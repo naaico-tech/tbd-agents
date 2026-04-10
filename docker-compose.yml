@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=copilot_agent_hub
+      - DEFAULT_MODEL=gpt-4.1
+      - DEFAULT_MAX_TURNS=5
+      - SESSION_TIMEOUT=300
+      # Optional server-level GitHub token (per-request tokens take priority)
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Datadog MCP credentials
+      - DD_API_KEY=${DD_API_KEY:-}
+      - DD_APP_KEY=${DD_APP_KEY:-}
+      - DD_SITE=${DD_SITE:-datadoghq.com}
+      # Atlassian / Jira MCP credentials
+      - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
+      - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
+      - ATLASSIAN_URL=${ATLASSIAN_URL:-}
+    depends_on:
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

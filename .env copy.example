@@ -1,0 +1,18 @@
+# MongoDB
+MONGO_URI=mongodb://mongodb:27017
+MONGO_DB_NAME=copilot_agent_hub
+
+# Copilot Models API
+COPILOT_API_BASE_URL=https://models.inference.ai.azure.com
+DEFAULT_MODEL=gpt-4.1
+DEFAULT_MAX_TURNS=5
+
+# Datadog MCP — https://docs.datadoghq.com/account_management/api-app-keys/
+DD_API_KEY=your_datadog_api_key
+DD_APP_KEY=your_datadog_app_key
+DD_SITE=datadoghq.com
+
+# Atlassian / Jira MCP — https://id.atlassian.com/manage-profile/security/api-tokens
+ATLASSIAN_API_TOKEN=your_atlassian_api_token
+ATLASSIAN_EMAIL=you@company.com
+ATLASSIAN_URL=https://yourcompany.atlassian.net

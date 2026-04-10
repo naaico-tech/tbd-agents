@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Copilot Agent Hub</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --accent: #58a6ff; --accent-bg: #1f6feb22;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-brand { padding: 20px; font-size: 16px; font-weight: 700; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; }
+  .sidebar-brand svg { width: 24px; height: 24px; fill: var(--accent); }
+  .sidebar nav { flex: 1; padding: 12px 0; }
+  .sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+    color: var(--muted); text-decoration: none; font-size: 14px; transition: all .15s; cursor: pointer; }
+  .sidebar nav a:hover { color: var(--text); background: var(--surface2); }
+  .sidebar nav a.active { color: var(--accent); background: var(--accent-bg); border-right: 2px solid var(--accent); }
+  .sidebar nav a .icon { font-size: 18px; width: 22px; text-align: center; }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; background: var(--surface); }
+  .topbar h1 { font-size: 20px; font-weight: 600; }
+  .content { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* Cards & Grids */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.blue { color: var(--accent); }
+  .stat-card .value.green { color: var(--green); }
+  .stat-card .value.purple { color: var(--purple); }
+  .stat-card .value.yellow { color: var(--yellow); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; }
+  .card-header h2 { font-size: 16px; font-weight: 600; }
+  .card-body { padding: 20px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  tr:hover td { background: var(--surface2); }
+  td .mono { font-family: 'SF Mono', monospace; font-size: 12px; color: var(--muted); }
+
+  /* Buttons */
+  .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text); transition: all .15s;
+    display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { border-color: var(--muted); }
+  .btn-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .btn-primary:hover { background: #388bfd; }
+  .btn-danger { color: var(--red); }
+  .btn-danger:hover { background: #f8514922; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-group { display: flex; gap: 6px; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+  .badge-green { background: #3fb95022; color: var(--green); }
+  .badge-blue { background: #58a6ff22; color: var(--accent); }
+  .badge-yellow { background: #d2992222; color: var(--yellow); }
+  .badge-red { background: #f8514922; color: var(--red); }
+  .badge-purple { background: #bc8cff22; color: var(--purple); }
+  .badge-muted { background: var(--surface2); color: var(--muted); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: #00000088; display: none;
+    justify-content: center; align-items: flex-start; padding-top: 80px; z-index: 100; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    width: 560px; max-height: 80vh; overflow-y: auto; }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; }
+  .modal-header h3 { font-size: 16px; }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; }
+  .modal-body { padding: 20px; }
+  .modal-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex;
+    justify-content: flex-end; gap: 8px; }
+
+  /* Forms */
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--muted); }
+  .form-group input, .form-group textarea, .form-group select {
+    width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 14px; font-family: inherit; }
+  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+    outline: none; border-color: var(--accent); }
+  .form-group textarea { resize: vertical; min-height: 80px; }
+  .form-group .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* Sections */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Prompt area */
+  .prompt-area { display: flex; gap: 12px; }
+  .prompt-area textarea { flex: 1; min-height: 60px; }
+  .prompt-area .btn { align-self: flex-end; }
+
+  /* Logs */
+  .log-list { max-height: 400px; overflow-y: auto; }
+  .log-entry { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
+    font-family: 'SF Mono', monospace; }
+  .log-entry .ts { color: var(--muted); margin-right: 8px; }
+  .log-entry .ev { color: var(--accent); margin-right: 8px; }
+
+  /* Messages */
+  .msg { padding: 12px 16px; margin-bottom: 8px; border-radius: var(--radius); font-size: 14px;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .msg-user { background: #1f6feb33; border: 1px solid #1f6feb55; }
+  .msg-assistant { background: var(--surface2); border: 1px solid var(--border); }
+  .msg-system { background: #bc8cff11; border: 1px solid #bc8cff33; font-size: 12px; color: var(--muted); }
+  .msg-tool { background: #3fb95011; border: 1px solid #3fb95033; font-size: 12px;
+    font-family: 'SF Mono', monospace; }
+  .msg .role-label { font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .5px; margin-bottom: 4px; }
+  .msg-user .role-label { color: var(--accent); }
+  .msg-assistant .role-label { color: var(--text); }
+  .msg-system .role-label { color: var(--purple); }
+  .msg-tool .role-label { color: var(--green); }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 200; display: flex;
+    flex-direction: column; gap: 8px; }
+  .toast { padding: 12px 16px; border-radius: 6px; font-size: 13px; background: var(--surface);
+    border: 1px solid var(--border); animation: slideIn .2s; max-width: 360px; }
+  .toast-error { border-color: var(--red); color: var(--red); }
+  .toast-success { border-color: var(--green); color: var(--green); }
+  @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+    Copilot Agent Hub
+  </div>
+  <nav>
+    <a data-page="dashboard" class="active"><span class="icon">📊</span> Dashboard</a>
+    <a data-page="agents"><span class="icon">🤖</span> Agents</a>
+    <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
+    <a data-page="skills"><span class="icon">⚡</span> Skills</a>
+    <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
+    <a data-page="task"><span class="icon">💬</span> Run Task</a>
+  </nav>
+  <div class="sidebar-footer">v0.1.0 &middot; Copilot SDK</div>
+</aside>
+
+<!-- Main Content -->
+<div class="main">
+  <div class="topbar">
+    <h1 id="page-title">Dashboard</h1>
+    <div id="topbar-actions"></div>
+  </div>
+  <div class="content">
+
+    <!-- Dashboard Page -->
+    <div id="page-dashboard" class="page active">
+      <div class="stats">
+        <div class="stat-card"><div class="label">Agents</div><div class="value blue" id="stat-agents">-</div></div>
+        <div class="stat-card"><div class="label">MCP Servers</div><div class="value green" id="stat-mcps">-</div></div>
+        <div class="stat-card"><div class="label">Skills</div><div class="value purple" id="stat-skills">-</div></div>
+        <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Recent Workflows</h2></div>
+        <div class="card-body"><table><thead><tr>
+          <th>ID</th><th>Agent</th><th>Status</th><th>Model</th><th>Created</th>
+        </tr></thead><tbody id="dash-workflows-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Agents Page -->
+    <div id="page-agents" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openAgentModal()">+ New Agent</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Model</th><th>MCP Servers</th><th>Created</th><th></th>
+        </tr></thead><tbody id="agents-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- MCP Servers Page -->
+    <div id="page-mcps" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openMcpModal()">+ Register MCP</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Transport</th><th>Status</th><th>Created</th><th></th>
+        </tr></thead><tbody id="mcps-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Skills Page -->
+    <div id="page-skills" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openSkillModal()">+ New Skill</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Tags</th><th>Created</th><th></th>
+        </tr></thead><tbody id="skills-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Workflows Page -->
+    <div id="page-workflows" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openWorkflowModal()">+ New Workflow</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>ID</th><th>Agent</th><th>Status</th><th>Model</th><th>Turns</th><th>Created</th><th></th>
+        </tr></thead><tbody id="workflows-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Run Task Page -->
+    <div id="page-task" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h2>Assign Task to Agent</h2></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Select Workflow</label>
+            <select id="task-workflow"></select>
+          </div>
+          <div class="form-group">
+            <label>Prompt</label>
+            <textarea id="task-prompt" rows="4" placeholder="Describe the task you want the agent to perform..."></textarea>
+          </div>
+          <button class="btn btn-primary" id="task-send" onclick="sendTask()">▶ Send Task</button>
+        </div>
+      </div>
+
+      <div id="task-result" style="display:none">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">
+            <h2>Status</h2>
+            <span id="task-status-badge" class="badge"></span>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;gap:24px;font-size:14px;color:var(--muted)">
+              <span>Turn: <strong id="task-turn" style="color:var(--text)">-</strong></span>
+              <span>Model: <strong id="task-model" style="color:var(--text)">-</strong></span>
+              <span>Format: <strong id="task-format" style="color:var(--text)">-</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h2>Messages</h2></div>
+          <div class="card-body" id="task-messages"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h2>Logs</h2></div>
+          <div class="card-body log-list" id="task-logs"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Create</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+const API = '';  // same origin
+let agents = [], mcps = [], skills = [], workflows = [];
+let pollTimer = null;
+
+// ── Helpers ──
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+  return data;
+}
+
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function statusBadge(s) {
+  const map = { active:'blue', running:'yellow', completed:'green', failed:'red', max_turns_reached:'purple',
+    registered:'muted', connected:'green', error:'red' };
+  return `<span class="badge badge-${map[s]||'muted'}">${s}</span>`;
+}
+
+function agentName(id) {
+  const a = agents.find(a => a.id === id);
+  return a ? a.name : id?.slice(0,8) || '-';
+}
+
+// ── Navigation ──
+document.querySelectorAll('.sidebar nav a').forEach(a => {
+  a.addEventListener('click', () => {
+    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    const page = a.dataset.page;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    document.getElementById('page-title').textContent =
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', workflows:'Workflows', task:'Run Task' }[page];
+    loadPage(page);
+  });
+});
+
+function loadPage(page) {
+  if (page === 'dashboard') loadDashboard();
+  else if (page === 'agents') loadAgents();
+  else if (page === 'mcps') loadMcps();
+  else if (page === 'skills') loadSkills();
+  else if (page === 'workflows') loadWorkflows();
+  else if (page === 'task') loadTaskPage();
+}
+
+// ── Dashboard ──
+async function loadDashboard() {
+  try {
+    [agents, mcps, skills, workflows] = await Promise.all([
+      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows')
+    ]);
+    document.getElementById('stat-agents').textContent = agents.length;
+    document.getElementById('stat-mcps').textContent = mcps.length;
+    document.getElementById('stat-skills').textContent = skills.length;
+    document.getElementById('stat-workflows').textContent = workflows.length;
+
+    const recent = workflows.slice(-5).reverse();
+    document.getElementById('dash-workflows-body').innerHTML = recent.length
+      ? recent.map(w => `<tr>
+          <td><span class="mono">${w.id.slice(0,8)}</span></td>
+          <td>${agentName(w.agent_id)}</td>
+          <td>${statusBadge(w.status)}</td>
+          <td>${w.model}</td>
+          <td>${fmtDate(w.created_at)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No workflows yet</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Agents ──
+async function loadAgents() {
+  try {
+    agents = await api('/api/agents');
+    document.getElementById('agents-body').innerHTML = agents.length
+      ? agents.map(a => `<tr>
+          <td><strong>${esc(a.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(a.description||'')}</span></td>
+          <td>${a.model || 'default'}</td>
+          <td>${a.mcp_server_ids.length}</td>
+          <td>${fmtDate(a.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openAgentModal('${a.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteAgent('${a.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="empty-state">No agents. Create one to get started.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openAgentModal(id) {
+  const a = id ? agents.find(x => x.id === id) : null;
+  const mcpOpts = mcps.map(m =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${m.id}" ${a?.mcp_server_ids?.includes(m.id)?'checked':''}> ${esc(m.name)}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No MCP servers registered</span>';
+
+  document.getElementById('modal-title').textContent = a ? 'Edit Agent' : 'Create Agent';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-agent-name" value="${esc(a?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-agent-desc" value="${esc(a?.description||'')}"></div>
+    <div class="form-group"><label>System Prompt</label>
+      <textarea id="f-agent-prompt" rows="4">${esc(a?.system_prompt||'You are a helpful assistant.')}</textarea></div>
+    <div class="form-group"><label>Model</label><input id="f-agent-model" value="${esc(a?.model||'')}" placeholder="gpt-4.1"></div>
+    <div class="form-group"><label>MCP Servers</label><div id="f-agent-mcps">${mcpOpts}</div></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveAgent('${id||''}')">${a?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveAgent(id) {
+  const mcpIds = [...document.querySelectorAll('#f-agent-mcps input:checked')].map(c => c.value);
+  const body = {
+    name: document.getElementById('f-agent-name').value,
+    description: document.getElementById('f-agent-desc').value,
+    system_prompt: document.getElementById('f-agent-prompt').value,
+    model: document.getElementById('f-agent-model').value || null,
+    mcp_server_ids: mcpIds,
+  };
+  try {
+    if (id) await api(`/api/agents/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/agents', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Agent updated' : 'Agent created');
+    closeModal(); loadAgents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteAgent(id) {
+  if (!confirm('Delete this agent?')) return;
+  try { await api(`/api/agents/${id}`, { method:'DELETE' }); toast('Agent deleted'); loadAgents(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── MCP Servers ──
+async function loadMcps() {
+  try {
+    mcps = await api('/api/mcps');
+    document.getElementById('mcps-body').innerHTML = mcps.length
+      ? mcps.map(m => `<tr>
+          <td><strong>${esc(m.name)}</strong></td>
+          <td><span class="badge badge-blue">${m.transport_type}</span></td>
+          <td>${statusBadge(m.status)}</td>
+          <td>${fmtDate(m.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="testMcp('${m.id}')">Test</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteMcp('${m.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="empty-state">No MCP servers. Register one to enable tool use.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openMcpModal() {
+  document.getElementById('modal-title').textContent = 'Register MCP Server';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-mcp-name" placeholder="e.g. datadog-mcp"></div>
+    <div class="form-group"><label>Transport Type</label>
+      <select id="f-mcp-transport"><option value="stdio">stdio</option><option value="sse">sse</option></select></div>
+    <div id="mcp-stdio-fields">
+      <div class="form-group"><label>Command</label><input id="f-mcp-cmd" placeholder="npx"></div>
+      <div class="form-group"><label>Args (JSON array)</label><input id="f-mcp-args" placeholder='["-y","@datadog/mcp"]'></div>
+      <div class="form-group"><label>Env (JSON object, optional)</label>
+        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"..."}'></textarea></div>
+    </div>
+    <div id="mcp-sse-fields" style="display:none">
+      <div class="form-group"><label>URL</label><input id="f-mcp-url" placeholder="http://localhost:3000/sse"></div>
+      <div class="form-group"><label>Headers (JSON object, optional)</label>
+        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer ..."}'></textarea></div>
+    </div>`;
+  document.getElementById('f-mcp-transport').addEventListener('change', e => {
+    document.getElementById('mcp-stdio-fields').style.display = e.target.value==='stdio'?'block':'none';
+    document.getElementById('mcp-sse-fields').style.display = e.target.value==='sse'?'block':'none';
+  });
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveMcp()">Register</button>`;
+  showModal();
+}
+
+async function saveMcp() {
+  const transport = document.getElementById('f-mcp-transport').value;
+  let config;
+  if (transport === 'stdio') {
+    config = { command: document.getElementById('f-mcp-cmd').value };
+    const argsVal = document.getElementById('f-mcp-args').value.trim();
+    if (argsVal) config.args = JSON.parse(argsVal);
+    const envVal = document.getElementById('f-mcp-env').value.trim();
+    if (envVal) config.env = JSON.parse(envVal);
+  } else {
+    config = { url: document.getElementById('f-mcp-url').value };
+    const hdrVal = document.getElementById('f-mcp-headers').value.trim();
+    if (hdrVal) config.headers = JSON.parse(hdrVal);
+  }
+  try {
+    await api('/api/mcps', { method:'POST', body:JSON.stringify({
+      name: document.getElementById('f-mcp-name').value,
+      transport_type: transport,
+      connection_config: config,
+    })});
+    toast('MCP server registered'); closeModal(); loadMcps();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function testMcp(id) {
+  try {
+    const res = await api(`/api/mcps/${id}/test`, { method:'POST' });
+    if (res.success) toast(`Connected! ${res.tools.length} tools found`);
+    else toast(res.error || 'Connection failed', 'error');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteMcp(id) {
+  if (!confirm('Delete this MCP server?')) return;
+  try { await api(`/api/mcps/${id}`, { method:'DELETE' }); toast('MCP server deleted'); loadMcps(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Skills ──
+async function loadSkills() {
+  try {
+    skills = await api('/api/skills');
+    document.getElementById('skills-body').innerHTML = skills.length
+      ? skills.map(s => `<tr>
+          <td><strong>${esc(s.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(s.description||'')}</span></td>
+          <td>${s.tags.map(t=>`<span class="badge badge-purple">${esc(t)}</span> `).join('')||'-'}</td>
+          <td>${fmtDate(s.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openSkillModal('${s.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSkill('${s.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="empty-state">No skills. Create one to enhance agent capabilities.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openSkillModal(id) {
+  const s = id ? skills.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = s ? 'Edit Skill' : 'Create Skill';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-skill-name" value="${esc(s?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-skill-desc" value="${esc(s?.description||'')}"></div>
+    <div class="form-group"><label>Instructions</label>
+      <textarea id="f-skill-instr" rows="6">${esc(s?.instructions||'')}</textarea></div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-skill-tags" value="${esc(s?.tags?.join(', ')||'')}"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveSkill('${id||''}')">${s?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveSkill(id) {
+  const body = {
+    name: document.getElementById('f-skill-name').value,
+    description: document.getElementById('f-skill-desc').value,
+    instructions: document.getElementById('f-skill-instr').value,
+    tags: document.getElementById('f-skill-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+  };
+  try {
+    if (id) await api(`/api/skills/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/skills', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Skill updated' : 'Skill created'); closeModal(); loadSkills();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteSkill(id) {
+  if (!confirm('Delete this skill?')) return;
+  try { await api(`/api/skills/${id}`, { method:'DELETE' }); toast('Skill deleted'); loadSkills(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Workflows ──
+async function loadWorkflows() {
+  try {
+    [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
+    document.getElementById('workflows-body').innerHTML = workflows.length
+      ? workflows.map(w => `<tr>
+          <td><span class="mono">${w.id.slice(0,8)}</span></td>
+          <td>${agentName(w.agent_id)}</td>
+          <td>${statusBadge(w.status)}</td>
+          <td>${w.model}</td>
+          <td>${w.current_turn}/${w.max_turns}</td>
+          <td>${fmtDate(w.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="viewWorkflow('${w.id}')">View</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty-state">No workflows yet.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openWorkflowModal() {
+  const agentOpts = agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const skillOpts = skills.map(s =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${s.id}"> ${esc(s.name)}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No skills available</span>';
+
+  document.getElementById('modal-title').textContent = 'Create Workflow';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Agent</label><select id="f-wf-agent">${agentOpts}</select></div>
+    <div class="form-group"><label>Model Override</label><input id="f-wf-model" placeholder="gpt-4.1 (leave blank for default)"></div>
+    <div class="form-group"><label>Max Turns</label><input id="f-wf-turns" type="number" value="5"></div>
+    <div class="form-group"><label>Output Format</label>
+      <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
+    <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveWorkflow()">Create</button>`;
+  showModal();
+}
+
+async function saveWorkflow() {
+  const skillIds = [...document.querySelectorAll('#f-wf-skills input:checked')].map(c => c.value);
+  const body = {
+    agent_id: document.getElementById('f-wf-agent').value,
+    model: document.getElementById('f-wf-model').value || null,
+    max_turns: parseInt(document.getElementById('f-wf-turns').value) || 5,
+    output_format: document.getElementById('f-wf-format').value,
+    skill_ids: skillIds,
+  };
+  try {
+    await api('/api/workflows', { method:'POST', body:JSON.stringify(body) });
+    toast('Workflow created'); closeModal(); loadWorkflows();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function viewWorkflow(id) {
+  // Switch to task page and load this workflow's details
+  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+  document.querySelector('[data-page="task"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-task').classList.add('active');
+  document.getElementById('page-title').textContent = 'Run Task';
+  loadTaskPage().then(() => {
+    document.getElementById('task-workflow').value = id;
+    pollWorkflowResult(id);
+  });
+}
+
+// ── Task Runner ──
+async function loadTaskPage() {
+  try {
+    [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
+    const sel = document.getElementById('task-workflow');
+    sel.innerHTML = workflows.map(w =>
+      `<option value="${w.id}">${agentName(w.agent_id)} — ${w.id.slice(0,8)} (${w.status})</option>`
+    ).join('') || '<option value="">No workflows — create one first</option>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function sendTask() {
+  const wfId = document.getElementById('task-workflow').value;
+  const prompt = document.getElementById('task-prompt').value.trim();
+  if (!wfId) return toast('Select a workflow', 'error');
+  if (!prompt) return toast('Enter a prompt', 'error');
+
+  document.getElementById('task-send').disabled = true;
+  document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('task-result').style.display = 'block';
+
+  try {
+    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify({ prompt }) });
+    toast('Task submitted');
+    pollWorkflowResult(wfId);
+  } catch(e) {
+    toast(e.message, 'error');
+    document.getElementById('task-send').disabled = false;
+    document.getElementById('task-send').textContent = '▶ Send Task';
+  }
+}
+
+async function pollWorkflowResult(wfId) {
+  if (pollTimer) clearInterval(pollTimer);
+  const update = async () => {
+    try {
+      const w = await api(`/api/workflows/${wfId}`);
+      renderTaskResult(w);
+      if (w.status !== 'running') {
+        clearInterval(pollTimer); pollTimer = null;
+        document.getElementById('task-send').disabled = false;
+        document.getElementById('task-send').textContent = '▶ Send Task';
+      }
+    } catch(e) { clearInterval(pollTimer); toast(e.message, 'error'); }
+  };
+  await update();
+  if (document.getElementById('task-send').disabled) {
+    pollTimer = setInterval(update, 2000);
+  }
+}
+
+function renderTaskResult(w) {
+  document.getElementById('task-result').style.display = 'block';
+  document.getElementById('task-status-badge').className = 'badge badge-' +
+    ({active:'blue',running:'yellow',completed:'green',failed:'red',max_turns_reached:'purple'}[w.status]||'muted');
+  document.getElementById('task-status-badge').textContent = w.status;
+  document.getElementById('task-turn').textContent = `${w.current_turn}/${w.max_turns}`;
+  document.getElementById('task-model').textContent = w.model;
+  document.getElementById('task-format').textContent = w.output_format;
+
+  // Messages
+  const msgEl = document.getElementById('task-messages');
+  msgEl.innerHTML = (w.messages||[]).map(m => `
+    <div class="msg msg-${m.role}">
+      <div class="role-label">${m.role}${m.name?' · '+esc(m.name):''}</div>
+      ${m.content ? esc(m.content) : ''}
+      ${m.tool_calls ? '<pre style="margin-top:6px;font-size:12px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : ''}
+    </div>`).join('') || '<div class="empty-state">No messages yet</div>';
+
+  // Logs
+  const logEl = document.getElementById('task-logs');
+  logEl.innerHTML = (w.logs||[]).map(l => `
+    <div class="log-entry">
+      <span class="ts">${fmtDate(l.timestamp)}</span>
+      <span class="ev">[${l.event}]</span>
+      ${esc(l.detail)}
+    </div>`).join('') || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No logs</div>';
+}
+
+// ── Modal helpers ──
+function showModal() { document.getElementById('modal-overlay').classList.add('show'); }
+function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// ── Escape HTML ──
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ── Init ──
+loadDashboard();
+</script>
+</body>
+</html>
