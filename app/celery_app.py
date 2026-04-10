@@ -12,6 +12,7 @@ celery = Celery(
     "copilot_agent_hub",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    include=["app.tasks.agent_task"],
 )
 
 celery.conf.update(

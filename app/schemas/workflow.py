@@ -20,12 +20,23 @@ class UsageStatsResponse(BaseModel):
 
 
 class WorkflowCreate(BaseModel):
+    title: str | None = None
     agent_id: str
     max_turns: int | None = None
     output_format: str = "json"  # json | markdown
     model: str | None = None
     skill_ids: list[str] = []
     infinite_session: bool = True
+    output_destination: OutputDestinationCreate | None = None
+
+
+class WorkflowUpdate(BaseModel):
+    title: str | None = None
+    max_turns: int | None = None
+    output_format: str | None = None
+    model: str | None = None
+    skill_ids: list[str] | None = None
+    infinite_session: bool | None = None
     output_destination: OutputDestinationCreate | None = None
 
 
@@ -63,6 +74,7 @@ class PromptResponse(BaseModel):
 
 class WorkflowResponse(BaseModel):
     id: str
+    title: str | None = None
     agent_id: str
     github_user: str
     model: str

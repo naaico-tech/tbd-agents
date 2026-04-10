@@ -49,6 +49,7 @@ class OutputDestination(BaseModel):
 
 
 class Workflow(Document):
+    title: str | None = None
     agent_id: str
     github_user: str
     model: str

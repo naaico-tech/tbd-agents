@@ -473,7 +473,13 @@ async def run_agent(
                     "model_call",
                     f"Sending prompt to {workflow.model} via Copilot SDK",
                 )
-                await session.send({"prompt": user_prompt})
+                # Call RPC directly to avoid the SDK sending null values
+                # for 'mode' and 'attachments' which causes "t.asString is
+                # not a function" in the Node binary.
+                await session._client.request(
+                    "session.send",
+                    {"sessionId": session.session_id, "prompt": user_prompt},
+                )
 
                 # Wait for the session to finish (idle or error)
                 try:

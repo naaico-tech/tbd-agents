@@ -22,6 +22,7 @@ from app.schemas.workflow import (
     UsageStatsResponse,
     WorkflowCreate,
     WorkflowResponse,
+    WorkflowUpdate,
 )
 from app.tasks.agent_task import run_agent_task
 
@@ -43,6 +44,7 @@ def _dest_response(wf: Workflow) -> OutputDestinationCreate | None:
 def _to_response(wf: Workflow) -> WorkflowResponse:
     return WorkflowResponse(
         id=str(wf.id),
+        title=wf.title,
         agent_id=wf.agent_id,
         github_user=wf.github_user,
         model=wf.model,
@@ -84,6 +86,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         )
 
     wf = Workflow(
+        title=body.title,
         agent_id=str(agent.id),
         github_user=user["login"],
         model=model,
@@ -109,14 +112,14 @@ async def send_prompt(
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.COMPLETED):
+    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED):
         raise HTTPException(
             status_code=400,
             detail=f"Workflow is {wf.status}, cannot send prompt",
         )
 
-    # Reset for a new run if re-prompting a completed workflow
-    if wf.status == WorkflowStatus.COMPLETED:
+    # Reset for a new run if re-prompting a completed or failed workflow
+    if wf.status in (WorkflowStatus.COMPLETED, WorkflowStatus.FAILED):
         wf.status = WorkflowStatus.ACTIVE
 
     token = extract_token(authorization)
@@ -177,6 +180,43 @@ async def get_workflow(workflow_id: str, user=Depends(get_current_user)):
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
     return _to_response(wf)
+
+
+@router.put("/{workflow_id}", response_model=WorkflowResponse)
+async def update_workflow(
+    workflow_id: str, body: WorkflowUpdate, user=Depends(get_current_user)
+):
+    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your workflow")
+
+    updates = body.model_dump(exclude_unset=True)
+    if "output_format" in updates and updates["output_format"] not in ("json", "markdown"):
+        raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
+    if "output_destination" in updates:
+        od = updates.pop("output_destination")
+        wf.output_destination = OutputDestination(**od) if od else None
+    if "output_format" in updates:
+        updates["output_format"] = OutputFormat(updates["output_format"])
+    for k, v in updates.items():
+        setattr(wf, k, v)
+    from datetime import UTC, datetime
+    wf.updated_at = datetime.now(UTC)
+    await wf.save()
+    return _to_response(wf)
+
+
+@router.delete("/{workflow_id}", status_code=204)
+async def delete_workflow(workflow_id: str, user=Depends(get_current_user)):
+    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your workflow")
+    await wf.delete()
+    return None
 
 
 @router.get("", response_model=list[WorkflowResponse])

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import agents, health, mcps, skills, tokens, workflows
+from app.api.routes import agents, health, mcps, models, skills, tokens, workflows
 from app.db import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Copilot Agent Hub",
+    title="TBD Agent",
     description="Multi-agent API hub powered by GitHub Copilot Models API with MCP support",
     version="0.1.0",
     lifespan=lifespan,
@@ -34,6 +34,7 @@ app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(skills.router)
 app.include_router(mcps.router)
+app.include_router(models.router)
 app.include_router(tokens.router)
 app.include_router(workflows.router)
 

@@ -8,6 +8,7 @@ from pydantic import Field
 class TransportType(StrEnum):
     STDIO = "stdio"
     SSE = "sse"
+    HTTP = "http"
 
 
 class McpServerStatus(StrEnum):

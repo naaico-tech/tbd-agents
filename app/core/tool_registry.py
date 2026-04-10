@@ -41,4 +41,13 @@ async def build_mcp_servers_config(servers: list[McpServer]) -> dict[str, dict[s
                 "url": cc["url"],
                 "headers": headers,
             }
+        elif server.transport_type == TransportType.HTTP:
+            headers = cc.get("headers", {})
+            if headers:
+                headers = await token_manager.resolve_config(headers)
+            config[server.name] = {
+                "type": "http",
+                "url": cc["url"],
+                "headers": headers,
+            }
     return config

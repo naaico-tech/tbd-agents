@@ -25,8 +25,8 @@ def _to_response(server: McpServer) -> McpServerResponse:
 
 @router.post("", response_model=McpServerResponse, status_code=201)
 async def register_mcp_server(body: McpServerCreate, _user=Depends(get_current_user)):
-    if body.transport_type not in (TransportType.STDIO, TransportType.SSE):
-        raise HTTPException(status_code=400, detail="transport_type must be 'stdio' or 'sse'")
+    if body.transport_type not in (TransportType.STDIO, TransportType.SSE, TransportType.HTTP):
+        raise HTTPException(status_code=400, detail="transport_type must be 'stdio', 'sse', or 'http'")
     server = McpServer(
         name=body.name,
         transport_type=TransportType(body.transport_type),
@@ -90,8 +90,8 @@ async def update_mcp_server(
     if body.name is not None:
         server.name = body.name
     if body.transport_type is not None:
-        if body.transport_type not in (TransportType.STDIO, TransportType.SSE):
-            raise HTTPException(status_code=400, detail="transport_type must be 'stdio' or 'sse'")
+        if body.transport_type not in (TransportType.STDIO, TransportType.SSE, TransportType.HTTP):
+            raise HTTPException(status_code=400, detail="transport_type must be 'stdio', 'sse', or 'http'")
         server.transport_type = TransportType(body.transport_type)
     if body.connection_config is not None:
         server.connection_config = body.connection_config

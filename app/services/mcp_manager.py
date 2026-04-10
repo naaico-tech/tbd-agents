@@ -6,6 +6,7 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 from app.models.mcp_server import McpServer, McpServerStatus, TransportType
 from app.services import token_manager
@@ -60,15 +61,34 @@ class McpManager:
                 await session.initialize()
                 yield session
 
+    @asynccontextmanager
+    async def _connect_http(self, config: dict):
+        """Connect via streamable HTTP transport (MCP 2025+)."""
+        import httpx
+
+        url = config["url"]
+        headers = config.get("headers", {})
+        if headers:
+            headers = await token_manager.resolve_config(headers)
+        http_client = httpx.AsyncClient(headers=headers) if headers else None
+        async with streamable_http_client(url=url, http_client=http_client) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
+
+    def _get_connection(self, server: McpServer):
+        """Return the appropriate async context manager for the server transport."""
+        if server.transport_type == TransportType.STDIO:
+            return self._connect_stdio(server.connection_config)
+        elif server.transport_type == TransportType.HTTP:
+            return self._connect_http(server.connection_config)
+        else:
+            return self._connect_sse(server.connection_config)
+
     async def test_connection(self, server: McpServer) -> dict[str, Any]:
         """Test MCP server connectivity. Returns {success, tools[], error?}."""
         try:
-            ctx = (
-                self._connect_stdio(server.connection_config)
-                if server.transport_type == TransportType.STDIO
-                else self._connect_sse(server.connection_config)
-            )
-            async with ctx as session:
+            async with self._get_connection(server) as session:
                 result = await session.list_tools()
                 tools = [
                     {
@@ -90,12 +110,7 @@ class McpManager:
 
     async def list_tools(self, server: McpServer) -> list[dict[str, Any]]:
         """List tools from an MCP server (ephemeral connection)."""
-        ctx = (
-            self._connect_stdio(server.connection_config)
-            if server.transport_type == TransportType.STDIO
-            else self._connect_sse(server.connection_config)
-        )
-        async with ctx as session:
+        async with self._get_connection(server) as session:
             result = await session.list_tools()
             return [
                 {
@@ -110,12 +125,7 @@ class McpManager:
         self, server: McpServer, tool_name: str, arguments: dict[str, Any]
     ) -> Any:
         """Call a tool on the MCP server and return the result."""
-        ctx = (
-            self._connect_stdio(server.connection_config)
-            if server.transport_type == TransportType.STDIO
-            else self._connect_sse(server.connection_config)
-        )
-        async with ctx as session:
+        async with self._get_connection(server) as session:
             result = await session.call_tool(tool_name, arguments)
             # Extract text content from the result
             contents = []
