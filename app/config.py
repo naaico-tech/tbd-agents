@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     notion_token: str | None = None
     # Slack bot token for MCP auto-injection
     slack_bot_token: str | None = None
+    # Fernet encryption key for token store
+    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    token_encryption_key: str | None = None
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

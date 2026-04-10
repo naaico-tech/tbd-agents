@@ -167,6 +167,7 @@
     <a data-page="agents"><span class="icon">🤖</span> Agents</a>
     <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
+    <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
     <a data-page="task"><span class="icon">💬</span> Run Task</a>
   </nav>
@@ -187,6 +188,7 @@
         <div class="stat-card"><div class="label">Agents</div><div class="value blue" id="stat-agents">-</div></div>
         <div class="stat-card"><div class="label">MCP Servers</div><div class="value green" id="stat-mcps">-</div></div>
         <div class="stat-card"><div class="label">Skills</div><div class="value purple" id="stat-skills">-</div></div>
+        <div class="stat-card"><div class="label">Tokens</div><div class="value green" id="stat-tokens">-</div></div>
         <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
       </div>
       <div class="card">
@@ -230,6 +232,18 @@
         <div class="card-body"><table><thead><tr>
           <th>Name</th><th>Tags</th><th>Created</th><th></th>
         </tr></thead><tbody id="skills-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Tokens Page -->
+    <div id="page-tokens" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openTokenModal()">+ New Token</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Value</th><th>Description</th><th>Created By</th><th>Created</th><th></th>
+        </tr></thead><tbody id="tokens-body"></tbody></table></div>
       </div>
     </div>
 
@@ -315,7 +329,7 @@
 
 <script>
 const API = '';  // same origin
-let agents = [], mcps = [], skills = [], workflows = [];
+let agents = [], mcps = [], skills = [], workflows = [], tokens = [];
 let pollTimer = null;
 let sseSource = null;         // current EventSource
 let streamingMsgEl = null;    // element receiving message_delta tokens
@@ -365,7 +379,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', workflows:'Workflows', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', tokens:'Tokens', workflows:'Workflows', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -375,6 +389,7 @@ function loadPage(page) {
   else if (page === 'agents') loadAgents();
   else if (page === 'mcps') loadMcps();
   else if (page === 'skills') loadSkills();
+  else if (page === 'tokens') loadTokens();
   else if (page === 'workflows') loadWorkflows();
   else if (page === 'task') loadTaskPage();
 }
@@ -382,12 +397,13 @@ function loadPage(page) {
 // ── Dashboard ──
 async function loadDashboard() {
   try {
-    [agents, mcps, skills, workflows] = await Promise.all([
-      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows')
+    [agents, mcps, skills, workflows, tokens] = await Promise.all([
+      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens')
     ]);
     document.getElementById('stat-agents').textContent = agents.length;
     document.getElementById('stat-mcps').textContent = mcps.length;
     document.getElementById('stat-skills').textContent = skills.length;
+    document.getElementById('stat-tokens').textContent = tokens.length;
     document.getElementById('stat-workflows').textContent = workflows.length;
 
     const recent = workflows.slice(-5).reverse();
@@ -495,12 +511,14 @@ function openMcpModal() {
       <div class="form-group"><label>Command</label><input id="f-mcp-cmd" placeholder="npx"></div>
       <div class="form-group"><label>Args (JSON array)</label><input id="f-mcp-args" placeholder='["-y","@datadog/mcp"]'></div>
       <div class="form-group"><label>Env (JSON object, optional)</label>
-        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"..."}'></textarea></div>
+        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"{{token:my-api-key}}"}'></textarea>
+        <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store instead of pasting raw values.</div></div>
     </div>
     <div id="mcp-sse-fields" style="display:none">
       <div class="form-group"><label>URL</label><input id="f-mcp-url" placeholder="http://localhost:3000/sse"></div>
       <div class="form-group"><label>Headers (JSON object, optional)</label>
-        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer ..."}'></textarea></div>
+        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer {{token:my-token}}"}'></textarea>
+        <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store.</div></div>
     </div>`;
   document.getElementById('f-mcp-transport').addEventListener('change', e => {
     document.getElementById('mcp-stdio-fields').style.display = e.target.value==='stdio'?'block':'none';
@@ -547,6 +565,71 @@ async function testMcp(id) {
 async function deleteMcp(id) {
   if (!confirm('Delete this MCP server?')) return;
   try { await api(`/api/mcps/${id}`, { method:'DELETE' }); toast('MCP server deleted'); loadMcps(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Tokens ──
+async function loadTokens() {
+  try {
+    tokens = await api('/api/tokens');
+    document.getElementById('tokens-body').innerHTML = tokens.length
+      ? tokens.map(t => `<tr>
+          <td><strong>${esc(t.name)}</strong></td>
+          <td><code style="color:var(--muted);font-size:12px">${esc(t.masked_value)}</code></td>
+          <td>${esc(t.description || '-')}</td>
+          <td>${esc(t.created_by)}</td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openTokenModal('${t.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteToken('${t.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No tokens. Create one, then reference it in MCP configs as <code>{{token:NAME}}</code>.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openTokenModal(id) {
+  const t = id ? tokens.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = t ? 'Edit Token' : 'Create Token';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label>
+      <input id="f-token-name" value="${esc(t?.name||'')}" ${t?'readonly style="opacity:0.6"':''} placeholder="e.g. dd-api-key">
+      <div class="hint">Unique key used in MCP configs as <code style="color:var(--accent)">{{token:${t?.name||'NAME'}}}</code></div></div>
+    <div class="form-group"><label>Value</label>
+      <input id="f-token-value" type="password" placeholder="${t?'Leave blank to keep current':'Enter secret value'}">
+      <div class="hint">Encrypted at rest. Never exposed in API responses.</div></div>
+    <div class="form-group"><label>Description</label>
+      <input id="f-token-desc" value="${esc(t?.description||'')}" placeholder="What this token is for"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveToken('${id||''}')">${t?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveToken(id) {
+  const name = document.getElementById('f-token-name').value.trim();
+  const value = document.getElementById('f-token-value').value;
+  const description = document.getElementById('f-token-desc').value;
+  if (!name) return toast('Name is required', 'error');
+  if (!id && !value) return toast('Value is required', 'error');
+
+  try {
+    if (id) {
+      const body = { description };
+      if (value) body.value = value;
+      await api(`/api/tokens/${id}`, { method:'PUT', body:JSON.stringify(body) });
+      toast('Token updated');
+    } else {
+      await api('/api/tokens', { method:'POST', body:JSON.stringify({ name, value, description }) });
+      toast('Token created');
+    }
+    closeModal(); loadTokens();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteToken(id) {
+  if (!confirm('Delete this token? MCP configs referencing it will fail.')) return;
+  try { await api(`/api/tokens/${id}`, { method:'DELETE' }); toast('Token deleted'); loadTokens(); }
   catch(e) { toast(e.message, 'error'); }
 }
 

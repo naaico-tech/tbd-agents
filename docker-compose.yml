@@ -22,6 +22,8 @@ services:
       - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
       - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
       - ATLASSIAN_URL=${ATLASSIAN_URL:-}
+      # Token store encryption key — must be the same across app + worker
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
     depends_on:
       mongodb:
         condition: service_started
@@ -48,6 +50,7 @@ services:
       - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
       - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
       - ATLASSIAN_URL=${ATLASSIAN_URL:-}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
     depends_on:
       mongodb:
         condition: service_started

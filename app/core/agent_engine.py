@@ -33,6 +33,7 @@ from app.models.workflow import (
     Workflow,
     WorkflowStatus,
 )
+from app.services import token_manager
 from app.services.copilot_client import build_client
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,8 @@ async def _build_system_prompt(
     if dest:
         hints: list[str] = []
         if dest.notion_base_page_id:
-            if settings.notion_token:
+            notion_token = await token_manager.get_token_value("notion") or settings.notion_token
+            if notion_token:
                 hints.append(
                     f"You have access to Notion. When producing document output, "
                     f"create a sub-page under page ID {dest.notion_base_page_id}."
@@ -98,7 +100,8 @@ async def _build_system_prompt(
                     "Skip Notion output."
                 )
         if dest.slack_channel_id:
-            if settings.slack_bot_token:
+            slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
+            if slack_token:
                 hints.append(
                     f"You have access to Slack. Send output to channel {dest.slack_channel_id}."
                 )
@@ -108,7 +111,8 @@ async def _build_system_prompt(
                     "Skip Slack output."
                 )
         elif dest.slack_user_id:
-            if settings.slack_bot_token:
+            slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
+            if slack_token:
                 hints.append(
                     f"You have access to Slack. Send output to user {dest.slack_user_id}."
                 )
@@ -125,38 +129,46 @@ async def _build_system_prompt(
     return system_prompt
 
 
-def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
-    """Build MCP server configs for Notion/Slack based on workflow settings."""
+async def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
+    """Build MCP server configs for Notion/Slack based on workflow settings.
+
+    Looks up tokens from the encrypted token store first, falls back to
+    environment-based settings for backward compatibility.
+    """
     config: dict = {}
     dest = workflow.output_destination
     if not dest:
         return config
 
     # Notion MCP
-    if dest.notion_base_page_id and settings.notion_token:
-        headers_json = json.dumps({
-            "Authorization": f"Bearer {settings.notion_token}",
-            "Notion-Version": "2022-06-28",
-        })
-        env = dict(os.environ)
-        env["OPENAPI_MCP_HEADERS"] = headers_json
-        config["notion"] = {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@notionhq/notion-mcp-server"],
-            "env": env,
-        }
+    if dest.notion_base_page_id:
+        notion_token = await token_manager.get_token_value("notion") or settings.notion_token
+        if notion_token:
+            headers_json = json.dumps({
+                "Authorization": f"Bearer {notion_token}",
+                "Notion-Version": "2022-06-28",
+            })
+            env = dict(os.environ)
+            env["OPENAPI_MCP_HEADERS"] = headers_json
+            config["notion"] = {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@notionhq/notion-mcp-server"],
+                "env": env,
+            }
 
     # Slack MCP
-    if (dest.slack_channel_id or dest.slack_user_id) and settings.slack_bot_token:
-        env = dict(os.environ)
-        env["SLACK_BOT_TOKEN"] = settings.slack_bot_token
-        config["slack"] = {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-slack"],
-            "env": env,
-        }
+    if dest.slack_channel_id or dest.slack_user_id:
+        slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
+        if slack_token:
+            env = dict(os.environ)
+            env["SLACK_BOT_TOKEN"] = slack_token
+            config["slack"] = {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-slack"],
+                "env": env,
+            }
 
     return config
 
@@ -203,10 +215,10 @@ async def run_agent(
         if server:
             mcp_servers_db.append(server)
 
-    mcp_config = build_mcp_servers_config(mcp_servers_db)
+    mcp_config = await build_mcp_servers_config(mcp_servers_db)
 
     # Auto-inject Notion/Slack MCPs based on workflow output destinations
-    dynamic_mcps = _build_dynamic_mcp_config(workflow)
+    dynamic_mcps = await _build_dynamic_mcp_config(workflow)
     mcp_config.update(dynamic_mcps)
 
     await _log(

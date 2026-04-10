@@ -8,6 +8,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from app.models.mcp_server import McpServer, McpServerStatus, TransportType
+from app.services import token_manager
 
 logger = logging.getLogger(__name__)
 
@@ -20,16 +21,20 @@ class McpManager:
         self._cleanup_fns: dict[str, Any] = {}
 
     @staticmethod
-    def _build_env(config_env: dict | None) -> dict[str, str]:
+    async def _build_env(config_env: dict | None) -> dict[str, str]:
         """Merge config-supplied env vars with the host process env.
 
         StdioServerParameters.env replaces the entire environment, so we
         must carry over PATH, HOME, NODE_PATH etc. for npx to work, then
         overlay any credentials the user supplied.
+
+        Any ``{{token:NAME}}`` references in values are resolved from the
+        encrypted token store.
         """
         env = dict(os.environ)
         if config_env:
-            env.update(config_env)
+            resolved = await token_manager.resolve_config(config_env)
+            env.update(resolved)
         return env
 
     @asynccontextmanager
@@ -37,7 +42,7 @@ class McpManager:
         params = StdioServerParameters(
             command=config["command"],
             args=config.get("args", []),
-            env=self._build_env(config.get("env")),
+            env=await self._build_env(config.get("env")),
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
@@ -48,6 +53,8 @@ class McpManager:
     async def _connect_sse(self, config: dict):
         url = config["url"]
         headers = config.get("headers", {})
+        if headers:
+            headers = await token_manager.resolve_config(headers)
         async with sse_client(url=url, headers=headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

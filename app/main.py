@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import agents, health, mcps, skills, workflows
+from app.api.routes import agents, health, mcps, skills, tokens, workflows
 from app.db import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,7 @@ app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(skills.router)
 app.include_router(mcps.router)
+app.include_router(tokens.router)
 app.include_router(workflows.router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
