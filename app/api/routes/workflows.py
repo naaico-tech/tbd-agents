@@ -7,6 +7,7 @@ from app.config import settings
 from app.core import event_bus
 from app.models.agent import Agent
 from app.models.skill import Skill
+from app.models.task_execution import TaskExecution
 from app.models.workflow import (
     OutputDestination,
     OutputFormat,
@@ -112,20 +113,36 @@ async def send_prompt(
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED):
+    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.HALTED, WorkflowStatus.MAX_TURNS_REACHED):
         raise HTTPException(
             status_code=400,
             detail=f"Workflow is {wf.status}, cannot send prompt",
         )
 
-    # Reset for a new run if re-prompting a completed or failed workflow
-    if wf.status in (WorkflowStatus.COMPLETED, WorkflowStatus.FAILED):
+    # Reset for a new run if re-prompting a finished or stale workflow
+    if wf.status in (WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.HALTED, WorkflowStatus.MAX_TURNS_REACHED):
         wf.status = WorkflowStatus.ACTIVE
+        wf.logs = []
+        wf.messages = []
+        wf.current_turn = 0
+        await wf.save()
 
     token = extract_token(authorization)
 
+    # Create a task execution record
+    task_exec = TaskExecution(
+        workflow_id=str(wf.id),
+        prompt=body.prompt,
+        model=wf.model,
+    )
+    await task_exec.insert()
+
     # Dispatch to a Celery worker for scalable background execution
-    run_agent_task.delay(str(wf.id), body.prompt, token)
+    result = run_agent_task.delay(str(wf.id), body.prompt, token, str(task_exec.id))
+
+    # Store the Celery task ID
+    task_exec.celery_task_id = result.id
+    await task_exec.save()
 
     return PromptResponse(
         workflow_id=str(wf.id),
@@ -140,6 +157,20 @@ async def send_prompt(
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
     )
+
+
+@router.post("/{workflow_id}/halt", status_code=202)
+async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
+    """Signal a running workflow to halt. The worker will abort the SDK session."""
+    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your workflow")
+    if wf.status != WorkflowStatus.RUNNING:
+        raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, not running")
+    await event_bus.set_halt(str(wf.id))
+    return {"detail": "Halt signal sent"}
 
 
 @router.get("/{workflow_id}/stream")

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Optional server-level GitHub token (per-request tokens take priority)
     github_token: str | None = None
     # Session timeout in seconds
-    session_timeout: int = 300
+    session_timeout: int = 600
     # Redis URL for Celery broker/backend and event bus pub/sub
     redis_url: str = "redis://redis:6379/0"
     # Notion integration token for MCP auto-injection

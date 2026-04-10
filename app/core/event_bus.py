@@ -77,3 +77,33 @@ async def subscribe(workflow_id: str) -> AsyncGenerator[str | None, None]:
         await pubsub.aclose()
         await r.aclose()
 
+
+# ── Halt signal ──────────────────────────────────────────────────────────────
+
+_HALT_KEY_PREFIX = "workflow:halt:"
+
+
+async def set_halt(workflow_id: str) -> None:
+    """Set a halt signal for a running workflow (expires after 5 min)."""
+    global _pub_redis
+    if _pub_redis is None:
+        _pub_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    await _pub_redis.set(f"{_HALT_KEY_PREFIX}{workflow_id}", "1", ex=300)
+
+
+async def check_halt(workflow_id: str) -> bool:
+    """Check whether a halt signal has been set for a workflow."""
+    global _pub_redis
+    if _pub_redis is None:
+        _pub_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    val = await _pub_redis.get(f"{_HALT_KEY_PREFIX}{workflow_id}")
+    return val is not None
+
+
+async def clear_halt(workflow_id: str) -> None:
+    """Clear the halt signal for a workflow."""
+    global _pub_redis
+    if _pub_redis is None:
+        _pub_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    await _pub_redis.delete(f"{_HALT_KEY_PREFIX}{workflow_id}")
+

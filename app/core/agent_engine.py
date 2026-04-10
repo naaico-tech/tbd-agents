@@ -25,6 +25,7 @@ from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
 from app.models.mcp_server import McpServer
 from app.models.skill import Skill
+from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import (
     LogEntry,
     Message,
@@ -42,11 +43,15 @@ logger = logging.getLogger(__name__)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _log(workflow: Workflow, event: str, detail: str = "") -> None:
+async def _log(workflow: Workflow, event: str, detail: str = "", task_exec: TaskExecution | None = None) -> None:
     """Append a log entry, persist to DB, and publish to SSE subscribers."""
-    workflow.logs.append(LogEntry(event=event, detail=detail))
+    entry = LogEntry(event=event, detail=detail)
+    workflow.logs.append(entry)
     workflow.updated_at = datetime.now(UTC)
     await workflow.save()
+    if task_exec:
+        task_exec.logs.append(entry)
+        await task_exec.save()
     await event_bus.publish(
         str(workflow.id),
         "log",
@@ -155,6 +160,7 @@ async def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
                 "command": "npx",
                 "args": ["-y", "@notionhq/notion-mcp-server"],
                 "env": env,
+                "tools": ["*"],
             }
 
     # Slack MCP
@@ -168,6 +174,7 @@ async def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
                 "command": "npx",
                 "args": ["-y", "@modelcontextprotocol/server-slack"],
                 "env": env,
+                "tools": ["*"],
             }
 
     return config
@@ -180,6 +187,7 @@ async def run_agent(
     workflow: Workflow,
     user_prompt: str,
     github_token: str,
+    task_execution_id: str | None = None,
 ) -> str | None:
     """Execute a prompt using the GitHub Copilot SDK.
 
@@ -189,19 +197,38 @@ async def run_agent(
     4. Logs every significant event to the workflow and publishes to SSE subscribers.
     5. Tracks usage/cost data from SDK events.
     """
+    # Load task execution if provided
+    task_exec: TaskExecution | None = None
+    if task_execution_id:
+        from beanie import PydanticObjectId
+        task_exec = await TaskExecution.get(PydanticObjectId(task_execution_id))
+        if task_exec:
+            task_exec.status = TaskStatus.RUNNING
+            task_exec.started_at = datetime.now(UTC)
+            task_exec.model = workflow.model
+            await task_exec.save()
+
     if workflow.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.RUNNING):
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
         return None
 
     agent = await Agent.get(workflow.agent_id)
     if not agent:
         workflow.status = WorkflowStatus.FAILED
-        await _log(workflow, "error", "Agent not found")
+        await _log(workflow, "error", "Agent not found", task_exec)
         await _publish_status(workflow)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
         return None
 
     # Mark running
     workflow.status = WorkflowStatus.RUNNING
-    await _log(workflow, "prompt_received", user_prompt[:200])
+    await _log(workflow, "prompt_received", user_prompt[:200], task_exec)
     await _publish_status(workflow)
 
     # Append user message
@@ -241,6 +268,7 @@ async def run_agent(
         workflow,
         "mcp_loaded",
         f"{len(mcp_config)} MCP server(s) configured: {list(mcp_config.keys())}",
+        task_exec,
     )
 
     # Build system prompt with skills + output destination hints
@@ -275,17 +303,17 @@ async def run_agent(
         # Enforce allowed-tools filter
         if allowed_tools_set is not None and tool_name not in allowed_tools_set:
             asyncio.create_task(
-                _log(workflow, "tool_denied", f"{tool_name} — not in allowed tools")
+                _log(workflow, "tool_denied", f"{tool_name} — not in allowed tools", task_exec)
             )
             return {"permissionDecision": "deny", "permissionDecisionReason": "Tool not in allowed list"}
         tool_call_count += 1
         if tool_call_count > max_turns:
             asyncio.create_task(
-                _log(workflow, "tool_denied", f"{tool_name} — max turns exceeded")
+                _log(workflow, "tool_denied", f"{tool_name} — max turns exceeded", task_exec)
             )
             return {"permissionDecision": "deny", "permissionDecisionReason": "Max turns exceeded"}
         asyncio.create_task(
-            _log(workflow, "tool_call", str(tool_name))
+            _log(workflow, "tool_call", str(tool_name), task_exec)
         )
         return {"permissionDecision": "allow"}
 
@@ -293,7 +321,7 @@ async def run_agent(
         """Log tool result; inject goal reminder when deep into the run."""
         tool_name = input_data.get("toolName", "unknown")
         asyncio.create_task(
-            _log(workflow, "tool_result", f"{tool_name} completed")
+            _log(workflow, "tool_result", f"{tool_name} completed", task_exec)
         )
         result = {}
         # Inject goal reminder when past 50% of max turns to reduce hallucination
@@ -309,7 +337,7 @@ async def run_agent(
         recoverable = input_data.get("recoverable", False)
         error_ctx = input_data.get("errorContext", "system")
         asyncio.create_task(
-            _log(workflow, "error", f"[{error_ctx}] {error} (recoverable={recoverable})")
+            _log(workflow, "error", f"[{error_ctx}] {error} (recoverable={recoverable})", task_exec)
         )
         if recoverable:
             key = f"{error_ctx}:{error[:50]}"
@@ -323,7 +351,7 @@ async def run_agent(
         """Log session end reason."""
         reason = input_data.get("reason", "unknown")
         asyncio.create_task(
-            _log(workflow, "session_end", f"Reason: {reason}")
+            _log(workflow, "session_end", f"Reason: {reason}", task_exec)
         )
         return None
 
@@ -367,6 +395,7 @@ async def run_agent(
                 "session_creating",
                 f"Model: {workflow.model}, MCP servers: {list(mcp_config.keys())}, "
                 f"infinite_session: {workflow.infinite_session}",
+                task_exec,
             )
 
             async with await c.create_session(**session_kwargs) as session:
@@ -388,7 +417,7 @@ async def run_agent(
                         content = getattr(event.data, "content", None) or ""
                         assistant_messages.append(content)
                         asyncio.create_task(
-                            _log(workflow, "model_response", content[:200])
+                            _log(workflow, "model_response", content[:200], task_exec)
                         )
                         asyncio.create_task(event_bus.publish(
                             str(workflow.id), "message",
@@ -437,13 +466,13 @@ async def run_agent(
                     elif ev_type == "tool.execution_start":
                         tool_name = getattr(event.data, "tool_name", "unknown")
                         asyncio.create_task(
-                            _log(workflow, "tool_call", str(tool_name))
+                            _log(workflow, "tool_call", str(tool_name), task_exec)
                         )
 
                     elif ev_type == "tool.execution_complete":
                         tool_name = getattr(event.data, "tool_name", "unknown")
                         asyncio.create_task(
-                            _log(workflow, "tool_result", f"{tool_name} completed")
+                            _log(workflow, "tool_result", f"{tool_name} completed", task_exec)
                         )
 
                     elif ev_type == "session.idle":
@@ -452,18 +481,18 @@ async def run_agent(
                     elif ev_type == "session.error":
                         error_msg = getattr(event.data, "message", str(event.data))
                         asyncio.create_task(
-                            _log(workflow, "error", error_msg)
+                            _log(workflow, "error", error_msg, task_exec)
                         )
                         done.set()
 
                     elif ev_type == "session.compaction_start":
                         asyncio.create_task(
-                            _log(workflow, "compaction_start", "Context compaction started")
+                            _log(workflow, "compaction_start", "Context compaction started", task_exec)
                         )
 
                     elif ev_type == "session.compaction_complete":
                         asyncio.create_task(
-                            _log(workflow, "compaction_complete", "Context compaction completed")
+                            _log(workflow, "compaction_complete", "Context compaction completed", task_exec)
                         )
 
                 session.on(on_event)
@@ -472,6 +501,7 @@ async def run_agent(
                     workflow,
                     "model_call",
                     f"Sending prompt to {workflow.model} via Copilot SDK",
+                    task_exec,
                 )
                 # Call RPC directly to avoid the SDK sending null values
                 # for 'mode' and 'attachments' which causes "t.asString is
@@ -482,18 +512,50 @@ async def run_agent(
                 )
 
                 # Wait for the session to finish (idle or error)
+                # Poll for halt signal every 2 seconds while waiting.
                 try:
-                    await asyncio.wait_for(
-                        done.wait(), timeout=settings.session_timeout
-                    )
+                    deadline = asyncio.get_event_loop().time() + settings.session_timeout
+                    while not done.is_set():
+                        remaining = deadline - asyncio.get_event_loop().time()
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError()
+                        try:
+                            await asyncio.wait_for(done.wait(), timeout=min(2.0, remaining))
+                        except asyncio.TimeoutError:
+                            if done.is_set():
+                                break
+                            # Check if user requested halt
+                            if await event_bus.check_halt(str(workflow.id)):
+                                await event_bus.clear_halt(str(workflow.id))
+                                await session.abort()
+                                workflow.status = WorkflowStatus.HALTED
+                                workflow.current_turn = tool_call_count
+                                await _log(workflow, "halted", "Execution halted by user", task_exec)
+                                await _publish_status(workflow)
+                                if task_exec:
+                                    task_exec.status = TaskStatus.HALTED
+                                    task_exec.finished_at = datetime.now(UTC)
+                                    task_exec.tool_calls = tool_call_count
+                                    await task_exec.save()
+                                return None
+                            # Not halted yet and not timed out — keep waiting
+                            if remaining <= 2.0:
+                                raise
                 except asyncio.TimeoutError:
                     workflow.status = WorkflowStatus.FAILED
+                    workflow.current_turn = tool_call_count
                     await _log(
                         workflow,
                         "error",
                         f"Session timed out after {settings.session_timeout}s",
+                        task_exec,
                     )
                     await _publish_status(workflow)
+                    if task_exec:
+                        task_exec.status = TaskStatus.FAILED
+                        task_exec.finished_at = datetime.now(UTC)
+                        task_exec.tool_calls = tool_call_count
+                        await task_exec.save()
                     return None
 
                 # Retrieve conversation history from the SDK session
@@ -527,7 +589,7 @@ async def run_agent(
                 # Check if max turns was hit
                 if tool_call_count > max_turns:
                     workflow.status = WorkflowStatus.MAX_TURNS_REACHED
-                    await _log(workflow, "max_turns_reached", f"{tool_call_count} tool calls")
+                    await _log(workflow, "max_turns_reached", f"{tool_call_count} tool calls", task_exec)
                 elif workflow.status == WorkflowStatus.RUNNING:
                     workflow.status = WorkflowStatus.COMPLETED
 
@@ -535,14 +597,38 @@ async def run_agent(
                 if final_text and workflow.output_format == OutputFormat.JSON:
                     final_text = json.dumps({"response": final_text})
 
-                await _log(workflow, "completed", f"Final status: {workflow.status}")
+                await _log(workflow, "completed", f"Final status: {workflow.status}", task_exec)
                 await _publish_status(workflow)
+
+                # Finalize task execution
+                if task_exec:
+                    status_map = {
+                        WorkflowStatus.COMPLETED: TaskStatus.COMPLETED,
+                        WorkflowStatus.FAILED: TaskStatus.FAILED,
+                        WorkflowStatus.HALTED: TaskStatus.HALTED,
+                        WorkflowStatus.MAX_TURNS_REACHED: TaskStatus.MAX_TURNS_REACHED,
+                    }
+                    task_exec.status = status_map.get(workflow.status, TaskStatus.COMPLETED)
+                    task_exec.finished_at = datetime.now(UTC)
+                    task_exec.tool_calls = tool_call_count
+                    task_exec.response = final_text
+                    task_exec.usage = usage
+                    # Copy messages added during this execution
+                    task_exec.messages = [
+                        m for m in workflow.messages
+                        if m.content == user_prompt or m.role == "assistant"
+                    ][-20:]  # Keep last 20 messages for this execution
+                    await task_exec.save()
 
     except Exception as e:
         workflow.status = WorkflowStatus.FAILED
-        await _log(workflow, "error", str(e))
+        await _log(workflow, "error", str(e), task_exec)
         await _publish_status(workflow)
         logger.exception("Agent run failed for workflow %s", workflow.id)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
         final_text = None
 
     return final_text

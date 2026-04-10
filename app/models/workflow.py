@@ -11,6 +11,7 @@ class WorkflowStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    HALTED = "halted"
     MAX_TURNS_REACHED = "max_turns_reached"
 
 

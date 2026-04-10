@@ -20,6 +20,9 @@ async def build_mcp_servers_config(servers: list[McpServer]) -> dict[str, dict[s
     config: dict[str, dict[str, Any]] = {}
     for server in servers:
         cc = server.connection_config
+        # SDK requires a 'tools' list — ["*"] means all, [] means none.
+        # If allowed_tools is empty (unrestricted), expose all tools.
+        tools = server.allowed_tools if server.allowed_tools else ["*"]
         if server.transport_type == TransportType.STDIO:
             # Merge host env with config-supplied env so PATH/NODE_PATH are available
             env = dict(os.environ)
@@ -31,6 +34,7 @@ async def build_mcp_servers_config(servers: list[McpServer]) -> dict[str, dict[s
                 "command": cc["command"],
                 "args": cc.get("args", []),
                 "env": env,
+                "tools": tools,
             }
         elif server.transport_type == TransportType.SSE:
             headers = cc.get("headers", {})
@@ -40,6 +44,7 @@ async def build_mcp_servers_config(servers: list[McpServer]) -> dict[str, dict[s
                 "type": "sse",
                 "url": cc["url"],
                 "headers": headers,
+                "tools": tools,
             }
         elif server.transport_type == TransportType.HTTP:
             headers = cc.get("headers", {})
@@ -49,5 +54,6 @@ async def build_mcp_servers_config(servers: list[McpServer]) -> dict[str, dict[s
                 "type": "http",
                 "url": cc["url"],
                 "headers": headers,
+                "tools": tools,
             }
     return config

@@ -87,7 +87,7 @@
     justify-content: center; align-items: flex-start; padding-top: 80px; z-index: 100; }
   .modal-overlay.show { display: flex; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    width: 560px; max-height: 80vh; overflow-y: auto; }
+    width: 700px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
   .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
     justify-content: space-between; align-items: center; }
   .modal-header h3 { font-size: 16px; }
@@ -169,6 +169,7 @@
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
     <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
+    <a data-page="tasks"><span class="icon">📋</span> Task Executions</a>
     <a data-page="task"><span class="icon">💬</span> Run Task</a>
   </nav>
   <div class="sidebar-footer">v0.1.0 &middot; Copilot SDK</div>
@@ -190,6 +191,7 @@
         <div class="stat-card"><div class="label">Skills</div><div class="value purple" id="stat-skills">-</div></div>
         <div class="stat-card"><div class="label">Tokens</div><div class="value green" id="stat-tokens">-</div></div>
         <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
+        <div class="stat-card"><div class="label">Task Executions</div><div class="value purple" id="stat-tasks">-</div></div>
       </div>
       <div class="card">
         <div class="card-header"><h2>Recent Workflows</h2></div>
@@ -259,6 +261,19 @@
       </div>
     </div>
 
+    <!-- Task Executions Page -->
+    <div id="page-tasks" class="page">
+      <div class="card">
+        <div class="card-header">
+          <h2>Task Executions</h2>
+          <button class="btn btn-sm" onclick="loadTaskExecutions()">↻ Refresh</button>
+        </div>
+        <div class="card-body"><table><thead><tr>
+          <th>Prompt</th><th>Workflow</th><th>Agent</th><th>Status</th><th>Worker</th><th>Tool Calls</th><th>Elapsed</th><th>Created</th><th></th>
+        </tr></thead><tbody id="task-execs-body"></tbody></table></div>
+      </div>
+    </div>
+
     <!-- Run Task Page -->
     <div id="page-task" class="page">
       <div class="card" style="margin-bottom:16px">
@@ -273,6 +288,7 @@
             <textarea id="task-prompt" rows="4" placeholder="Describe the task you want the agent to perform..."></textarea>
           </div>
           <button class="btn btn-primary" id="task-send" onclick="sendTask()">▶ Send Task</button>
+          <button class="btn btn-danger" id="task-halt" onclick="haltTask()" style="display:none">⏹ Stop</button>
         </div>
       </div>
 
@@ -360,7 +376,7 @@ function fmtDate(d) {
 }
 
 function statusBadge(s) {
-  const map = { active:'blue', running:'yellow', completed:'green', failed:'red', max_turns_reached:'purple',
+  const map = { active:'blue', running:'yellow', completed:'green', failed:'red', halted:'purple', max_turns_reached:'purple',
     registered:'muted', connected:'green', error:'red' };
   return `<span class="badge badge-${map[s]||'muted'}">${s}</span>`;
 }
@@ -379,7 +395,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', tokens:'Tokens', workflows:'Workflows', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', tokens:'Tokens', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -391,20 +407,22 @@ function loadPage(page) {
   else if (page === 'skills') loadSkills();
   else if (page === 'tokens') loadTokens();
   else if (page === 'workflows') loadWorkflows();
+  else if (page === 'tasks') loadTaskExecutions();
   else if (page === 'task') loadTaskPage();
 }
 
 // ── Dashboard ──
 async function loadDashboard() {
   try {
-    [agents, mcps, skills, workflows, tokens] = await Promise.all([
-      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens')
+    [agents, mcps, skills, workflows, tokens, taskExecs] = await Promise.all([
+      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/tasks')
     ]);
     document.getElementById('stat-agents').textContent = agents.length;
     document.getElementById('stat-mcps').textContent = mcps.length;
     document.getElementById('stat-skills').textContent = skills.length;
     document.getElementById('stat-tokens').textContent = tokens.length;
     document.getElementById('stat-workflows').textContent = workflows.length;
+    document.getElementById('stat-tasks').textContent = taskExecs.length;
 
     const recent = workflows.slice(-5).reverse();
     document.getElementById('dash-workflows-body').innerHTML = recent.length
@@ -1037,7 +1055,7 @@ async function loadTaskPage() {
     [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
     const sel = document.getElementById('task-workflow');
     sel.innerHTML = workflows.map(w =>
-      `<option value="${w.id}">${agentName(w.agent_id)} — ${w.id.slice(0,8)} (${w.status})</option>`
+      `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)} (${w.status})</option>`
     ).join('') || '<option value="">No workflows — create one first</option>';
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -1050,6 +1068,7 @@ async function sendTask() {
 
   document.getElementById('task-send').disabled = true;
   document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('task-halt').style.display = 'inline-block';
   document.getElementById('task-result').style.display = 'block';
 
   // Append user message immediately
@@ -1063,6 +1082,17 @@ async function sendTask() {
     toast(e.message, 'error');
     resetSendButton();
   }
+}
+
+async function haltTask() {
+  const wfId = document.getElementById('task-workflow').value;
+  if (!wfId) return;
+  document.getElementById('task-halt').disabled = true;
+  document.getElementById('task-halt').textContent = 'Stopping…';
+  try {
+    await api(`/api/workflows/${wfId}/halt`, { method:'POST' });
+    toast('Halt signal sent');
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── SSE Streaming ──
@@ -1094,7 +1124,7 @@ function connectSSE(wfId) {
           `${data.current_turn}/${data.max_turns || '-'}`;
       }
       // Terminal states — close SSE and do a final fetch for complete data
-      if (['completed','failed','max_turns_reached'].includes(data.status)) {
+      if (['completed','failed','halted','max_turns_reached'].includes(data.status)) {
         disconnectSSE();
         resetSendButton();
         fetchAndRenderWorkflow(wfId);
@@ -1117,6 +1147,10 @@ function disconnectSSE() {
 function resetSendButton() {
   document.getElementById('task-send').disabled = false;
   document.getElementById('task-send').textContent = '▶ Send Task';
+  const haltBtn = document.getElementById('task-halt');
+  haltBtn.style.display = 'none';
+  haltBtn.disabled = false;
+  haltBtn.textContent = '⏹ Stop';
 }
 
 // ── Streaming message helpers ──
@@ -1275,6 +1309,89 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = String(s);
   return d.innerHTML;
+}
+
+// ── Task Executions ──
+let taskExecs = [];
+
+function fmtElapsed(seconds) {
+  if (seconds == null) return '-';
+  if (seconds < 60) return seconds.toFixed(1) + 's';
+  const mins = Math.floor(seconds / 60);
+  const secs = (seconds % 60).toFixed(0);
+  return `${mins}m ${secs}s`;
+}
+
+async function loadTaskExecutions() {
+  try {
+    taskExecs = await api('/api/tasks');
+    document.getElementById('task-execs-body').innerHTML = taskExecs.length
+      ? taskExecs.map(t => `<tr>
+          <td><strong title="${esc(t.prompt)}">${esc(t.prompt.length > 60 ? t.prompt.slice(0,60)+'…' : t.prompt)}</strong></td>
+          <td>${esc(t.workflow_title || t.workflow_id.slice(0,8))}</td>
+          <td>${esc(t.agent_name || '-')}</td>
+          <td>${statusBadge(t.status)}</td>
+          <td><span class="mono">${esc(t.worker || '-')}</span></td>
+          <td>${t.tool_calls}</td>
+          <td>${fmtElapsed(t.elapsed_seconds)}</td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td><button class="btn btn-sm" onclick="viewTaskExecution('${t.id}')">View Logs</button></td>
+        </tr>`).join('')
+      : '<tr><td colspan="9" class="empty-state">No task executions yet. Run a task to see results here.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function viewTaskExecution(id) {
+  try {
+    const t = await api(`/api/tasks/${id}`);
+    document.getElementById('modal-title').textContent = `Task Execution — ${t.status}`;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:16px">
+        <span>Status: ${statusBadge(t.status)}</span>
+        <span>Model: <strong style="color:var(--text)">${esc(t.model || '-')}</strong></span>
+        <span>Worker: <strong style="color:var(--text)">${esc(t.worker || '-')}</strong></span>
+        <span>Tool Calls: <strong style="color:var(--text)">${t.tool_calls}</strong></span>
+        <span>Elapsed: <strong style="color:var(--text)">${fmtElapsed(t.elapsed_seconds)}</strong></span>
+      </div>
+      ${t.usage ? `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:16px;padding:8px 12px;background:var(--bg);border-radius:6px">
+        <span>Requests: <strong style="color:var(--purple)">${t.usage.total_premium_requests}</strong></span>
+        <span>In: <strong style="color:var(--accent)">${t.usage.total_input_tokens.toLocaleString()}</strong></span>
+        <span>Out: <strong style="color:var(--green)">${t.usage.total_output_tokens.toLocaleString()}</strong></span>
+        <span>Cost: <strong style="color:var(--yellow)">$${t.usage.total_cost.toFixed(4)}</strong></span>
+      </div>` : ''}
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Prompt</div>
+        <div class="msg msg-user" style="margin:0">${esc(t.prompt)}</div>
+      </div>
+      ${t.response ? `<div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Response</div>
+        <div class="msg msg-assistant" style="margin:0">${esc(t.response)}</div>
+      </div>` : ''}
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Messages (${t.messages.length})</div>
+        <div style="max-height:200px;overflow-y:auto">
+          ${t.messages.length ? t.messages.map(m => `
+            <div class="msg msg-${m.role}" style="margin-bottom:4px;padding:8px 12px;font-size:13px">
+              <div class="role-label">${esc(m.role)}</div>
+              ${m.content ? esc(m.content) : ''}
+              ${m.tool_calls ? '<pre style="margin-top:4px;font-size:11px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : ''}
+            </div>`).join('') : '<div style="color:var(--muted);font-size:13px">No messages</div>'}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Logs (${t.logs.length})</div>
+        <div class="log-list" style="max-height:300px">
+          ${t.logs.length ? t.logs.map(l => `
+            <div class="log-entry">
+              <span class="ts">${fmtDate(l.timestamp)}</span>
+              <span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}
+            </div>`).join('') : '<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px">No logs</div>'}
+        </div>
+      </div>`;
+    document.getElementById('modal-footer').innerHTML =
+      '<button class="btn" onclick="closeModal()">Close</button>';
+    showModal();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── Init ──
