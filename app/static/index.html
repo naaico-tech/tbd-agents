@@ -218,7 +218,7 @@
       </div>
       <div class="card">
         <div class="card-body"><table><thead><tr>
-          <th>Name</th><th>Transport</th><th>Status</th><th>Created</th><th></th>
+          <th>Name</th><th>Transport</th><th>Status</th><th>Tools</th><th>Created</th><th></th>
         </tr></thead><tbody id="mcps-body"></tbody></table></div>
       </div>
     </div>
@@ -487,37 +487,47 @@ async function loadMcps() {
   try {
     mcps = await api('/api/mcps');
     document.getElementById('mcps-body').innerHTML = mcps.length
-      ? mcps.map(m => `<tr>
+      ? mcps.map(m => {
+          const toolCount = m.allowed_tools?.length || 0;
+          const toolLabel = toolCount ? `${toolCount} tool(s)` : 'All tools';
+          return `<tr>
           <td><strong>${esc(m.name)}</strong></td>
           <td><span class="badge badge-blue">${m.transport_type}</span></td>
           <td>${statusBadge(m.status)}</td>
+          <td><span class="badge" style="background:var(--border);color:var(--text)">${toolLabel}</span></td>
           <td>${fmtDate(m.created_at)}</td>
           <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openMcpModal('${m.id}')">Edit</button>
+            <button class="btn btn-sm" onclick="openToolsModal('${m.id}')">Tools</button>
             <button class="btn btn-sm" onclick="testMcp('${m.id}')">Test</button>
             <button class="btn btn-sm btn-danger" onclick="deleteMcp('${m.id}')">Delete</button>
           </div></td>
-        </tr>`).join('')
-      : '<tr><td colspan="5" class="empty-state">No MCP servers. Register one to enable tool use.</td></tr>';
+        </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" class="empty-state">No MCP servers. Register one to enable tool use.</td></tr>';
   } catch(e) { toast(e.message, 'error'); }
 }
 
-function openMcpModal() {
-  document.getElementById('modal-title').textContent = 'Register MCP Server';
+function openMcpModal(id) {
+  const m = id ? mcps.find(x => x.id === id) : null;
+  const isStdio = m ? m.transport_type === 'stdio' : true;
+  const cc = m?.connection_config || {};
+  document.getElementById('modal-title').textContent = m ? 'Edit MCP Server' : 'Register MCP Server';
   document.getElementById('modal-body').innerHTML = `
-    <div class="form-group"><label>Name</label><input id="f-mcp-name" placeholder="e.g. datadog-mcp"></div>
+    <div class="form-group"><label>Name</label><input id="f-mcp-name" value="${esc(m?.name||'')}" placeholder="e.g. datadog-mcp"></div>
     <div class="form-group"><label>Transport Type</label>
-      <select id="f-mcp-transport"><option value="stdio">stdio</option><option value="sse">sse</option></select></div>
-    <div id="mcp-stdio-fields">
-      <div class="form-group"><label>Command</label><input id="f-mcp-cmd" placeholder="npx"></div>
-      <div class="form-group"><label>Args (JSON array)</label><input id="f-mcp-args" placeholder='["-y","@datadog/mcp"]'></div>
+      <select id="f-mcp-transport"><option value="stdio" ${isStdio?'selected':''}>stdio</option><option value="sse" ${!isStdio?'selected':''}>sse</option></select></div>
+    <div id="mcp-stdio-fields" style="display:${isStdio?'block':'none'}">
+      <div class="form-group"><label>Command</label><input id="f-mcp-cmd" value="${esc(cc.command||'')}" placeholder="npx"></div>
+      <div class="form-group"><label>Args (JSON array)</label><input id="f-mcp-args" value="${cc.args?esc(JSON.stringify(cc.args)):''}" placeholder='["-y","@datadog/mcp"]'></div>
       <div class="form-group"><label>Env (JSON object, optional)</label>
-        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"{{token:my-api-key}}"}'></textarea>
+        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"{{token:my-api-key}}"}'>${cc.env?esc(JSON.stringify(cc.env,null,2)):''}</textarea>
         <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store instead of pasting raw values.</div></div>
     </div>
-    <div id="mcp-sse-fields" style="display:none">
-      <div class="form-group"><label>URL</label><input id="f-mcp-url" placeholder="http://localhost:3000/sse"></div>
+    <div id="mcp-sse-fields" style="display:${!isStdio?'block':'none'}">
+      <div class="form-group"><label>URL</label><input id="f-mcp-url" value="${esc(cc.url||'')}" placeholder="http://localhost:3000/sse"></div>
       <div class="form-group"><label>Headers (JSON object, optional)</label>
-        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer {{token:my-token}}"}'></textarea>
+        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer {{token:my-token}}"}'>${cc.headers?esc(JSON.stringify(cc.headers,null,2)):''}</textarea>
         <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store.</div></div>
     </div>`;
   document.getElementById('f-mcp-transport').addEventListener('change', e => {
@@ -526,11 +536,11 @@ function openMcpModal() {
   });
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-primary" onclick="saveMcp()">Register</button>`;
+    <button class="btn btn-primary" onclick="saveMcp('${id||''}')">${m?'Update':'Register'}</button>`;
   showModal();
 }
 
-async function saveMcp() {
+async function saveMcp(id) {
   const transport = document.getElementById('f-mcp-transport').value;
   let config;
   if (transport === 'stdio') {
@@ -545,12 +555,19 @@ async function saveMcp() {
     if (hdrVal) config.headers = JSON.parse(hdrVal);
   }
   try {
-    await api('/api/mcps', { method:'POST', body:JSON.stringify({
+    const body = {
       name: document.getElementById('f-mcp-name').value,
       transport_type: transport,
       connection_config: config,
-    })});
-    toast('MCP server registered'); closeModal(); loadMcps();
+    };
+    if (id) {
+      await api(`/api/mcps/${id}`, { method:'PUT', body:JSON.stringify(body) });
+      toast('MCP server updated');
+    } else {
+      await api('/api/mcps', { method:'POST', body:JSON.stringify(body) });
+      toast('MCP server registered');
+    }
+    closeModal(); loadMcps();
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -566,6 +583,83 @@ async function deleteMcp(id) {
   if (!confirm('Delete this MCP server?')) return;
   try { await api(`/api/mcps/${id}`, { method:'DELETE' }); toast('MCP server deleted'); loadMcps(); }
   catch(e) { toast(e.message, 'error'); }
+}
+
+async function openToolsModal(id) {
+  const m = mcps.find(x => x.id === id);
+  if (!m) return;
+  const allowed = m.allowed_tools || [];
+  document.getElementById('modal-title').textContent = `Configure Tools — ${m.name}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="text-align:center;padding:24px;color:var(--muted)">Discovering tools…</div>`;
+  document.getElementById('modal-footer').innerHTML = '';
+  showModal();
+  try {
+    const res = await api(`/api/mcps/${id}/tools`);
+    const tools = res.tools || [];
+    if (!tools.length) {
+      document.getElementById('modal-body').innerHTML =
+        '<div style="padding:16px;color:var(--muted)">No tools found. Test the connection first to ensure the MCP server is reachable.</div>';
+      document.getElementById('modal-footer').innerHTML =
+        '<button class="btn" onclick="closeModal()">Close</button>';
+      return;
+    }
+    const allChecked = allowed.length === 0;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="margin-bottom:12px;font-size:13px;color:var(--muted)">
+        Select which tools the agent may use. Leave all checked to allow everything.
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="cursor:pointer;font-size:13px;color:var(--accent)">
+          <input type="checkbox" id="tools-select-all" ${allChecked?'checked':''} onchange="toggleAllTools(this.checked)"> Select All
+        </label>
+      </div>
+      <div id="tools-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+        ${tools.map(t => {
+          const checked = allChecked || allowed.includes(t.name);
+          return `<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:6px 8px;border-radius:6px;background:var(--bg)">
+            <input type="checkbox" class="tool-cb" value="${esc(t.name)}" ${checked?'checked':''} style="margin-top:3px">
+            <div>
+              <div style="font-weight:600;font-size:13px">${esc(t.name)}</div>
+              ${t.description ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(t.description)}</div>` : ''}
+            </div>
+          </label>`;
+        }).join('')}
+      </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTools('${id}')">Save</button>`;
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML =
+      `<div style="padding:16px;color:#e44">${esc(e.message)}</div>`;
+    document.getElementById('modal-footer').innerHTML =
+      '<button class="btn" onclick="closeModal()">Close</button>';
+  }
+}
+
+function toggleAllTools(checked) {
+  document.querySelectorAll('.tool-cb').forEach(cb => cb.checked = checked);
+}
+
+async function saveTools(id) {
+  const allCbs = document.querySelectorAll('.tool-cb');
+  const selectAll = document.getElementById('tools-select-all');
+  let allowed = [];
+  if (selectAll && selectAll.checked) {
+    // All selected → store empty list (= unrestricted)
+    allowed = [];
+  } else {
+    allowed = [...allCbs].filter(cb => cb.checked).map(cb => cb.value);
+  }
+  try {
+    await api(`/api/mcps/${id}/tools`, {
+      method: 'PUT',
+      body: JSON.stringify({ allowed_tools: allowed }),
+    });
+    toast('Tool configuration saved');
+    closeModal();
+    loadMcps();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── Tokens ──

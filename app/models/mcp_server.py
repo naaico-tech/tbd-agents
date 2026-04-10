@@ -20,6 +20,7 @@ class McpServer(Document):
     name: str
     transport_type: TransportType
     connection_config: dict  # stdio: {command, args, env} | sse: {url, headers}
+    allowed_tools: list[str] = Field(default_factory=list)  # empty = all tools
     status: McpServerStatus = McpServerStatus.REGISTERED
     last_error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

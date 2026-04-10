@@ -217,6 +217,22 @@ async def run_agent(
 
     mcp_config = await build_mcp_servers_config(mcp_servers_db)
 
+    # Build allowed-tools set for filtering in hooks.
+    # If a server has a non-empty allowed_tools list, only those tools are permitted.
+    # Tools from MCPs with no restrictions (empty list) are always allowed.
+    allowed_tools_set: set[str] | None = None  # None = no filtering
+    has_restrictions = any(s.allowed_tools for s in mcp_servers_db)
+    if has_restrictions:
+        allowed_tools_set = set()
+        for s in mcp_servers_db:
+            if s.allowed_tools:
+                allowed_tools_set.update(s.allowed_tools)
+            else:
+                # Server has no restrictions – we can't enumerate its tools ahead of
+                # time, so we mark it as unrestricted by adding a sentinel.
+                allowed_tools_set = None
+                break
+
     # Auto-inject Notion/Slack MCPs based on workflow output destinations
     dynamic_mcps = await _build_dynamic_mcp_config(workflow)
     mcp_config.update(dynamic_mcps)
@@ -253,9 +269,15 @@ async def run_agent(
 
     # ── Hooks ──
     def on_pre_tool_use(input_data, context):
-        """Log tool invocation; deny if max turns exceeded."""
+        """Log tool invocation; deny if max turns exceeded or tool not allowed."""
         nonlocal tool_call_count
         tool_name = input_data.get("toolName", "unknown")
+        # Enforce allowed-tools filter
+        if allowed_tools_set is not None and tool_name not in allowed_tools_set:
+            asyncio.create_task(
+                _log(workflow, "tool_denied", f"{tool_name} — not in allowed tools")
+            )
+            return {"permissionDecision": "deny", "permissionDecisionReason": "Tool not in allowed list"}
         tool_call_count += 1
         if tool_call_count > max_turns:
             asyncio.create_task(
