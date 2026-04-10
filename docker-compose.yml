@@ -8,6 +8,7 @@ services:
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - MONGO_DB_NAME=copilot_agent_hub
+      - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
       - SESSION_TIMEOUT=300
@@ -24,6 +25,42 @@ services:
     depends_on:
       mongodb:
         condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=copilot_agent_hub
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_MODEL=gpt-4.1
+      - DEFAULT_MAX_TURNS=5
+      - SESSION_TIMEOUT=300
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - DD_API_KEY=${DD_API_KEY:-}
+      - DD_APP_KEY=${DD_APP_KEY:-}
+      - DD_SITE=${DD_SITE:-datadoghq.com}
+      - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
+      - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
+      - ATLASSIAN_URL=${ATLASSIAN_URL:-}
+    depends_on:
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
   mongodb:
@@ -36,3 +73,4 @@ services:
 
 volumes:
   mongo_data:
+  redis_data:

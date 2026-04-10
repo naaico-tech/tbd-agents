@@ -1,5 +1,3 @@
-import asyncio
-
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -7,7 +5,6 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import extract_token, get_current_user
 from app.config import settings
 from app.core import event_bus
-from app.core.agent_engine import run_agent
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.workflow import (
@@ -26,6 +23,7 @@ from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowResponse,
 )
+from app.tasks.agent_task import run_agent_task
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -123,8 +121,8 @@ async def send_prompt(
 
     token = extract_token(authorization)
 
-    # Launch the agent loop in the background
-    asyncio.get_running_loop().create_task(run_agent(wf, body.prompt, token))
+    # Dispatch to a Celery worker for scalable background execution
+    run_agent_task.delay(str(wf.id), body.prompt, token)
 
     return PromptResponse(
         workflow_id=str(wf.id),
@@ -148,22 +146,17 @@ async def stream_workflow(workflow_id: str, request: Request):
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    queue = event_bus.subscribe(workflow_id)
-
     async def event_generator():
         try:
-            while True:
-                # Check if client disconnected
+            async for payload in event_bus.subscribe(workflow_id):
                 if await request.is_disconnected():
                     break
-                try:
-                    payload = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"data: {payload}\n\n"
-                except asyncio.TimeoutError:
-                    # Send keepalive comment
+                if payload is None:
                     yield ": keepalive\n\n"
-        finally:
-            event_bus.unsubscribe(workflow_id, queue)
+                else:
+                    yield f"data: {payload}\n\n"
+        except Exception:
+            pass
 
     return StreamingResponse(
         event_generator(),

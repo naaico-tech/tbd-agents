@@ -12,6 +12,8 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     "github-copilot-sdk",
     "mcp>=1.1.0",
+    "celery[redis]>=5.4.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
