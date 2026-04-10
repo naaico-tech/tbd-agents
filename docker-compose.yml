@@ -11,7 +11,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
-      - SESSION_TIMEOUT=300
+      - SESSION_TIMEOUT=600
       # Optional server-level GitHub token (per-request tokens take priority)
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       # Datadog MCP credentials
@@ -29,6 +29,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    volumes:
+      - repos_data:/repos
     restart: unless-stopped
 
   worker:
@@ -42,7 +44,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
-      - SESSION_TIMEOUT=300
+      - SESSION_TIMEOUT=600
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - DD_API_KEY=${DD_API_KEY:-}
       - DD_APP_KEY=${DD_APP_KEY:-}
@@ -56,6 +58,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    volumes:
+      - repos_data:/repos
     restart: unless-stopped
 
   redis:
@@ -77,3 +81,4 @@ services:
 volumes:
   mongo_data:
   redis_data:
+  repos_data:

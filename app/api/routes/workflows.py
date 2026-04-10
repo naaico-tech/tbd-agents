@@ -56,6 +56,10 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         status=wf.status,
         output_format=wf.output_format,
         infinite_session=wf.infinite_session,
+        reasoning_effort=wf.reasoning_effort,
+        repo_url=wf.repo_url,
+        repo_branch=wf.repo_branch,
+        repo_token_name=wf.repo_token_name,
         usage=_usage_response(wf),
         output_destination=_dest_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
@@ -95,6 +99,10 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         skill_ids=body.skill_ids,
         output_format=OutputFormat(body.output_format),
         infinite_session=body.infinite_session,
+        reasoning_effort=body.reasoning_effort,
+        repo_url=body.repo_url,
+        repo_branch=body.repo_branch,
+        repo_token_name=body.repo_token_name,
         output_destination=output_dest,
     )
     await wf.insert()
@@ -129,16 +137,20 @@ async def send_prompt(
 
     token = extract_token(authorization)
 
+    # Resolve reasoning effort: prompt-time override > workflow default
+    reasoning_effort = body.reasoning_effort or wf.reasoning_effort
+
     # Create a task execution record
     task_exec = TaskExecution(
         workflow_id=str(wf.id),
         prompt=body.prompt,
         model=wf.model,
+        reasoning_effort=reasoning_effort,
     )
     await task_exec.insert()
 
     # Dispatch to a Celery worker for scalable background execution
-    result = run_agent_task.delay(str(wf.id), body.prompt, token, str(task_exec.id))
+    result = run_agent_task.delay(str(wf.id), body.prompt, token, str(task_exec.id), reasoning_effort)
 
     # Store the Celery task ID
     task_exec.celery_task_id = result.id

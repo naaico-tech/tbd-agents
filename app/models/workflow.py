@@ -65,6 +65,10 @@ class Workflow(Document):
     usage: UsageStats | None = None
     output_destination: OutputDestination | None = None
     infinite_session: bool = True
+    reasoning_effort: str | None = None  # low | medium | high (model-dependent)
+    repo_url: str | None = None  # GitHub repo URL to clone for agent access
+    repo_branch: str | None = None  # Branch to checkout (default: main)
+    repo_token_name: str | None = None  # Token Store key for private repo auth
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

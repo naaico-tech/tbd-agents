@@ -180,6 +180,55 @@ async def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
     return config
 
 
+REPOS_BASE = "/repos"
+
+
+async def _sync_repo(workflow: Workflow) -> str | None:
+    """Clone or pull the workflow's configured repository.
+
+    Returns the local path to the repo checkout, or None if no repo configured.
+    Uses shallow clone (--depth 1) for speed.
+    """
+    if not workflow.repo_url:
+        return None
+
+    import hashlib
+    import shlex
+
+    repo_dir = os.path.join(
+        REPOS_BASE,
+        hashlib.sha256(f"{workflow.id}:{workflow.repo_url}".encode()).hexdigest()[:16],
+    )
+    branch = workflow.repo_branch or "main"
+
+    # Build auth URL if a token name is configured
+    clone_url = workflow.repo_url
+    if workflow.repo_token_name:
+        token_value = await token_manager.get_token_value(workflow.repo_token_name)
+        if token_value:
+            # Insert token into HTTPS URL: https://TOKEN@github.com/...
+            clone_url = clone_url.replace("https://", f"https://{token_value}@")
+
+    if os.path.isdir(os.path.join(repo_dir, ".git")):
+        # Pull latest
+        cmd = f"git -C {shlex.quote(repo_dir)} fetch --depth 1 origin {shlex.quote(branch)} && git -C {shlex.quote(repo_dir)} checkout FETCH_HEAD"
+    else:
+        os.makedirs(repo_dir, exist_ok=True)
+        cmd = f"git clone --depth 1 --branch {shlex.quote(branch)} {shlex.quote(clone_url)} {shlex.quote(repo_dir)}"
+
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        logger.warning("Repo sync failed for %s: %s", workflow.repo_url, stderr.decode()[:500])
+        return None
+
+    return repo_dir
+
+
 # ── Main Execution ───────────────────────────────────────────────────────────
 
 
@@ -188,6 +237,7 @@ async def run_agent(
     user_prompt: str,
     github_token: str,
     task_execution_id: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str | None:
     """Execute a prompt using the GitHub Copilot SDK.
 
@@ -273,6 +323,21 @@ async def run_agent(
 
     # Build system prompt with skills + output destination hints
     system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow)
+
+    # Sync repository if configured
+    repo_path = await _sync_repo(workflow)
+    if repo_path:
+        await _log(workflow, "repo_synced", f"Repository synced to {repo_path}", task_exec)
+        system_prompt += (
+            f"\n\n<repository>\n"
+            f"A git repository has been cloned and is available at: {repo_path}\n"
+            f"URL: {workflow.repo_url}\n"
+            f"Branch: {workflow.repo_branch or 'main'}\n"
+            f"You can read files from this path to understand the codebase.\n"
+            f"</repository>"
+        )
+    elif workflow.repo_url:
+        await _log(workflow, "repo_sync_failed", f"Failed to sync {workflow.repo_url}", task_exec)
 
     # ── Usage tracking state ──
     usage = UsageStats()
@@ -506,10 +571,10 @@ async def run_agent(
                 # Call RPC directly to avoid the SDK sending null values
                 # for 'mode' and 'attachments' which causes "t.asString is
                 # not a function" in the Node binary.
-                await session._client.request(
-                    "session.send",
-                    {"sessionId": session.session_id, "prompt": user_prompt},
-                )
+                send_params: dict = {"sessionId": session.session_id, "prompt": user_prompt}
+                if reasoning_effort:
+                    send_params["reasoningEffort"] = reasoning_effort
+                await session._client.request("session.send", send_params)
 
                 # Wait for the session to finish (idle or error)
                 # Poll for halt signal every 2 seconds while waiting.

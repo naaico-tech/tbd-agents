@@ -27,6 +27,10 @@ class WorkflowCreate(BaseModel):
     model: str | None = None
     skill_ids: list[str] = []
     infinite_session: bool = True
+    reasoning_effort: str | None = None  # low | medium | high
+    repo_url: str | None = None  # GitHub repo URL
+    repo_branch: str | None = None  # Branch to checkout
+    repo_token_name: str | None = None  # Token Store key for private repos
     output_destination: OutputDestinationCreate | None = None
 
 
@@ -37,11 +41,16 @@ class WorkflowUpdate(BaseModel):
     model: str | None = None
     skill_ids: list[str] | None = None
     infinite_session: bool | None = None
+    reasoning_effort: str | None = None
+    repo_url: str | None = None
+    repo_branch: str | None = None
+    repo_token_name: str | None = None
     output_destination: OutputDestinationCreate | None = None
 
 
 class PromptRequest(BaseModel):
     prompt: str
+    reasoning_effort: str | None = None  # Override workflow default at prompt time
 
 
 class MessageResponse(BaseModel):
@@ -85,6 +94,10 @@ class WorkflowResponse(BaseModel):
     status: str
     output_format: str
     infinite_session: bool = True
+    reasoning_effort: str | None = None
+    repo_url: str | None = None
+    repo_branch: str | None = None
+    repo_token_name: str | None = None
     usage: UsageStatsResponse | None = None
     output_destination: OutputDestinationCreate | None = None
     logs: list[LogEntryResponse] = []

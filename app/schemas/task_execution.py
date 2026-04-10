@@ -15,6 +15,7 @@ class TaskExecutionResponse(BaseModel):
     celery_task_id: str | None = None
     worker: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
     tool_calls: int = 0
     response: str | None = None
     logs: list[LogEntryResponse] = []
@@ -36,6 +37,7 @@ class TaskExecutionSummary(BaseModel):
     status: str
     worker: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
     tool_calls: int = 0
     started_at: datetime | None = None
     finished_at: datetime | None = None

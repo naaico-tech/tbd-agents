@@ -87,7 +87,8 @@
     justify-content: center; align-items: flex-start; padding-top: 80px; z-index: 100; }
   .modal-overlay.show { display: flex; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    width: 700px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    width: 700px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+  .modal.modal-wide { width: 960px; }
   .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
     justify-content: space-between; align-items: center; }
   .modal-header h3 { font-size: 16px; }
@@ -124,19 +125,34 @@
   .log-entry .ev { color: var(--accent); margin-right: 8px; }
 
   /* Messages */
-  .msg { padding: 12px 16px; margin-bottom: 8px; border-radius: var(--radius); font-size: 14px;
-    line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .msg-user { background: #1f6feb33; border: 1px solid #1f6feb55; }
-  .msg-assistant { background: var(--surface2); border: 1px solid var(--border); }
+  .msg { padding: 12px 16px; margin-bottom: 10px; border-radius: var(--radius); font-size: 14px;
+    line-height: 1.6; word-break: break-word; position: relative; }
+  .msg-user { background: #1f6feb22; border: 1px solid #1f6feb44; margin-left: 40px; }
+  .msg-assistant { background: var(--surface2); border: 1px solid var(--border); margin-right: 40px; }
   .msg-system { background: #bc8cff11; border: 1px solid #bc8cff33; font-size: 12px; color: var(--muted); }
-  .msg-tool { background: #3fb95011; border: 1px solid #3fb95033; font-size: 12px;
-    font-family: 'SF Mono', monospace; }
+  .msg-tool { background: #3fb95011; border: 1px solid #3fb95033; font-size: 13px; }
   .msg .role-label { font-size: 11px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: .5px; margin-bottom: 4px; }
+    letter-spacing: .5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
   .msg-user .role-label { color: var(--accent); }
   .msg-assistant .role-label { color: var(--text); }
   .msg-system .role-label { color: var(--purple); }
   .msg-tool .role-label { color: var(--green); }
+  .msg .msg-content { white-space: pre-wrap; }
+  .msg .msg-content code { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'SF Mono', monospace; }
+  .msg .msg-content pre { background: var(--bg); padding: 10px 14px; border-radius: 6px; overflow-x: auto;
+    font-size: 12px; font-family: 'SF Mono', monospace; margin: 8px 0; line-height: 1.4; border: 1px solid var(--border); }
+  .msg .msg-content pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* Tool call cards */
+  .tool-call-card { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .tool-call-card summary { padding: 8px 12px; background: var(--surface2); cursor: pointer; font-size: 12px;
+    font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .tool-call-card summary::marker { color: var(--muted); }
+  .tool-call-card summary .tool-name { color: var(--green); font-family: 'SF Mono', monospace; }
+  .tool-call-card summary .tool-id { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: auto; }
+  .tool-call-card .tool-args { padding: 8px 12px; background: var(--bg); font-size: 11px;
+    font-family: 'SF Mono', monospace; white-space: pre-wrap; max-height: 300px; overflow-y: auto;
+    border-top: 1px solid var(--border); }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
   .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
@@ -287,6 +303,10 @@
             <label>Prompt</label>
             <textarea id="task-prompt" rows="4" placeholder="Describe the task you want the agent to perform..."></textarea>
           </div>
+          <div class="form-group" id="task-reasoning-group" style="display:none">
+            <label>Thinking Level <span style="font-weight:400;color:var(--muted);font-size:12px">(override workflow default)</span></label>
+            <select id="task-reasoning"><option value="">Use workflow default</option></select>
+          </div>
           <button class="btn btn-primary" id="task-send" onclick="sendTask()">▶ Send Task</button>
           <button class="btn btn-danger" id="task-halt" onclick="haltTask()" style="display:none">⏹ Stop</button>
         </div>
@@ -316,7 +336,7 @@
 
         <div class="card" style="margin-bottom:16px">
           <div class="card-header"><h2>Messages</h2></div>
-          <div class="card-body" id="task-messages" style="max-height:500px;overflow-y:auto"></div>
+          <div class="card-body" id="task-messages" style="max-height:600px;overflow-y:auto"></div>
         </div>
 
         <div class="card">
@@ -844,6 +864,13 @@ function openWorkflowModal() {
       <select id="f-wf-model"><option value="">Loading models…</option></select>
       <div id="f-wf-model-info" class="hint"></div>
     </div>
+    <div class="form-group" id="f-wf-reasoning-group" style="display:none">
+      <label>Thinking Level</label>
+      <select id="f-wf-reasoning">
+        <option value="">Default (none)</option>
+      </select>
+      <div class="hint">Controls depth of reasoning. Higher = slower but more thorough.</div>
+    </div>
     <div class="form-group"><label>Max Turns</label><input id="f-wf-turns" type="number" value="5"></div>
     <div class="form-group"><label>Output Format</label>
       <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
@@ -853,6 +880,20 @@ function openWorkflowModal() {
         <input type="checkbox" id="f-wf-infinite" checked> Infinite Session
       </label>
       <div class="hint">Auto-compacts context when the window fills up, allowing longer sessions.</div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Repository <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — cloned fresh each run)</span></label>
+      <div class="form-group"><label>Repo URL</label>
+        <input id="f-wf-repo-url" placeholder="https://github.com/owner/repo">
+        <div class="hint">HTTPS URL of a GitHub repository to clone for agent access.</div>
+      </div>
+      <div class="form-group"><label>Branch</label>
+        <input id="f-wf-repo-branch" placeholder="main">
+      </div>
+      <div class="form-group"><label>Auth Token <span style="font-weight:400;color:var(--muted);font-size:12px">(Token Store key name)</span></label>
+        <input id="f-wf-repo-token" placeholder="e.g. github-pat">
+        <div class="hint">Name of a token in the Token Store for private repos. Leave blank for public repos.</div>
+      </div>
     </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Output Destinations <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — agent decides when to use)</span></label>
@@ -909,8 +950,8 @@ async function loadModelOptions() {
       const disabled = policy === 'disabled' ? ' disabled' : '';
       return `<option value="${esc(m.id)}"${disabled}>${esc(m.name)}${badge}</option>`;
     }).join('');
-    sel.addEventListener('change', () => updateModelInfo(models, sel.value, info));
-    updateModelInfo(models, sel.value, info);
+    sel.addEventListener('change', () => updateModelInfo(models, sel.value, info, 'f-wf-reasoning'));
+    updateModelInfo(models, sel.value, info, 'f-wf-reasoning');
   } catch(e) {
     sel.innerHTML = '<option value="">Failed to load models</option>';
     info.textContent = e.message;
@@ -945,6 +986,10 @@ async function saveWorkflow() {
     output_format: document.getElementById('f-wf-format').value,
     skill_ids: skillIds,
     infinite_session: document.getElementById('f-wf-infinite').checked,
+    reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
+    repo_url: document.getElementById('f-wf-repo-url').value || null,
+    repo_branch: document.getElementById('f-wf-repo-branch').value || null,
+    repo_token_name: document.getElementById('f-wf-repo-token').value || null,
   };
 
   // Output destinations
@@ -978,6 +1023,12 @@ function openEditWorkflowModal(id) {
       <select id="f-wf-edit-model"><option value="">Loading models…</option></select>
       <div id="f-wf-edit-model-info" class="hint"></div>
     </div>
+    <div class="form-group" id="f-wf-edit-reasoning-group" style="display:none">
+      <label>Thinking Level</label>
+      <select id="f-wf-edit-reasoning">
+        <option value="">Default (none)</option>
+      </select>
+    </div>
     <div class="form-group"><label>Max Turns</label><input id="f-wf-edit-turns" type="number" value="${w.max_turns}"></div>
     <div class="form-group"><label>Output Format</label>
       <select id="f-wf-edit-format">
@@ -988,6 +1039,18 @@ function openEditWorkflowModal(id) {
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="f-wf-edit-infinite" ${w.infinite_session?'checked':''}> Infinite Session
       </label>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Repository</label>
+      <div class="form-group"><label>Repo URL</label>
+        <input id="f-wf-edit-repo-url" value="${esc(w.repo_url||'')}" placeholder="https://github.com/owner/repo">
+      </div>
+      <div class="form-group"><label>Branch</label>
+        <input id="f-wf-edit-repo-branch" value="${esc(w.repo_branch||'')}" placeholder="main">
+      </div>
+      <div class="form-group"><label>Auth Token (Token Store key)</label>
+        <input id="f-wf-edit-repo-token" value="${esc(w.repo_token_name||'')}" placeholder="e.g. github-pat">
+      </div>
     </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
@@ -1006,8 +1069,13 @@ function openEditWorkflowModal(id) {
         const selected = m.id === w.model ? ' selected' : '';
         return `<option value="${esc(m.id)}"${selected}>${esc(m.name)}${badge}</option>`;
       }).join('');
-      sel.addEventListener('change', () => updateModelInfo(_cachedModels, sel.value, info));
-      updateModelInfo(_cachedModels, sel.value, info);
+      sel.addEventListener('change', () => updateModelInfo(_cachedModels, sel.value, info, 'f-wf-edit-reasoning'));
+      updateModelInfo(_cachedModels, sel.value, info, 'f-wf-edit-reasoning');
+      // Set previously saved reasoning effort
+      if (w.reasoning_effort) {
+        const rSel = document.getElementById('f-wf-edit-reasoning');
+        if (rSel) rSel.value = w.reasoning_effort;
+      }
     } catch(e) {
       sel.innerHTML = `<option value="${esc(w.model)}" selected>${esc(w.model)}</option>`;
     }
@@ -1021,6 +1089,10 @@ async function updateWorkflow(id) {
     max_turns: parseInt(document.getElementById('f-wf-edit-turns').value) || undefined,
     output_format: document.getElementById('f-wf-edit-format').value,
     infinite_session: document.getElementById('f-wf-edit-infinite').checked,
+    reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
+    repo_url: document.getElementById('f-wf-edit-repo-url').value || null,
+    repo_branch: document.getElementById('f-wf-edit-repo-branch').value || null,
+    repo_token_name: document.getElementById('f-wf-edit-repo-token').value || null,
   };
   // Remove undefined keys so they're not sent (leave workflow values unchanged)
   Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
@@ -1057,7 +1129,28 @@ async function loadTaskPage() {
     sel.innerHTML = workflows.map(w =>
       `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)} (${w.status})</option>`
     ).join('') || '<option value="">No workflows — create one first</option>';
+    sel.addEventListener('change', () => updateTaskReasoningDropdown());
+    updateTaskReasoningDropdown();
   } catch(e) { toast(e.message, 'error'); }
+}
+
+async function updateTaskReasoningDropdown() {
+  const wfId = document.getElementById('task-workflow').value;
+  const w = workflows.find(x => x.id === wfId);
+  const group = document.getElementById('task-reasoning-group');
+  const sel = document.getElementById('task-reasoning');
+  if (!w || !sel || !group) return;
+  try {
+    if (!_cachedModels) _cachedModels = await api('/api/models');
+    const m = _cachedModels.find(x => x.id === w.model);
+    if (m?.supportedReasoningEfforts?.length) {
+      sel.innerHTML = '<option value="">Use workflow default' + (w.reasoning_effort ? ` (${w.reasoning_effort})` : '') + '</option>' +
+        m.supportedReasoningEfforts.map(e => `<option value="${esc(e)}">${esc(e.charAt(0).toUpperCase()+e.slice(1))}</option>`).join('');
+      group.style.display = '';
+    } else {
+      group.style.display = 'none';
+    }
+  } catch { group.style.display = 'none'; }
 }
 
 async function sendTask() {
@@ -1075,7 +1168,7 @@ async function sendTask() {
   appendMessage({ role: 'user', content: prompt });
 
   try {
-    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify({ prompt }) });
+    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify({ prompt, reasoning_effort: document.getElementById('task-reasoning')?.value || null }) });
     toast('Task submitted');
     connectSSE(wfId);
   } catch(e) {
@@ -1157,18 +1250,20 @@ function resetSendButton() {
 function appendDelta(text) {
   if (!text) return;
   if (!streamingMsgEl) {
-    // Create a new assistant message bubble for streaming
+    const msgEl = document.getElementById('task-messages');
+    const empty = msgEl.querySelector('.empty-state');
+    if (empty) empty.remove();
     streamingMsgEl = document.createElement('div');
     streamingMsgEl.className = 'msg msg-assistant';
-    streamingMsgEl.innerHTML = '<div class="role-label">assistant <span class="spinner" style="margin-left:6px"></span></div>';
-    const contentSpan = document.createElement('span');
-    contentSpan.className = 'streaming-content';
+    streamingMsgEl.innerHTML = '<div class="role-label">🤖 assistant <span class="spinner" style="margin-left:6px"></span></div>';
+    const contentSpan = document.createElement('div');
+    contentSpan.className = 'msg-content streaming-content';
+    contentSpan.style.whiteSpace = 'pre-wrap';
     streamingMsgEl.appendChild(contentSpan);
-    document.getElementById('task-messages').appendChild(streamingMsgEl);
+    msgEl.appendChild(streamingMsgEl);
   }
   const contentEl = streamingMsgEl.querySelector('.streaming-content');
   contentEl.textContent += text;
-  // Auto-scroll
   const msgContainer = document.getElementById('task-messages');
   msgContainer.scrollTop = msgContainer.scrollHeight;
 }
@@ -1182,6 +1277,47 @@ function finishStreamingMsg() {
   }
 }
 
+// ── Message rendering helpers ──
+const ROLE_ICONS = { user: '👤', assistant: '🤖', system: '⚙️', tool: '🔧' };
+
+function formatContent(raw) {
+  if (!raw) return '';
+  // Escape HTML first
+  let s = esc(raw);
+  // Convert fenced code blocks: ```lang\n...\n```
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code>${code.replace(/&lt;/g,'<').replace(/&gt;/g,'>')}</code></pre>`);
+  // Convert inline code: `...`
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return s;
+}
+
+function renderToolCalls(toolCalls) {
+  if (!toolCalls || !toolCalls.length) return '';
+  return toolCalls.map(tc => {
+    const fn = tc.function || tc;
+    const name = fn.name || tc.name || 'unknown';
+    const id = tc.id || '';
+    let args = fn.arguments || tc.arguments || '';
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch {}
+    }
+    const argsStr = typeof args === 'object' ? JSON.stringify(args, null, 2) : String(args);
+    return `<details class="tool-call-card">
+      <summary><span class="tool-name">${esc(name)}</span>${id ? `<span class="tool-id">${esc(id)}</span>` : ''}</summary>
+      <div class="tool-args">${esc(argsStr)}</div>
+    </details>`;
+  }).join('');
+}
+
+function renderMsgHtml(m) {
+  const icon = ROLE_ICONS[m.role] || '💬';
+  const nameTag = m.name ? ' · ' + esc(m.name) : '';
+  return `<div class="role-label">${icon} ${esc(m.role)}${nameTag}</div>` +
+    (m.content ? `<div class="msg-content">${formatContent(m.content)}</div>` : '') +
+    renderToolCalls(m.tool_calls);
+}
+
 function appendMessage(m) {
   const msgEl = document.getElementById('task-messages');
   // Remove "No messages yet" empty state
@@ -1190,9 +1326,7 @@ function appendMessage(m) {
 
   const div = document.createElement('div');
   div.className = `msg msg-${m.role}`;
-  div.innerHTML = `<div class="role-label">${esc(m.role)}${m.name?' · '+esc(m.name):''}</div>` +
-    (m.content ? esc(m.content) : '') +
-    (m.tool_calls ? '<pre style="margin-top:6px;font-size:12px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : '');
+  div.innerHTML = renderMsgHtml(m);
   msgEl.appendChild(div);
   msgEl.scrollTop = msgEl.scrollHeight;
 }
@@ -1281,9 +1415,7 @@ function renderTaskResult(w) {
   const msgEl = document.getElementById('task-messages');
   msgEl.innerHTML = (w.messages||[]).map(m => `
     <div class="msg msg-${m.role}">
-      <div class="role-label">${esc(m.role)}${m.name?' · '+esc(m.name):''}</div>
-      ${m.content ? esc(m.content) : ''}
-      ${m.tool_calls ? '<pre style="margin-top:6px;font-size:12px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : ''}
+      ${renderMsgHtml(m)}
     </div>`).join('') || '<div class="empty-state">No messages yet</div>';
 
   // Logs
@@ -1298,7 +1430,7 @@ function renderTaskResult(w) {
 
 // ── Modal helpers ──
 function showModal() { document.getElementById('modal-overlay').classList.add('show'); }
-function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+function closeModal() { document.querySelector('.modal').classList.remove('modal-wide'); document.getElementById('modal-overlay').classList.remove('show'); }
 document.getElementById('modal-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeModal();
 });
@@ -1344,11 +1476,13 @@ async function loadTaskExecutions() {
 async function viewTaskExecution(id) {
   try {
     const t = await api(`/api/tasks/${id}`);
+    document.querySelector('.modal').classList.add('modal-wide');
     document.getElementById('modal-title').textContent = `Task Execution — ${t.status}`;
     document.getElementById('modal-body').innerHTML = `
       <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:16px">
         <span>Status: ${statusBadge(t.status)}</span>
         <span>Model: <strong style="color:var(--text)">${esc(t.model || '-')}</strong></span>
+        ${t.reasoning_effort ? `<span>Thinking: <strong style="color:var(--purple)">${esc(t.reasoning_effort)}</strong></span>` : ''}
         <span>Worker: <strong style="color:var(--text)">${esc(t.worker || '-')}</strong></span>
         <span>Tool Calls: <strong style="color:var(--text)">${t.tool_calls}</strong></span>
         <span>Elapsed: <strong style="color:var(--text)">${fmtElapsed(t.elapsed_seconds)}</strong></span>
@@ -1361,20 +1495,18 @@ async function viewTaskExecution(id) {
       </div>` : ''}
       <div style="margin-bottom:12px">
         <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Prompt</div>
-        <div class="msg msg-user" style="margin:0">${esc(t.prompt)}</div>
+        <div class="msg msg-user" style="margin:0">${renderMsgHtml({role:'user',content:t.prompt})}</div>
       </div>
       ${t.response ? `<div style="margin-bottom:12px">
         <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Response</div>
-        <div class="msg msg-assistant" style="margin:0">${esc(t.response)}</div>
+        <div class="msg msg-assistant" style="margin:0">${renderMsgHtml({role:'assistant',content:t.response})}</div>
       </div>` : ''}
       <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Messages (${t.messages.length})</div>
-        <div style="max-height:200px;overflow-y:auto">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Conversation (${t.messages.length})</div>
+        <div style="max-height:400px;overflow-y:auto">
           ${t.messages.length ? t.messages.map(m => `
-            <div class="msg msg-${m.role}" style="margin-bottom:4px;padding:8px 12px;font-size:13px">
-              <div class="role-label">${esc(m.role)}</div>
-              ${m.content ? esc(m.content) : ''}
-              ${m.tool_calls ? '<pre style="margin-top:4px;font-size:11px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : ''}
+            <div class="msg msg-${m.role}" style="margin-bottom:6px">
+              ${renderMsgHtml(m)}
             </div>`).join('') : '<div style="color:var(--muted);font-size:13px">No messages</div>'}
         </div>
       </div>
