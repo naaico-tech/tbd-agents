@@ -1,77 +1,56 @@
-# Copilot Agent Hub
+<p align="center">
+  <strong>TBD Agent</strong><br>
+  <em>Your agents. Your rules. Your infrastructure.</em>
+</p>
 
-Multi-agent API hub powered by the **official GitHub Copilot SDK** with native MCP (Model Context Protocol) tool support.
+<p align="center">
+  Built by <a href="https://www.naaico.com">NAAICO</a>
+</p>
 
-## What Changed in v0.2
+---
 
-This project was revamped from raw `httpx` calls to the GitHub Models API to the **official `github-copilot-sdk`** Python package. The SDK:
+**TBD Agent** lets you build, control, and trigger your own custom AI agents over the web — no black boxes, no vendor lock-in, just a clean API backed by the **GitHub Copilot SDK** that you run on your own infrastructure.
 
-- Spawns the bundled Copilot CLI and communicates via JSON-RPC
-- Handles the full agentic loop (planning → tool calls → response) natively
-- Connects to MCP servers directly (no more ephemeral reconnection per tool call)
-- Supports streaming, infinite sessions, and context-window compaction
-- Billing goes through GitHub Copilot premium request quota
+Spin up purpose-built agents with distinct system prompts, wire them to any MCP tool server, send a prompt over HTTP, and watch them work in real-time through streaming Server-Sent Events. Need to scale? Celery workers distribute agent execution across as many nodes as you want.
 
-## Features
+> **TBD** — *To Be Decided* by you: what your agents do, which tools they use, and how far they go.
 
-- **Multi-Agent System** — Create custom agents with distinct system prompts, models, and MCP configurations
-- **GitHub Copilot SDK** — Full agentic loop handled natively (tool planning, execution, response generation)
-- **MCP Integration** — Connect external MCP servers (stdio or SSE); the SDK manages persistent connections during sessions
-- **Skills** — Installable instruction sets injected into the system prompt per workflow
-- **Async Execution** — Prompts return 201 immediately; poll the workflow for progress and logs
-- **Max Turns** — Configurable limit on tool-call rounds per workflow (enforced via permission handler)
-- **Output Formats** — JSON or Markdown responses
-- **MongoDB Storage** — Persistent agent configs, MCP registrations, skills, and workflow history
-- **Dockerized** — Single `docker-compose up` for the full stack
+## Highlights
+
+- **Fully self-hosted** — runs on your infra via Docker Compose; no SaaS dependency beyond GitHub Copilot billing
+- **Custom agents over HTTP** — create, configure, and trigger agents with a simple REST API or the built-in dashboard
+- **Real-time streaming** — SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client
+- **Distributed workers** — Celery + Redis architecture lets you scale agent execution horizontally; add workers to handle load
+- **MCP tool ecosystem** — connect any MCP-compatible tool server (Datadog, Jira, Notion, Slack, and hundreds more) via stdio or SSE
+- **Infinite sessions** — automatic context compaction keeps long-running agents alive without hitting context limits
+- **Usage & cost tracking** — per-workflow token counts, premium request quotas, and cost data from the Copilot SDK
+- **Skills system** — modular instruction sets that can be installed per workflow to shape agent behaviour
+- **Output destinations** — agents autonomously decide when to push results to Notion pages or Slack channels
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker & Docker Compose
-- A GitHub Personal Access Token with `copilot` scope ([create one here](https://github.com/settings/tokens))
-- A **GitHub Copilot subscription** (Individual, Business, or Enterprise)
-
-### Run
-
 ```bash
-# Clone and start
 git clone <repo-url> && cd copilot-agent-hub
+
+# Set your GitHub PAT (requires `copilot` scope)
 export GITHUB_TOKEN="ghp_your_token_here"
+
 docker-compose up --build
 ```
 
-The API is available at `http://localhost:8000`. Swagger docs at `http://localhost:8000/docs`.
+- **Dashboard:** http://localhost:8000/dashboard
+- **API docs:** http://localhost:8000/docs
+- **API base:** http://localhost:8000/api
 
-### Local Development (without Docker)
+See [docs/local-setup.md](docs/local-setup.md) for detailed local development instructions.
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+## Documentation
 
-# Start MongoDB locally (or use a cloud instance)
-export MONGO_URI=mongodb://localhost:27017
-export GITHUB_TOKEN="ghp_your_token_here"
-
-uvicorn app.main:app --reload
-```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `MONGO_URI` | `mongodb://mongodb:27017` | MongoDB connection string |
-| `MONGO_DB_NAME` | `copilot_agent_hub` | Database name |
-| `DEFAULT_MODEL` | `gpt-4.1` | Default model for new workflows |
-| `DEFAULT_MAX_TURNS` | `5` | Default max tool-call turns per workflow |
-| `SESSION_TIMEOUT` | `300` | SDK session timeout in seconds |
-| `GITHUB_TOKEN` | — | Optional server-level token (per-request Bearer tokens take priority) |
-| `DD_API_KEY` | — | Datadog API key (for Datadog MCP) |
-| `DD_APP_KEY` | — | Datadog App key (for Datadog MCP) |
-| `DD_SITE` | `datadoghq.com` | Datadog site |
-| `ATLASSIAN_API_TOKEN` | — | Atlassian API token (for Jira MCP) |
-| `ATLASSIAN_EMAIL` | — | Atlassian account email |
-| `ATLASSIAN_URL` | — | Atlassian site URL |
+| Document | Description |
+|---|---|
+| [Local Setup](docs/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
+| [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
+| [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
 
 ## API Reference
 
@@ -118,8 +97,9 @@ DELETE /api/mcps/{id}           — Remove MCP server
 
 ```
 POST   /api/workflows                        — Create workflow
-POST   /api/workflows/{id}/prompt            — Send prompt (returns 201, runs async)
-GET    /api/workflows/{id}                   — Poll workflow state + logs
+POST   /api/workflows/{id}/prompt            — Send prompt (returns 201, runs via worker)
+GET    /api/workflows/{id}                   — Get workflow state + logs + messages
+GET    /api/workflows/{id}/stream            — SSE stream of real-time events
 GET    /api/workflows                        — List your workflows
 POST   /api/workflows/{id}/skills/{skill_id} — Install skill into workflow
 DELETE /api/workflows/{id}/skills/{skill_id} — Remove skill from workflow
@@ -143,7 +123,6 @@ curl -X POST http://localhost:8000/api/agents \
 ### 2. Register an MCP Server
 
 ```bash
-# Stdio-based MCP server (e.g., Datadog)
 curl -X POST http://localhost:8000/api/mcps \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
@@ -158,68 +137,36 @@ curl -X POST http://localhost:8000/api/mcps \
   }'
 ```
 
-### 3. Attach MCP to Agent
+### 3. Create a Workflow and Send a Prompt
 
 ```bash
-curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"mcp_server_ids": ["<MCP_ID>"]}'
-```
-
-### 4. Create a Workflow and Send a Prompt
-
-```bash
-# Create workflow
+# Create workflow with Notion output + infinite session
 WORKFLOW=$(curl -s -X POST http://localhost:8000/api/workflows \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id": "<AGENT_ID>", "max_turns": 5, "output_format": "json"}')
+  -d '{
+    "agent_id": "<AGENT_ID>",
+    "max_turns": 10,
+    "output_format": "markdown",
+    "infinite_session": true,
+    "output_destination": {
+      "notion_base_page_id": "abc123..."
+    }
+  }')
 
 WORKFLOW_ID=$(echo "$WORKFLOW" | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
 
-# Send prompt (returns 201 immediately)
+# Send prompt — dispatched to a Celery worker
 curl -X POST "http://localhost:8000/api/workflows/$WORKFLOW_ID/prompt" \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "What is 2+2?"}'
-
-# Poll for results
-curl "http://localhost:8000/api/workflows/$WORKFLOW_ID" \
-  -H "Authorization: Bearer $GITHUB_TOKEN"
+  -d '{"prompt": "Investigate the spike in p99 latency on the payments service over the last 24 hours."}'
 ```
 
-## Architecture
+### 4. Stream Results in Real-Time
 
-```
-┌──────────────────────────────────────────────────┐
-│  Client (curl / app / CI)                        │
-│  Authorization: Bearer <GitHub PAT>              │
-└──────────────┬───────────────────────────────────┘
-               │
-       ┌───────▼────────┐
-       │   FastAPI App   │
-       │   /api/...      │
-       └───────┬────────┘
-               │
-  ┌────────────┼────────────────┐
-  │            │                │
-  ▼            ▼                ▼
-Agents DB   Workflows DB    MCP Servers DB
-(MongoDB)   (MongoDB)       (MongoDB)
-               │
-       ┌───────▼────────────┐
-       │  Copilot SDK Client │
-       │  (JSON-RPC)         │
-       └──┬──────────────┬──┘
-          │              │
-          ▼              ▼
-  Copilot CLI         MCP Servers
-  (bundled)           (stdio/sse)
-      │
-      ▼
-  GitHub Copilot
-  Models API
+```bash
+curl -N "http://localhost:8000/api/workflows/$WORKFLOW_ID/stream"
 ```
 
 ## Supported Models
@@ -230,6 +177,22 @@ Any model available through GitHub Copilot, including:
 - `o3`, `o3-mini`, `o4-mini`
 - `claude-sonnet-4.5` (if available via Copilot)
 
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| API | FastAPI + Uvicorn |
+| Agent engine | GitHub Copilot SDK (JSON-RPC) |
+| Task queue | Celery + Redis |
+| Event bus | Redis Pub/Sub |
+| Database | MongoDB + Beanie ODM |
+| Frontend | Single-page dashboard (vanilla JS, SSE) |
+| Containerisation | Docker Compose |
+
 ## License
 
 MIT
+
+---
+
+<p align="center">A <a href="https://www.naaico.com">NAAICO</a> product</p>
