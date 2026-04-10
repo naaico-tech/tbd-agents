@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None
+    # OpenTelemetry
+    otel_endpoint: str = "http://otel-collector:4317"
+    otel_http_endpoint: str = "http://otel-collector:4318"
+    otel_service_name: str = "copilot-agent-hub"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

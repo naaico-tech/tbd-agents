@@ -123,6 +123,18 @@
     font-family: 'SF Mono', monospace; }
   .log-entry .ts { color: var(--muted); margin-right: 8px; }
   .log-entry .ev { color: var(--accent); margin-right: 8px; }
+  .log-entry.log-tool { cursor: pointer; transition: background .15s; }
+  .log-entry.log-tool:hover { background: var(--surface2); }
+  .log-entry.log-tool .tool-hint { margin-left: 6px; font-size: 11px; color: var(--muted); }
+  .log-entry.log-tool-fail .ev { color: var(--red); }
+
+  /* Tool detail modal content */
+  .tool-detail-section { margin-bottom: 16px; }
+  .tool-detail-section h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); margin-bottom: 6px; }
+  .tool-detail-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; color: var(--text); }
 
   /* Messages */
   .msg { padding: 12px 16px; margin-bottom: 10px; border-radius: var(--radius); font-size: 14px;
@@ -1338,9 +1350,19 @@ function appendLog(l) {
   if (placeholder && placeholder.textContent.includes('No logs')) placeholder.remove();
 
   const div = document.createElement('div');
-  div.className = 'log-entry';
+  const isToolEvent = l.event === 'tool_call' || l.event === 'tool_result';
+  const isFailed = l.event === 'tool_result' && l.detail && l.detail.includes('FAILED');
+  div.className = 'log-entry' + (isToolEvent ? ' log-tool' : '') + (isFailed ? ' log-tool-fail' : '');
   div.innerHTML = `<span class="ts">${fmtDate(l.timestamp || new Date().toISOString())}</span>` +
-    `<span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}`;
+    `<span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}` +
+    (isToolEvent ? '<span class="tool-hint">click for details</span>' : '');
+  if (isToolEvent) {
+    div.dataset.toolInput = l.tool_input || '';
+    div.dataset.toolOutput = l.tool_output || '';
+    div.dataset.toolEvent = l.event;
+    div.dataset.toolDetail = l.detail || '';
+    div.addEventListener('click', () => showToolDetailModal(div.dataset));
+  }
   logEl.appendChild(div);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -1420,12 +1442,28 @@ function renderTaskResult(w) {
 
   // Logs
   const logEl = document.getElementById('task-logs');
-  logEl.innerHTML = (w.logs||[]).map(l => `
-    <div class="log-entry">
-      <span class="ts">${fmtDate(l.timestamp)}</span>
-      <span class="ev">[${l.event}]</span>
-      ${esc(l.detail)}
-    </div>`).join('') || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No logs</div>';
+  if ((w.logs||[]).length) {
+    logEl.innerHTML = '';
+    (w.logs||[]).forEach(l => {
+      const isToolEvent = l.event === 'tool_call' || l.event === 'tool_result';
+      const isFailed = l.event === 'tool_result' && l.detail && l.detail.includes('FAILED');
+      const div = document.createElement('div');
+      div.className = 'log-entry' + (isToolEvent ? ' log-tool' : '') + (isFailed ? ' log-tool-fail' : '');
+      div.innerHTML = `<span class="ts">${fmtDate(l.timestamp)}</span>` +
+        `<span class="ev">[${l.event}]</span> ${esc(l.detail)}` +
+        (isToolEvent ? '<span class="tool-hint">click for details</span>' : '');
+      if (isToolEvent) {
+        div.dataset.toolInput = l.tool_input || '';
+        div.dataset.toolOutput = l.tool_output || '';
+        div.dataset.toolEvent = l.event;
+        div.dataset.toolDetail = l.detail || '';
+        div.addEventListener('click', () => showToolDetailModal(div.dataset));
+      }
+      logEl.appendChild(div);
+    });
+  } else {
+    logEl.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No logs</div>';
+  }
 }
 
 // ── Modal helpers ──
@@ -1434,6 +1472,36 @@ function closeModal() { document.querySelector('.modal').classList.remove('modal
 document.getElementById('modal-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeModal();
 });
+
+function showToolDetailModal(ds) {
+  const isFailed = ds.toolEvent === 'tool_result' && ds.toolDetail && ds.toolDetail.includes('FAILED');
+  const modal = document.querySelector('.modal');
+  modal.classList.add('modal-wide');
+  const title = ds.toolEvent === 'tool_call' ? 'Tool Call Details' : 'Tool Result Details';
+  let body = `<h3 style="margin:0 0 8px">${esc(title)}</h3>`;
+  body += `<p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(ds.toolDetail)}</p>`;
+  if (isFailed) {
+    body += '<div style="background:#3a1a1a;border:1px solid #ff4d4d;border-radius:6px;padding:10px 14px;margin-bottom:14px;color:#ff8080;font-weight:600">⚠ Tool execution failed</div>';
+  }
+  if (ds.toolInput) {
+    body += '<div class="tool-detail-section"><h4>Input / Arguments</h4>';
+    let formatted = ds.toolInput;
+    try { formatted = JSON.stringify(JSON.parse(ds.toolInput), null, 2); } catch {}
+    body += `<pre class="tool-detail-pre">${esc(formatted)}</pre></div>`;
+  }
+  if (ds.toolOutput) {
+    body += '<div class="tool-detail-section"><h4>Output / Result</h4>';
+    let formatted = ds.toolOutput;
+    try { formatted = JSON.stringify(JSON.parse(ds.toolOutput), null, 2); } catch {}
+    body += `<pre class="tool-detail-pre">${esc(formatted)}</pre></div>`;
+  }
+  if (!ds.toolInput && !ds.toolOutput) {
+    body += '<p style="color:var(--muted);font-style:italic">No detailed tool data available for this event.</p>';
+  }
+  body += '<div style="text-align:right;margin-top:16px"><button class="btn" onclick="closeModal()">Close</button></div>';
+  document.getElementById('modal-body').innerHTML = body;
+  showModal();
+}
 
 // ── Escape HTML ──
 function esc(s) {

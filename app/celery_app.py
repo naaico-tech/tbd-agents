@@ -5,6 +5,8 @@ Start a worker with:
 """
 
 from celery import Celery
+from celery.signals import worker_process_init
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
 
 from app.config import settings
 
@@ -31,3 +33,12 @@ celery.conf.update(
 )
 
 celery.autodiscover_tasks(["app.tasks"])
+
+
+@worker_process_init.connect(weak=False)
+def _init_worker_telemetry(**_kwargs):
+    """Initialise OTEL tracing + Celery instrumentation in each worker process."""
+    from app.observability import init_telemetry
+
+    init_telemetry()
+    CeleryInstrumentor().instrument()

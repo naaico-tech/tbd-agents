@@ -24,6 +24,8 @@ class LogEntry(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event: str  # e.g. "prompt_received", "model_call", "tool_call", "tool_result", "error", "completed"
     detail: str = ""
+    tool_input: str | None = None   # JSON-serialised tool arguments (for tool_call events)
+    tool_output: str | None = None  # Tool result or error text (for tool_result events)
 
 
 class Message(BaseModel):

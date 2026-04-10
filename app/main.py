@@ -5,9 +5,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.routes import agents, health, mcps, models, skills, tasks, tokens, workflows
 from app.db import init_db
+from app.observability import init_telemetry
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,6 +31,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# ── Observability ────────────────────────────────────────────────────────────
+init_telemetry(app)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 app.include_router(health.router)
 app.include_router(agents.router)

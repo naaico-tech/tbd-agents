@@ -34,6 +34,20 @@ from app.models.workflow import (
     Workflow,
     WorkflowStatus,
 )
+from app.observability import (
+    agent_task_duration_seconds,
+    agent_tasks_active,
+    agent_tasks_total,
+    cost_dollars_total,
+    cost_per_task_dollars,
+    mcp_connections_total,
+    premium_requests_total,
+    repo_sync_duration_seconds,
+    repo_sync_total,
+    tokens_total,
+    tool_calls_per_task,
+    tool_calls_total,
+)
 from app.services import token_manager
 from app.services.copilot_client import build_client
 
@@ -43,19 +57,31 @@ logger = logging.getLogger(__name__)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _log(workflow: Workflow, event: str, detail: str = "", task_exec: TaskExecution | None = None) -> None:
+async def _log(
+    workflow: Workflow,
+    event: str,
+    detail: str = "",
+    task_exec: TaskExecution | None = None,
+    tool_input: str | None = None,
+    tool_output: str | None = None,
+) -> None:
     """Append a log entry, persist to DB, and publish to SSE subscribers."""
-    entry = LogEntry(event=event, detail=detail)
+    entry = LogEntry(event=event, detail=detail, tool_input=tool_input, tool_output=tool_output)
     workflow.logs.append(entry)
     workflow.updated_at = datetime.now(UTC)
     await workflow.save()
     if task_exec:
         task_exec.logs.append(entry)
         await task_exec.save()
+    payload: dict = {"event": event, "detail": detail}
+    if tool_input is not None:
+        payload["tool_input"] = tool_input
+    if tool_output is not None:
+        payload["tool_output"] = tool_output
     await event_bus.publish(
         str(workflow.id),
         "log",
-        {"event": event, "detail": detail},
+        payload,
     )
 
 
@@ -294,6 +320,10 @@ async def run_agent(
 
     mcp_config = await build_mcp_servers_config(mcp_servers_db)
 
+    # Record MCP connection metrics
+    for server_name in mcp_config:
+        mcp_connections_total.labels(server_name=server_name).inc()
+
     # Build allowed-tools set for filtering in hooks.
     # If a server has a non-empty allowed_tools list, only those tools are permitted.
     # Tools from MCPs with no restrictions (empty list) are always allowed.
@@ -327,6 +357,7 @@ async def run_agent(
     # Sync repository if configured
     repo_path = await _sync_repo(workflow)
     if repo_path:
+        repo_sync_total.labels(status="success").inc()
         await _log(workflow, "repo_synced", f"Repository synced to {repo_path}", task_exec)
         system_prompt += (
             f"\n\n<repository>\n"
@@ -337,10 +368,13 @@ async def run_agent(
             f"</repository>"
         )
     elif workflow.repo_url:
+        repo_sync_total.labels(status="failure").inc()
         await _log(workflow, "repo_sync_failed", f"Failed to sync {workflow.repo_url}", task_exec)
 
     # ── Usage tracking state ──
     usage = UsageStats()
+    task_start_time = datetime.now(UTC)
+    agent_tasks_active.inc()
 
     # ── Tool call tracking for max-turns ──
     tool_call_count = 0
@@ -500,21 +534,29 @@ async def run_agent(
                     elif ev_type == "assistant.usage":
                         # Accumulate token/cost data
                         data = event.data
-                        usage.total_input_tokens += int(
-                            getattr(data, "input_tokens", 0) or 0
-                        )
-                        usage.total_output_tokens += int(
-                            getattr(data, "output_tokens", 0) or 0
-                        )
-                        usage.total_cache_read_tokens += int(
-                            getattr(data, "cache_read_tokens", 0) or 0
-                        )
-                        usage.total_cache_write_tokens += int(
-                            getattr(data, "cache_write_tokens", 0) or 0
-                        )
+                        input_tok = int(getattr(data, "input_tokens", 0) or 0)
+                        output_tok = int(getattr(data, "output_tokens", 0) or 0)
+                        cache_read = int(getattr(data, "cache_read_tokens", 0) or 0)
+                        cache_write = int(getattr(data, "cache_write_tokens", 0) or 0)
+                        usage.total_input_tokens += input_tok
+                        usage.total_output_tokens += output_tok
+                        usage.total_cache_read_tokens += cache_read
+                        usage.total_cache_write_tokens += cache_write
                         cost = getattr(data, "cost", None)
                         if cost:
                             usage.total_cost += float(cost)
+                        # Prometheus metrics
+                        model = workflow.model
+                        if input_tok:
+                            tokens_total.labels(direction="input", model=model).inc(input_tok)
+                        if output_tok:
+                            tokens_total.labels(direction="output", model=model).inc(output_tok)
+                        if cache_read:
+                            tokens_total.labels(direction="cache_read", model=model).inc(cache_read)
+                        if cache_write:
+                            tokens_total.labels(direction="cache_write", model=model).inc(cache_write)
+                        if cost:
+                            cost_dollars_total.labels(model=model).inc(float(cost))
                         asyncio.create_task(event_bus.publish(
                             str(workflow.id), "usage", usage.model_dump(),
                         ))
@@ -523,21 +565,50 @@ async def run_agent(
                         data = event.data
                         premium = getattr(data, "total_premium_requests", None)
                         if premium is not None:
+                            delta = float(premium) - usage.total_premium_requests
                             usage.total_premium_requests = float(premium)
+                            if delta > 0:
+                                premium_requests_total.labels(model=workflow.model).inc(delta)
                         asyncio.create_task(event_bus.publish(
                             str(workflow.id), "usage", usage.model_dump(),
                         ))
 
                     elif ev_type == "tool.execution_start":
-                        tool_name = getattr(event.data, "tool_name", "unknown")
+                        data = event.data
+                        tool_name = getattr(data, "tool_name", "unknown")
+                        tool_calls_total.labels(tool_name=str(tool_name)).inc()
+                        # Capture tool arguments
+                        args_raw = getattr(data, "arguments", None)
+                        tool_input_str = None
+                        if args_raw is not None:
+                            try:
+                                tool_input_str = json.dumps(args_raw, indent=2, default=str) if isinstance(args_raw, (dict, list)) else str(args_raw)
+                            except Exception:
+                                tool_input_str = str(args_raw)
+                        mcp_server = getattr(data, "mcp_server_name", None)
+                        detail = f"{tool_name}" + (f" (mcp:{mcp_server})" if mcp_server else "")
                         asyncio.create_task(
-                            _log(workflow, "tool_call", str(tool_name), task_exec)
+                            _log(workflow, "tool_call", detail, task_exec, tool_input=tool_input_str)
                         )
 
                     elif ev_type == "tool.execution_complete":
-                        tool_name = getattr(event.data, "tool_name", "unknown")
+                        data = event.data
+                        tool_name = getattr(data, "tool_name", "unknown")
+                        success = getattr(data, "success", None)
+                        # Capture tool result
+                        result_obj = getattr(data, "result", None)
+                        tool_output_str = None
+                        if result_obj is not None:
+                            detailed = getattr(result_obj, "detailed_content", None)
+                            content = getattr(result_obj, "content", None)
+                            tool_output_str = detailed or content
+                        # Include error if present
+                        error = getattr(data, "error", None) or getattr(data, "message", None)
+                        if error and not tool_output_str:
+                            tool_output_str = str(error)
+                        status_tag = "completed" if success is not False else "FAILED"
                         asyncio.create_task(
-                            _log(workflow, "tool_result", f"{tool_name} completed", task_exec)
+                            _log(workflow, "tool_result", f"{tool_name} {status_tag}", task_exec, tool_output=tool_output_str)
                         )
 
                     elif ev_type == "session.idle":
@@ -651,6 +722,16 @@ async def run_agent(
                 # Persist usage stats
                 workflow.usage = usage
 
+                # ── Record task-level Prometheus metrics ──
+                task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
+                final_status = workflow.status if workflow.status != WorkflowStatus.RUNNING else WorkflowStatus.COMPLETED
+                agent_task_duration_seconds.labels(
+                    model=workflow.model, status=final_status,
+                ).observe(task_duration)
+                tool_calls_per_task.labels(model=workflow.model).observe(tool_call_count)
+                if usage.total_cost > 0:
+                    cost_per_task_dollars.labels(model=workflow.model).observe(usage.total_cost)
+
                 # Check if max turns was hit
                 if tool_call_count > max_turns:
                     workflow.status = WorkflowStatus.MAX_TURNS_REACHED
@@ -695,5 +776,12 @@ async def run_agent(
             task_exec.finished_at = datetime.now(UTC)
             await task_exec.save()
         final_text = None
+    finally:
+        agent_tasks_active.dec()
+        agent_tasks_total.labels(
+            status=workflow.status,
+            model=workflow.model,
+            reasoning_effort=reasoning_effort or "default",
+        ).inc()
 
     return final_text

@@ -1,0 +1,447 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "API Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Request Rate",
+      "description": "HTTP requests per second",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(http_requests_total[5m])",
+          "legendFormat": "{{method}} {{handler}} {{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Request Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 10, "lineWidth": 2 },
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "red", "mode": "fixed" },
+          "custom": { "fillOpacity": 20, "lineWidth": 2 },
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{status=~\"5..\"}[5m])",
+          "legendFormat": "{{method}} {{handler}} {{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Agent Executions",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "title": "Tasks Running",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 6 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "copilot_hub_agent_tasks_active",
+          "legendFormat": "Active",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Task Completion Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 10, "x": 4, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "ops"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(copilot_hub_agent_tasks_total[5m])",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Task Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 10, "lineWidth": 2 },
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(copilot_hub_agent_task_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(copilot_hub_agent_task_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(copilot_hub_agent_task_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Token & Cost Tracking",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "title": "Tokens Consumed (Input + Output)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(copilot_hub_tokens_total{direction=\"input\"}[1h])",
+          "legendFormat": "Input ({{model}})",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(copilot_hub_tokens_total{direction=\"output\"}[1h])",
+          "legendFormat": "Output ({{model}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Cost Accumulated",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "custom": { "fillOpacity": 20, "lineWidth": 2 },
+          "unit": "currencyUSD"
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(copilot_hub_cost_dollars_total[1h])",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Premium Requests",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "purple", "mode": "fixed" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(copilot_hub_premium_requests_total[1h])",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "title": "Tool Calls",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "title": "Tool Call Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "ops"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(copilot_hub_tool_calls_total[5m])",
+          "legendFormat": "{{tool_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "title": "Tool Calls by Agent",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "normal"
+      },
+      "targets": [
+        {
+          "expr": "topk(15, increase(copilot_hub_tool_calls_total[24h]))",
+          "legendFormat": "{{tool_name}} ({{agent}})",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "title": "MCP Servers",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "title": "MCP Connection Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(copilot_hub_mcp_connections_total[5m])",
+          "legendFormat": "{{server}} ({{status}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "title": "Repo Sync Operations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(copilot_hub_repo_sync_total[5m])",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(copilot_hub_repo_sync_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95 duration",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "title": "System Resources",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 },
+      "collapsed": false
+    },
+    {
+      "id": 51,
+      "title": "Celery Queue Length",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 46 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "copilot_hub_celery_queue_length",
+          "legendFormat": "Queued",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "title": "Active SSE Connections",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 46 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "copilot_hub_sse_connections_active",
+          "legendFormat": "SSE",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 53,
+      "title": "HTTP In-Flight Requests",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "http_requests_in_progress",
+          "legendFormat": "{{method}} {{handler}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["copilot", "agent-hub"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Copilot Agent Hub — Overview",
+  "uid": "copilot-hub-overview",
+  "version": 1
+}
