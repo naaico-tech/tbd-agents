@@ -4,12 +4,29 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class OutputDestinationCreate(BaseModel):
+    notion_base_page_id: str | None = None
+    slack_channel_id: str | None = None
+    slack_user_id: str | None = None
+
+
+class UsageStatsResponse(BaseModel):
+    total_premium_requests: float = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_write_tokens: int = 0
+    total_cost: float = 0.0
+
+
 class WorkflowCreate(BaseModel):
     agent_id: str
     max_turns: int | None = None
     output_format: str = "json"  # json | markdown
     model: str | None = None
     skill_ids: list[str] = []
+    infinite_session: bool = True
+    output_destination: OutputDestinationCreate | None = None
 
 
 class PromptRequest(BaseModel):
@@ -37,6 +54,9 @@ class PromptResponse(BaseModel):
     max_turns: int
     response: str | None = None
     output_format: str
+    infinite_session: bool = True
+    usage: UsageStatsResponse | None = None
+    output_destination: OutputDestinationCreate | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse] = []
 
@@ -52,6 +72,9 @@ class WorkflowResponse(BaseModel):
     skill_ids: list[str]
     status: str
     output_format: str
+    infinite_session: bool = True
+    usage: UsageStatsResponse | None = None
+    output_destination: OutputDestinationCreate | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]
     created_at: datetime

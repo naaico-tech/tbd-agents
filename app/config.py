@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     github_token: str | None = None
     # Session timeout in seconds
     session_timeout: int = 300
+    # Notion integration token for MCP auto-injection
+    notion_token: str | None = None
+    # Slack bot token for MCP auto-injection
+    slack_bot_token: str | None = None
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

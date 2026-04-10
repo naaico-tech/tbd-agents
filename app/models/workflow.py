@@ -33,6 +33,21 @@ class Message(BaseModel):
     name: str | None = None
 
 
+class UsageStats(BaseModel):
+    total_premium_requests: float = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_write_tokens: int = 0
+    total_cost: float = 0.0
+
+
+class OutputDestination(BaseModel):
+    notion_base_page_id: str | None = None
+    slack_channel_id: str | None = None
+    slack_user_id: str | None = None
+
+
 class Workflow(Document):
     agent_id: str
     github_user: str
@@ -45,6 +60,9 @@ class Workflow(Document):
     logs: list[LogEntry] = Field(default_factory=list)
     status: WorkflowStatus = WorkflowStatus.ACTIVE
     output_format: OutputFormat = OutputFormat.JSON
+    usage: UsageStats | None = None
+    output_destination: OutputDestination | None = None
+    infinite_session: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

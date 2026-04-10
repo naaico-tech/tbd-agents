@@ -1,24 +1,45 @@
 import asyncio
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import extract_token, get_current_user
 from app.config import settings
+from app.core import event_bus
 from app.core.agent_engine import run_agent
 from app.models.agent import Agent
 from app.models.skill import Skill
-from app.models.workflow import OutputFormat, Workflow, WorkflowStatus
+from app.models.workflow import (
+    OutputDestination,
+    OutputFormat,
+    Workflow,
+    WorkflowStatus,
+)
 from app.schemas.workflow import (
     LogEntryResponse,
     MessageResponse,
+    OutputDestinationCreate,
     PromptRequest,
     PromptResponse,
+    UsageStatsResponse,
     WorkflowCreate,
     WorkflowResponse,
 )
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+
+def _usage_response(wf: Workflow) -> UsageStatsResponse | None:
+    if not wf.usage:
+        return None
+    return UsageStatsResponse(**wf.usage.model_dump())
+
+
+def _dest_response(wf: Workflow) -> OutputDestinationCreate | None:
+    if not wf.output_destination:
+        return None
+    return OutputDestinationCreate(**wf.output_destination.model_dump())
 
 
 def _to_response(wf: Workflow) -> WorkflowResponse:
@@ -33,6 +54,9 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         skill_ids=wf.skill_ids,
         status=wf.status,
         output_format=wf.output_format,
+        infinite_session=wf.infinite_session,
+        usage=_usage_response(wf),
+        output_destination=_dest_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
         created_at=wf.created_at,
@@ -52,6 +76,15 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
     if body.output_format not in ("json", "markdown"):
         raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
 
+    # Build output destination from request
+    output_dest = None
+    if body.output_destination:
+        output_dest = OutputDestination(
+            notion_base_page_id=body.output_destination.notion_base_page_id,
+            slack_channel_id=body.output_destination.slack_channel_id,
+            slack_user_id=body.output_destination.slack_user_id,
+        )
+
     wf = Workflow(
         agent_id=str(agent.id),
         github_user=user["login"],
@@ -59,6 +92,8 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         max_turns=max_turns,
         skill_ids=body.skill_ids,
         output_format=OutputFormat(body.output_format),
+        infinite_session=body.infinite_session,
+        output_destination=output_dest,
     )
     await wf.insert()
     return _to_response(wf)
@@ -98,8 +133,46 @@ async def send_prompt(
         max_turns=wf.max_turns,
         response=None,
         output_format=wf.output_format,
+        infinite_session=wf.infinite_session,
+        usage=_usage_response(wf),
+        output_destination=_dest_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
+    )
+
+
+@router.get("/{workflow_id}/stream")
+async def stream_workflow(workflow_id: str, request: Request):
+    """SSE endpoint — streams real-time log/message/usage/status events."""
+    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    queue = event_bus.subscribe(workflow_id)
+
+    async def event_generator():
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+        finally:
+            event_bus.unsubscribe(workflow_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

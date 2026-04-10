@@ -269,17 +269,24 @@
             <span id="task-status-badge" class="badge"></span>
           </div>
           <div class="card-body">
-            <div style="display:flex;gap:24px;font-size:14px;color:var(--muted)">
+            <div style="display:flex;gap:24px;font-size:14px;color:var(--muted);flex-wrap:wrap">
               <span>Turn: <strong id="task-turn" style="color:var(--text)">-</strong></span>
               <span>Model: <strong id="task-model" style="color:var(--text)">-</strong></span>
               <span>Format: <strong id="task-format" style="color:var(--text)">-</strong></span>
+              <span style="display:none">Dest: <strong id="task-destinations" style="color:var(--text)">-</strong></span>
+            </div>
+            <div id="task-usage" style="display:none;gap:24px;font-size:13px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap">
+              <span>Requests: <strong id="usage-requests" style="color:var(--purple)">-</strong></span>
+              <span>In: <strong id="usage-input" style="color:var(--accent)">-</strong></span>
+              <span>Out: <strong id="usage-output" style="color:var(--green)">-</strong></span>
+              <span>Cost: <strong id="usage-cost" style="color:var(--yellow)">-</strong></span>
             </div>
           </div>
         </div>
 
         <div class="card" style="margin-bottom:16px">
           <div class="card-header"><h2>Messages</h2></div>
-          <div class="card-body" id="task-messages"></div>
+          <div class="card-body" id="task-messages" style="max-height:500px;overflow-y:auto"></div>
         </div>
 
         <div class="card">
@@ -310,6 +317,8 @@
 const API = '';  // same origin
 let agents = [], mcps = [], skills = [], workflows = [];
 let pollTimer = null;
+let sseSource = null;         // current EventSource
+let streamingMsgEl = null;    // element receiving message_delta tokens
 
 // ── Helpers ──
 async function api(path, opts = {}) {
@@ -605,7 +614,7 @@ async function loadWorkflows() {
           <td>${agentName(w.agent_id)}</td>
           <td>${statusBadge(w.status)}</td>
           <td>${w.model}</td>
-          <td>${w.current_turn}/${w.max_turns}</td>
+          <td>${w.current_turn}/${w.max_turns}${w.infinite_session?' ∞':''}</td>
           <td>${fmtDate(w.created_at)}</td>
           <td><div class="btn-group">
             <button class="btn btn-sm" onclick="viewWorkflow('${w.id}')">View</button>
@@ -629,7 +638,43 @@ function openWorkflowModal() {
     <div class="form-group"><label>Max Turns</label><input id="f-wf-turns" type="number" value="5"></div>
     <div class="form-group"><label>Output Format</label>
       <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
-    <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>`;
+    <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>
+    <div class="form-group" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-infinite" checked> Infinite Session
+      </label>
+      <div class="hint">Auto-compacts context when the window fills up, allowing longer sessions.</div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Output Destinations <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — agent decides when to use)</span></label>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="f-wf-notion-on" onchange="document.getElementById('notion-fields').style.display=this.checked?'block':'none'"> Notion
+        </label>
+        <div id="notion-fields" style="display:none;margin-top:8px;margin-left:24px">
+          <div class="form-group"><label>Base Page ID</label>
+            <input id="f-wf-notion-page" placeholder="e.g. 1234abcd-5678-...">
+            <div class="hint">The Notion page under which new documents will be created.</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="f-wf-slack-on" onchange="document.getElementById('slack-fields').style.display=this.checked?'block':'none'"> Slack
+        </label>
+        <div id="slack-fields" style="display:none;margin-top:8px;margin-left:24px">
+          <div class="form-group"><label>Target Type</label>
+            <select id="f-wf-slack-type">
+              <option value="channel">Channel</option>
+              <option value="user">User (DM)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Channel or User ID</label>
+            <input id="f-wf-slack-id" placeholder="e.g. C01ABCDEF or U01ABCDEF">
+          </div>
+        </div>
+      </div>
+    </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
     <button class="btn btn-primary" onclick="saveWorkflow()">Create</button>`;
@@ -644,7 +689,24 @@ async function saveWorkflow() {
     max_turns: parseInt(document.getElementById('f-wf-turns').value) || 5,
     output_format: document.getElementById('f-wf-format').value,
     skill_ids: skillIds,
+    infinite_session: document.getElementById('f-wf-infinite').checked,
   };
+
+  // Output destinations
+  const notionOn = document.getElementById('f-wf-notion-on').checked;
+  const slackOn = document.getElementById('f-wf-slack-on').checked;
+  if (notionOn || slackOn) {
+    const dest = {};
+    if (notionOn) dest.notion_base_page_id = document.getElementById('f-wf-notion-page').value || null;
+    if (slackOn) {
+      const slackType = document.getElementById('f-wf-slack-type').value;
+      const slackId = document.getElementById('f-wf-slack-id').value || null;
+      if (slackType === 'channel') dest.slack_channel_id = slackId;
+      else dest.slack_user_id = slackId;
+    }
+    body.output_destination = dest;
+  }
+
   try {
     await api('/api/workflows', { method:'POST', body:JSON.stringify(body) });
     toast('Workflow created'); closeModal(); loadWorkflows();
@@ -660,7 +722,7 @@ function viewWorkflow(id) {
   document.getElementById('page-title').textContent = 'Run Task';
   loadTaskPage().then(() => {
     document.getElementById('task-workflow').value = id;
-    pollWorkflowResult(id);
+    fetchAndRenderWorkflow(id);
   });
 }
 
@@ -685,17 +747,149 @@ async function sendTask() {
   document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
   document.getElementById('task-result').style.display = 'block';
 
+  // Append user message immediately
+  appendMessage({ role: 'user', content: prompt });
+
   try {
     await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify({ prompt }) });
     toast('Task submitted');
-    pollWorkflowResult(wfId);
+    connectSSE(wfId);
   } catch(e) {
     toast(e.message, 'error');
-    document.getElementById('task-send').disabled = false;
-    document.getElementById('task-send').textContent = '▶ Send Task';
+    resetSendButton();
   }
 }
 
+// ── SSE Streaming ──
+function connectSSE(wfId) {
+  disconnectSSE();
+  sseSource = new EventSource(`/api/workflows/${wfId}/stream`);
+  streamingMsgEl = null;
+
+  sseSource.onmessage = (ev) => {
+    let parsed;
+    try { parsed = JSON.parse(ev.data); } catch { return; }
+    const { type, data } = parsed;
+
+    if (type === 'log') {
+      appendLog(data);
+    } else if (type === 'message') {
+      // Full message from the agent (role-based)
+      finishStreamingMsg();
+      appendMessage(data);
+    } else if (type === 'message_delta') {
+      // Streaming token — append to current assistant bubble
+      appendDelta(data.content || '');
+    } else if (type === 'usage') {
+      updateUsageStats(data);
+    } else if (type === 'status') {
+      updateStatusBadge(data.status);
+      if (data.current_turn !== undefined) {
+        document.getElementById('task-turn').textContent =
+          `${data.current_turn}/${data.max_turns || '-'}`;
+      }
+      // Terminal states — close SSE and do a final fetch for complete data
+      if (['completed','failed','max_turns_reached'].includes(data.status)) {
+        disconnectSSE();
+        resetSendButton();
+        fetchAndRenderWorkflow(wfId);
+      }
+    }
+  };
+
+  sseSource.onerror = () => {
+    // SSE dropped — fall back to polling
+    disconnectSSE();
+    pollWorkflowResult(wfId);
+  };
+}
+
+function disconnectSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  finishStreamingMsg();
+}
+
+function resetSendButton() {
+  document.getElementById('task-send').disabled = false;
+  document.getElementById('task-send').textContent = '▶ Send Task';
+}
+
+// ── Streaming message helpers ──
+function appendDelta(text) {
+  if (!text) return;
+  if (!streamingMsgEl) {
+    // Create a new assistant message bubble for streaming
+    streamingMsgEl = document.createElement('div');
+    streamingMsgEl.className = 'msg msg-assistant';
+    streamingMsgEl.innerHTML = '<div class="role-label">assistant <span class="spinner" style="margin-left:6px"></span></div>';
+    const contentSpan = document.createElement('span');
+    contentSpan.className = 'streaming-content';
+    streamingMsgEl.appendChild(contentSpan);
+    document.getElementById('task-messages').appendChild(streamingMsgEl);
+  }
+  const contentEl = streamingMsgEl.querySelector('.streaming-content');
+  contentEl.textContent += text;
+  // Auto-scroll
+  const msgContainer = document.getElementById('task-messages');
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+function finishStreamingMsg() {
+  if (streamingMsgEl) {
+    // Remove spinner
+    const spinner = streamingMsgEl.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    streamingMsgEl = null;
+  }
+}
+
+function appendMessage(m) {
+  const msgEl = document.getElementById('task-messages');
+  // Remove "No messages yet" empty state
+  const empty = msgEl.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const div = document.createElement('div');
+  div.className = `msg msg-${m.role}`;
+  div.innerHTML = `<div class="role-label">${esc(m.role)}${m.name?' · '+esc(m.name):''}</div>` +
+    (m.content ? esc(m.content) : '') +
+    (m.tool_calls ? '<pre style="margin-top:6px;font-size:12px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : '');
+  msgEl.appendChild(div);
+  msgEl.scrollTop = msgEl.scrollHeight;
+}
+
+function appendLog(l) {
+  const logEl = document.getElementById('task-logs');
+  // Remove "No logs" placeholder
+  const placeholder = logEl.querySelector('div[style]');
+  if (placeholder && placeholder.textContent.includes('No logs')) placeholder.remove();
+
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = `<span class="ts">${fmtDate(l.timestamp || new Date().toISOString())}</span>` +
+    `<span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateUsageStats(u) {
+  const el = document.getElementById('task-usage');
+  if (!el) return;
+  el.style.display = 'flex';
+  document.getElementById('usage-requests').textContent = u.total_premium_requests ?? '-';
+  document.getElementById('usage-input').textContent = (u.total_input_tokens ?? 0).toLocaleString();
+  document.getElementById('usage-output').textContent = (u.total_output_tokens ?? 0).toLocaleString();
+  document.getElementById('usage-cost').textContent = '$' + (u.total_cost ?? 0).toFixed(4);
+}
+
+function updateStatusBadge(status) {
+  const badge = document.getElementById('task-status-badge');
+  badge.className = 'badge badge-' +
+    ({active:'blue',running:'yellow',completed:'green',failed:'red',max_turns_reached:'purple'}[status]||'muted');
+  badge.textContent = status;
+}
+
+// ── Polling fallback ──
 async function pollWorkflowResult(wfId) {
   if (pollTimer) clearInterval(pollTimer);
   const update = async () => {
@@ -704,8 +898,7 @@ async function pollWorkflowResult(wfId) {
       renderTaskResult(w);
       if (w.status !== 'running') {
         clearInterval(pollTimer); pollTimer = null;
-        document.getElementById('task-send').disabled = false;
-        document.getElementById('task-send').textContent = '▶ Send Task';
+        resetSendButton();
       }
     } catch(e) { clearInterval(pollTimer); toast(e.message, 'error'); }
   };
@@ -715,20 +908,41 @@ async function pollWorkflowResult(wfId) {
   }
 }
 
+async function fetchAndRenderWorkflow(wfId) {
+  try {
+    const w = await api(`/api/workflows/${wfId}`);
+    renderTaskResult(w);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 function renderTaskResult(w) {
   document.getElementById('task-result').style.display = 'block';
-  document.getElementById('task-status-badge').className = 'badge badge-' +
-    ({active:'blue',running:'yellow',completed:'green',failed:'red',max_turns_reached:'purple'}[w.status]||'muted');
-  document.getElementById('task-status-badge').textContent = w.status;
-  document.getElementById('task-turn').textContent = `${w.current_turn}/${w.max_turns}`;
+  updateStatusBadge(w.status);
+  document.getElementById('task-turn').textContent = `${w.current_turn}/${w.max_turns}${w.infinite_session?' ∞':''}`;
   document.getElementById('task-model').textContent = w.model;
   document.getElementById('task-format').textContent = w.output_format;
+
+  // Output destinations
+  const destEl = document.getElementById('task-destinations');
+  if (w.output_destination) {
+    const parts = [];
+    if (w.output_destination.notion_base_page_id) parts.push('Notion: ' + w.output_destination.notion_base_page_id.slice(0,8) + '…');
+    if (w.output_destination.slack_channel_id) parts.push('Slack #' + w.output_destination.slack_channel_id);
+    if (w.output_destination.slack_user_id) parts.push('Slack @' + w.output_destination.slack_user_id);
+    destEl.textContent = parts.join(' · ') || 'None';
+    destEl.parentElement.style.display = parts.length ? '' : 'none';
+  } else {
+    destEl.parentElement.style.display = 'none';
+  }
+
+  // Usage stats
+  if (w.usage) updateUsageStats(w.usage);
 
   // Messages
   const msgEl = document.getElementById('task-messages');
   msgEl.innerHTML = (w.messages||[]).map(m => `
     <div class="msg msg-${m.role}">
-      <div class="role-label">${m.role}${m.name?' · '+esc(m.name):''}</div>
+      <div class="role-label">${esc(m.role)}${m.name?' · '+esc(m.name):''}</div>
       ${m.content ? esc(m.content) : ''}
       ${m.tool_calls ? '<pre style="margin-top:6px;font-size:12px">'+esc(JSON.stringify(m.tool_calls,null,2))+'</pre>' : ''}
     </div>`).join('') || '<div class="empty-state">No messages yet</div>';
