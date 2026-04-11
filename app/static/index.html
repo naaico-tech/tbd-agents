@@ -81,6 +81,8 @@
   .badge-red { background: #f8514922; color: var(--red); }
   .badge-purple { background: #bc8cff22; color: var(--purple); }
   .badge-muted { background: var(--surface2); color: var(--muted); }
+  .badge-gray { background: var(--surface2); color: var(--muted); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; background: var(--surface2); color: var(--muted); margin-right: 3px; }
 
   /* Modal */
   .modal-overlay { position: fixed; inset: 0; background: #00000088; display: none;
@@ -209,6 +211,7 @@
     <a data-page="agents"><span class="icon">🤖</span> Agents</a>
     <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
+    <a data-page="guardrails"><span class="icon">🛡️</span> Guardrails</a>
     <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
     <a data-page="tasks"><span class="icon">📋</span> Task Executions</a>
@@ -279,6 +282,18 @@
       </div>
     </div>
 
+    <!-- Guardrails Page -->
+    <div id="page-guardrails" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openGuardrailModal()">+ New Guardrail</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Type</th><th>Tags</th><th>Status</th><th>Created</th><th></th>
+        </tr></thead><tbody id="guardrails-body"></tbody></table></div>
+      </div>
+    </div>
+
     <!-- Tokens Page -->
     <div id="page-tokens" class="page">
       <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
@@ -325,9 +340,14 @@
             <label>Select Workflow</label>
             <select id="task-workflow"></select>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="task-prompt-group">
             <label>Prompt</label>
             <textarea id="task-prompt" rows="4" placeholder="Describe the task you want the agent to perform..."></textarea>
+          </div>
+          <div class="form-group" id="task-request-group" style="display:none">
+            <label>Request Object (JSON) <span class="badge badge-purple" style="vertical-align:middle;margin-left:4px">request guardrail</span></label>
+            <textarea id="task-request" rows="6" placeholder='{"key": "value"}'></textarea>
+            <div class="hint">This workflow has request guardrails — provide a JSON object to validate against the schema.</div>
           </div>
           <div class="form-group" id="task-reasoning-group" style="display:none">
             <label>Thinking Level <span style="font-weight:400;color:var(--muted);font-size:12px">(override workflow default)</span></label>
@@ -403,7 +423,7 @@
 
 <script>
 const API = '';  // same origin
-let agents = [], mcps = [], skills = [], workflows = [], tokens = [];
+let agents = [], mcps = [], skills = [], guardrails = [], workflows = [], tokens = [];
 let pollTimer = null;
 let sseSource = null;         // current EventSource
 let streamingMsgEl = null;    // element receiving message_delta tokens
@@ -453,7 +473,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', tokens:'Tokens', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', guardrails:'Guardrails', tokens:'Tokens', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -463,6 +483,7 @@ function loadPage(page) {
   else if (page === 'agents') loadAgents();
   else if (page === 'mcps') loadMcps();
   else if (page === 'skills') loadSkills();
+  else if (page === 'guardrails') loadGuardrails();
   else if (page === 'tokens') loadTokens();
   else if (page === 'workflows') loadWorkflows();
   else if (page === 'tasks') loadTaskExecutions();
@@ -865,13 +886,140 @@ async function deleteSkill(id) {
   catch(e) { toast(e.message, 'error'); }
 }
 
+// ── Guardrails ──
+async function loadGuardrails() {
+  try {
+    guardrails = await api('/api/guardrails');
+    document.getElementById('guardrails-body').innerHTML = guardrails.length
+      ? guardrails.map(g => `<tr>
+          <td><strong>${esc(g.name)}</strong>${g.description ? `<div style="font-size:12px;color:var(--muted)">${esc(g.description)}</div>` : ''}</td>
+          <td><span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}">${g.guardrail_type}</span></td>
+          <td>${g.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(' ') || '<span style="color:var(--muted)">—</span>'}</td>
+          <td><span class="badge ${g.enabled ? 'badge-green' : 'badge-gray'}">${g.enabled ? 'Enabled' : 'Disabled'}</span></td>
+          <td>${fmtDate(g.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openGuardrailModal('${g.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteGuardrail('${g.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No guardrails. Create one to add validation rules to workflows.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openGuardrailModal(id) {
+  const g = id ? guardrails.find(x => x.id === id) : null;
+  const isPrompt = !g || g.guardrail_type === 'prompt';
+  document.getElementById('modal-title').textContent = g ? 'Edit Guardrail' : 'Create Guardrail';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-gr-name" value="${esc(g?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-gr-desc" value="${esc(g?.description||'')}"></div>
+    <div class="form-group"><label>Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — workflows use these to select guardrails)</span></label>
+      <input id="f-gr-tags" value="${esc(g?.tags?.join(', ')||'')}">
+      <div class="hint">e.g. <code>safety, pii, production</code></div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-gr-enabled" ${!g || g.enabled ? 'checked' : ''}> Enabled
+      </label>
+    </div>
+    ${g ? '' : `<div class="form-group"><label>Type</label>
+      <select id="f-gr-type" onchange="toggleGuardrailType()">
+        <option value="prompt">Prompt — validate the prompt text</option>
+        <option value="request">Request — validate a structured request object (JSON Schema)</option>
+      </select>
+      <div class="hint">Cannot be changed after creation.</div>
+    </div>`}
+    <div id="f-gr-prompt-section" style="${(!g || g.guardrail_type === 'prompt') ? '' : 'display:none'}">
+      <div style="padding-top:16px;border-top:1px solid var(--border);margin-top:8px">
+        <label style="font-size:14px;font-weight:600;display:block;margin-bottom:12px">Prompt Rules</label>
+        <div class="form-group"><label>Min Length <span style="font-weight:400;font-size:11px;color:var(--muted)">(characters, optional)</span></label>
+          <input id="f-gr-min-len" type="number" min="0" value="${esc(String(g?.prompt_config?.min_length ?? ''))}">
+        </div>
+        <div class="form-group"><label>Max Length <span style="font-weight:400;font-size:11px;color:var(--muted)">(characters, optional)</span></label>
+          <input id="f-gr-max-len" type="number" min="0" value="${esc(String(g?.prompt_config?.max_length ?? ''))}">
+        </div>
+        <div class="form-group"><label>Forbidden Patterns <span style="font-weight:400;font-size:11px;color:var(--muted)">(regex, one per line)</span></label>
+          <textarea id="f-gr-forbidden" rows="4" placeholder="e.g.&#10;ignore.*(previous|all).*(instructions|rules)&#10;jailbreak">${esc((g?.prompt_config?.forbidden_patterns||[]).join('\n'))}</textarea>
+          <div class="hint">Prompts matching any of these patterns will be rejected (case-insensitive).</div>
+        </div>
+        <div class="form-group"><label>Required Patterns <span style="font-weight:400;font-size:11px;color:var(--muted)">(regex, one per line)</span></label>
+          <textarea id="f-gr-required" rows="3" placeholder="e.g.&#10;^(review|analyse|summarise)">${esc((g?.prompt_config?.required_patterns||[]).join('\n'))}</textarea>
+          <div class="hint">All patterns must match the prompt or the request will be rejected.</div>
+        </div>
+      </div>
+    </div>
+    <div id="f-gr-request-section" style="${g && g.guardrail_type === 'request' ? '' : 'display:none'}">
+      <div style="padding-top:16px;border-top:1px solid var(--border);margin-top:8px">
+        <label style="font-size:14px;font-weight:600;display:block;margin-bottom:12px">Request Schema</label>
+        <div class="form-group">
+          <label>JSON Schema (draft-07) <span style="font-weight:400;font-size:11px;color:var(--muted)">(required)</span></label>
+          <textarea id="f-gr-schema" rows="10" placeholder='{\n  "type": "object",\n  "required": ["task", "priority"],\n  "properties": {\n    "task": { "type": "string" },\n    "priority": { "type": "string", "enum": ["low", "medium", "high"] }\n  }\n}'>${esc(g?.request_config?.json_schema ? JSON.stringify(g.request_config.json_schema, null, 2) : '')}</textarea>
+          <div class="hint">The incoming <code>request</code> object will be validated against this schema before the workflow runs.</div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveGuardrail('${id||''}')">${g ? 'Update' : 'Create'}</button>`;
+  showModal();
+}
+
+function toggleGuardrailType() {
+  const t = document.getElementById('f-gr-type').value;
+  document.getElementById('f-gr-prompt-section').style.display = t === 'prompt' ? '' : 'none';
+  document.getElementById('f-gr-request-section').style.display = t === 'request' ? '' : 'none';
+}
+
+async function saveGuardrail(id) {
+  const g = id ? guardrails.find(x => x.id === id) : null;
+  const type = g ? g.guardrail_type : document.getElementById('f-gr-type').value;
+
+  const body = {
+    name: document.getElementById('f-gr-name').value.trim(),
+    description: document.getElementById('f-gr-desc').value.trim(),
+    tags: document.getElementById('f-gr-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+    enabled: document.getElementById('f-gr-enabled').checked,
+  };
+  if (!id) body.guardrail_type = type;
+
+  if (type === 'prompt') {
+    const minLen = document.getElementById('f-gr-min-len').value;
+    const maxLen = document.getElementById('f-gr-max-len').value;
+    const forbidden = document.getElementById('f-gr-forbidden').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    const required = document.getElementById('f-gr-required').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    body.prompt_config = {
+      min_length: minLen ? parseInt(minLen) : null,
+      max_length: maxLen ? parseInt(maxLen) : null,
+      forbidden_patterns: forbidden,
+      required_patterns: required,
+    };
+  } else {
+    const raw = document.getElementById('f-gr-schema').value.trim();
+    if (!raw) return toast('JSON Schema is required for request guardrails', 'error');
+    try { body.request_config = { json_schema: JSON.parse(raw) }; }
+    catch { return toast('Invalid JSON Schema — check syntax', 'error'); }
+  }
+
+  try {
+    if (id) await api(`/api/guardrails/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/guardrails', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Guardrail updated' : 'Guardrail created'); closeModal(); loadGuardrails();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteGuardrail(id) {
+  if (!confirm('Delete this guardrail?')) return;
+  try { await api(`/api/guardrails/${id}`, { method:'DELETE' }); toast('Guardrail deleted'); loadGuardrails(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
 // ── Workflows ──
 async function loadWorkflows() {
   try {
-    [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
+    [workflows, agents, guardrails] = await Promise.all([api('/api/workflows'), api('/api/agents'), api('/api/guardrails')]);
     document.getElementById('workflows-body').innerHTML = workflows.length
       ? workflows.map(w => `<tr>
-          <td><strong>${esc(w.title || w.id.slice(0,8))}</strong></td>
+          <td><strong>${esc(w.title || w.id.slice(0,8))}</strong>${(w.guardrail_ids?.length||w.guardrail_tags?.length) ? ' <span title="Has guardrails" style="color:var(--muted);font-size:11px">🛡️</span>' : ''}</td>
           <td>${agentName(w.agent_id)}</td>
           <td>${statusBadge(w.status)}</td>
           <td>${w.model}</td>
@@ -893,6 +1041,12 @@ function openWorkflowModal() {
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" value="${s.id}"> ${esc(s.name)}
     </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No skills available</span>';
+  const guardrailOpts = guardrails.map(g =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" class="gr-id-check" value="${g.id}">
+      ${esc(g.name)} <span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}" style="margin-left:4px">${g.guardrail_type}</span>
+      ${g.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No guardrails available</span>';
 
   document.getElementById('modal-title').textContent = 'Create Workflow';
   document.getElementById('modal-body').innerHTML = `
@@ -913,6 +1067,14 @@ function openWorkflowModal() {
     <div class="form-group"><label>Output Format</label>
       <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
     <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Guardrails <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — validate inputs before running)</span></label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-guardrails">${guardrailOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching guardrails)</span></label>
+        <input id="f-wf-guardrail-tags" placeholder="e.g. safety, pii">
+        <div class="hint">Any guardrail that has at least one of these tags will be applied.</div>
+      </div>
+    </div>
     <div class="form-group" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="f-wf-infinite" checked> Infinite Session
@@ -1016,6 +1178,9 @@ function updateModelInfo(models, modelId, infoEl) {
 
 async function saveWorkflow() {
   const skillIds = [...document.querySelectorAll('#f-wf-skills input:checked')].map(c => c.value);
+  const guardrailIds = [...document.querySelectorAll('#f-wf-guardrails .gr-id-check:checked')].map(c => c.value);
+  const guardrailTags = (document.getElementById('f-wf-guardrail-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
   const body = {
     title: document.getElementById('f-wf-title').value || null,
     agent_id: document.getElementById('f-wf-agent').value,
@@ -1023,6 +1188,8 @@ async function saveWorkflow() {
     max_turns: parseInt(document.getElementById('f-wf-turns').value) || 5,
     output_format: document.getElementById('f-wf-format').value,
     skill_ids: skillIds,
+    guardrail_ids: guardrailIds,
+    guardrail_tags: guardrailTags,
     infinite_session: document.getElementById('f-wf-infinite').checked,
     reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
     repo_url: document.getElementById('f-wf-repo-url').value || null,
@@ -1054,6 +1221,12 @@ async function saveWorkflow() {
 function openEditWorkflowModal(id) {
   const w = workflows.find(x => x.id === id);
   if (!w) return;
+  const guardrailEditOpts = guardrails.map(g =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" class="gr-id-check" value="${g.id}" ${(w.guardrail_ids||[]).includes(g.id) ? 'checked' : ''}>
+      ${esc(g.name)} <span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}" style="margin-left:4px">${g.guardrail_type}</span>
+      ${g.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No guardrails available</span>';
   document.getElementById('modal-title').textContent = 'Edit Workflow';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group"><label>Title</label><input id="f-wf-edit-title" value="${esc(w.title||'')}"></div>
@@ -1077,6 +1250,14 @@ function openEditWorkflowModal(id) {
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="f-wf-edit-infinite" ${w.infinite_session?'checked':''}> Infinite Session
       </label>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Guardrails</label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-guardrails">${guardrailEditOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated)</span></label>
+        <input id="f-wf-edit-guardrail-tags" value="${esc((w.guardrail_tags||[]).join(', '))}">
+        <div class="hint">Any guardrail that has at least one of these tags will be applied.</div>
+      </div>
     </div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Repository</label>
@@ -1121,6 +1302,9 @@ function openEditWorkflowModal(id) {
 }
 
 async function updateWorkflow(id) {
+  const guardrailIds = [...document.querySelectorAll('#f-wf-edit-guardrails .gr-id-check:checked')].map(c => c.value);
+  const guardrailTags = (document.getElementById('f-wf-edit-guardrail-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
   const body = {
     title: document.getElementById('f-wf-edit-title').value || null,
     model: document.getElementById('f-wf-edit-model').value || undefined,
@@ -1128,6 +1312,8 @@ async function updateWorkflow(id) {
     output_format: document.getElementById('f-wf-edit-format').value,
     infinite_session: document.getElementById('f-wf-edit-infinite').checked,
     reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
+    guardrail_ids: guardrailIds,
+    guardrail_tags: guardrailTags,
     repo_url: document.getElementById('f-wf-edit-repo-url').value || null,
     repo_branch: document.getElementById('f-wf-edit-repo-branch').value || null,
     repo_token_name: document.getElementById('f-wf-edit-repo-token').value || null,
@@ -1167,9 +1353,20 @@ async function loadTaskPage() {
     sel.innerHTML = workflows.map(w =>
       `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)} (${w.status})</option>`
     ).join('') || '<option value="">No workflows — create one first</option>';
-    sel.addEventListener('change', () => updateTaskReasoningDropdown());
+    sel.addEventListener('change', () => { updateTaskReasoningDropdown(); updateTaskGuardrailUI(); });
     updateTaskReasoningDropdown();
+    updateTaskGuardrailUI();
   } catch(e) { toast(e.message, 'error'); }
+}
+
+function updateTaskGuardrailUI() {
+  const wfId = document.getElementById('task-workflow').value;
+  const w = workflows.find(x => x.id === wfId);
+  const hasGuardrails = w && ((w.guardrail_ids && w.guardrail_ids.length > 0) || (w.guardrail_tags && w.guardrail_tags.length > 0));
+  const reqGroup = document.getElementById('task-request-group');
+  if (reqGroup) reqGroup.style.display = hasGuardrails ? '' : 'none';
+  const promptGroup = document.getElementById('task-prompt-group');
+  if (promptGroup) promptGroup.style.display = '';
 }
 
 async function updateTaskReasoningDropdown() {
@@ -1194,8 +1391,15 @@ async function updateTaskReasoningDropdown() {
 async function sendTask() {
   const wfId = document.getElementById('task-workflow').value;
   const prompt = document.getElementById('task-prompt').value.trim();
+  const requestRaw = document.getElementById('task-request')?.value?.trim();
   if (!wfId) return toast('Select a workflow', 'error');
-  if (!prompt) return toast('Enter a prompt', 'error');
+  if (!prompt && !requestRaw) return toast('Enter a prompt or request object', 'error');
+
+  let requestObj = undefined;
+  if (requestRaw) {
+    try { requestObj = JSON.parse(requestRaw); }
+    catch { return toast('Request Object must be valid JSON', 'error'); }
+  }
 
   document.getElementById('task-send').disabled = true;
   document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
@@ -1204,10 +1408,14 @@ async function sendTask() {
   document.getElementById('task-progress-panel').style.display = 'none';
 
   // Append user message immediately
-  appendMessage({ role: 'user', content: prompt });
+  appendMessage({ role: 'user', content: prompt || JSON.stringify(requestObj) });
+
+  const payload = { reasoning_effort: document.getElementById('task-reasoning')?.value || null };
+  if (prompt) payload.prompt = prompt;
+  if (requestObj !== undefined) payload.request = requestObj;
 
   try {
-    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify({ prompt, reasoning_effort: document.getElementById('task-reasoning')?.value || null }) });
+    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify(payload) });
     toast('Task submitted');
     connectSSE(wfId);
   } catch(e) {
@@ -1457,6 +1665,9 @@ async function fetchAndRenderWorkflow(wfId) {
   try {
     const w = await api(`/api/workflows/${wfId}`);
     renderTaskResult(w);
+    // Show request input if the workflow has request guardrails configured
+    const hasRequestGuardrails = (w.guardrail_ids && w.guardrail_ids.length > 0) || (w.guardrail_tags && w.guardrail_tags.length > 0);
+    document.getElementById('task-request-group').style.display = hasRequestGuardrails ? '' : 'none';
     // Fetch latest task execution for progress data
     const tasks = await api(`/api/tasks/workflow/${wfId}`);
     if (tasks.length) {
