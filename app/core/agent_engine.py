@@ -337,12 +337,13 @@ def _build_provider_request(
     provider_type = provider.provider_type
 
     # Resolve base URL: explicit override > built-in default
-    base_url = (provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type, "")).rstrip("/")
-    if not base_url:
+    raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type)
+    if raw_url is None:
         raise ValueError(
             f"Provider '{provider.name}' has no base_url configured and none is available "
             f"for provider_type '{provider_type}'."
         )
+    base_url = raw_url.rstrip("/")
 
     # Build headers based on provider type
     if provider_type == ProviderType.ANTHROPIC:
@@ -549,7 +550,10 @@ async def run_agent(
         try:
             from beanie import PydanticObjectId as _ObjId
             provider = await Provider.get(_ObjId(agent.provider_id))
-        except Exception:
+        except Exception as _exc:
+            logger.warning(
+                "Failed to resolve provider_id '%s': %s", agent.provider_id, _exc
+            )
             provider = None
         if provider:
             resolved_key = await token_manager.get_token_value(provider.api_key_token_name)
