@@ -11,6 +11,7 @@ class Agent(Document):
     model: str | None = None  # None → use workflow/global default
     mcp_server_ids: list[str] = Field(default_factory=list)
     tool_definitions: list[dict] = Field(default_factory=list)
+    provider_id: str | None = None  # Optional BYOK provider reference
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
