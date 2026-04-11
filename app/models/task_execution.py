@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from beanie import Document
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.models.workflow import LogEntry, Message, UsageStats
 
@@ -16,6 +16,24 @@ class TaskStatus(StrEnum):
     MAX_TURNS_REACHED = "max_turns_reached"
 
 
+class TodoItemStatus(StrEnum):
+    NOT_STARTED = "not-started"
+    IN_PROGRESS = "in-progress"
+    COMPLETED = "completed"
+
+
+class TodoItem(BaseModel):
+    id: int
+    title: str
+    status: TodoItemStatus = TodoItemStatus.NOT_STARTED
+
+
+class TaskProgress(BaseModel):
+    todos: list[TodoItem] = Field(default_factory=list)
+    current_step: int | None = None  # id of the in-progress item
+    percent_complete: float = 0.0  # 0.0 – 1.0
+
+
 class TaskExecution(Document):
     workflow_id: str
     prompt: str
@@ -26,6 +44,7 @@ class TaskExecution(Document):
     reasoning_effort: str | None = None
     tool_calls: int = 0
     response: str | None = None
+    progress: TaskProgress | None = None
     logs: list[LogEntry] = Field(default_factory=list)
     messages: list[Message] = Field(default_factory=list)
     usage: UsageStats | None = None

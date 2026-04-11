@@ -169,6 +169,20 @@
   .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
   .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
 
+  /* Progress panel */
+  .progress-panel { margin-bottom: 16px; }
+  .progress-bar-track { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; margin: 10px 0 12px; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s ease; }
+  .todo-list { list-style: none; padding: 0; }
+  .todo-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: 4px; }
+  .todo-item:hover { background: var(--surface2); }
+  .todo-icon { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; }
+  .todo-title { flex: 1; }
+  .todo-item.completed .todo-title { color: var(--muted); text-decoration: line-through; }
+  .todo-item.in-progress .todo-title { color: var(--accent); font-weight: 500; }
+  .todo-item.not-started .todo-title { color: var(--text); }
+  .progress-percent { font-size: 12px; color: var(--muted); font-weight: 600; }
+
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border);
     border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -325,6 +339,18 @@
       </div>
 
       <div id="task-result" style="display:none">
+        <!-- Progress Panel -->
+        <div id="task-progress-panel" class="card progress-panel" style="display:none;margin-bottom:16px">
+          <div class="card-header">
+            <h2>Progress</h2>
+            <span id="progress-percent" class="progress-percent">0%</span>
+          </div>
+          <div class="card-body">
+            <div class="progress-bar-track"><div id="progress-bar" class="progress-bar-fill" style="width:0%"></div></div>
+            <ul id="progress-todos" class="todo-list"></ul>
+          </div>
+        </div>
+
         <div class="card" style="margin-bottom:16px">
           <div class="card-header">
             <h2>Status</h2>
@@ -1175,6 +1201,7 @@ async function sendTask() {
   document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
   document.getElementById('task-halt').style.display = 'inline-block';
   document.getElementById('task-result').style.display = 'block';
+  document.getElementById('task-progress-panel').style.display = 'none';
 
   // Append user message immediately
   appendMessage({ role: 'user', content: prompt });
@@ -1220,6 +1247,8 @@ function connectSSE(wfId) {
     } else if (type === 'message_delta') {
       // Streaming token — append to current assistant bubble
       appendDelta(data.content || '');
+    } else if (type === 'progress') {
+      renderProgress(data);
     } else if (type === 'usage') {
       updateUsageStats(data);
     } else if (type === 'status') {
@@ -1384,6 +1413,27 @@ function updateStatusBadge(status) {
   badge.textContent = status;
 }
 
+// ── Progress rendering ──
+function renderProgress(data) {
+  const panel = document.getElementById('task-progress-panel');
+  const todosEl = document.getElementById('progress-todos');
+  const barEl = document.getElementById('progress-bar');
+  const pctEl = document.getElementById('progress-percent');
+  if (!data || !data.todos || !data.todos.length) return;
+  panel.style.display = '';
+  const pct = Math.round((data.percent_complete || 0) * 100);
+  pctEl.textContent = pct + '%';
+  barEl.style.width = pct + '%';
+  const STATUS_ICON = {'not-started':'○','in-progress':'◉','completed':'✓'};
+  todosEl.innerHTML = data.todos.map(t => {
+    const s = t.status || 'not-started';
+    return `<li class="todo-item ${s}">
+      <span class="todo-icon">${STATUS_ICON[s]||'○'}</span>
+      <span class="todo-title">${esc(t.title)}</span>
+    </li>`;
+  }).join('');
+}
+
 // ── Polling fallback ──
 async function pollWorkflowResult(wfId) {
   if (pollTimer) clearInterval(pollTimer);
@@ -1407,6 +1457,12 @@ async function fetchAndRenderWorkflow(wfId) {
   try {
     const w = await api(`/api/workflows/${wfId}`);
     renderTaskResult(w);
+    // Fetch latest task execution for progress data
+    const tasks = await api(`/api/tasks/workflow/${wfId}`);
+    if (tasks.length) {
+      const latestTask = await api(`/api/tasks/${tasks[0].id}`);
+      if (latestTask.progress) renderProgress(latestTask.progress);
+    }
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -1560,6 +1616,20 @@ async function viewTaskExecution(id) {
         <span>In: <strong style="color:var(--accent)">${t.usage.total_input_tokens.toLocaleString()}</strong></span>
         <span>Out: <strong style="color:var(--green)">${t.usage.total_output_tokens.toLocaleString()}</strong></span>
         <span>Cost: <strong style="color:var(--yellow)">$${t.usage.total_cost.toFixed(4)}</strong></span>
+      </div>` : ''}
+      ${t.progress && t.progress.todos.length ? `<div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Progress (${Math.round((t.progress.percent_complete||0)*100)}%)</div>
+        <div style="height:4px;background:var(--surface2);border-radius:2px;margin-bottom:8px;overflow:hidden">
+          <div style="height:100%;background:var(--accent);width:${Math.round((t.progress.percent_complete||0)*100)}%;border-radius:2px"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${t.progress.todos.map(td => {
+            const icon = td.status==='completed'?'✓':td.status==='in-progress'?'◉':'○';
+            const color = td.status==='completed'?'var(--muted)':td.status==='in-progress'?'var(--accent)':'var(--text)';
+            const strike = td.status==='completed'?'text-decoration:line-through;':'';
+            return `<div style="display:flex;align-items:center;gap:6px;font-size:13px"><span style="color:${color}">${icon}</span><span style="color:${color};${strike}">${esc(td.title)}</span></div>`;
+          }).join('')}
+        </div>
       </div>` : ''}
       <div style="margin-bottom:12px">
         <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Prompt</div>

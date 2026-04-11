@@ -5,6 +5,18 @@ from pydantic import BaseModel
 from app.schemas.workflow import LogEntryResponse, MessageResponse, UsageStatsResponse
 
 
+class TodoItemResponse(BaseModel):
+    id: int
+    title: str
+    status: str  # "not-started" | "in-progress" | "completed"
+
+
+class TaskProgressResponse(BaseModel):
+    todos: list[TodoItemResponse] = []
+    current_step: int | None = None
+    percent_complete: float = 0.0
+
+
 class TaskExecutionResponse(BaseModel):
     id: str
     workflow_id: str
@@ -18,6 +30,7 @@ class TaskExecutionResponse(BaseModel):
     reasoning_effort: str | None = None
     tool_calls: int = 0
     response: str | None = None
+    progress: TaskProgressResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse] = []
     usage: UsageStatsResponse | None = None

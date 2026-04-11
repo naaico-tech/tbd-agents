@@ -25,7 +25,7 @@ from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
 from app.models.mcp_server import McpServer
 from app.models.skill import Skill
-from app.models.task_execution import TaskExecution, TaskStatus
+from app.models.task_execution import TaskExecution, TaskProgress, TaskStatus, TodoItem, TodoItemStatus
 from app.models.workflow import (
     LogEntry,
     Message,
@@ -91,6 +91,61 @@ async def _publish_status(workflow: Workflow) -> None:
         str(workflow.id),
         "status",
         {"status": workflow.status, "current_turn": workflow.current_turn},
+    )
+
+
+def _parse_todo_list(args: dict | list | str) -> TaskProgress | None:
+    """Parse a manage_todo_list tool call into a TaskProgress object."""
+    try:
+        if isinstance(args, str):
+            args = json.loads(args)
+        todo_list = args.get("todoList") if isinstance(args, dict) else None
+        if not todo_list or not isinstance(todo_list, list):
+            return None
+        todos: list[TodoItem] = []
+        current_step: int | None = None
+        for item in todo_list:
+            status_str = item.get("status", "not-started")
+            try:
+                status = TodoItemStatus(status_str)
+            except ValueError:
+                status = TodoItemStatus.NOT_STARTED
+            todo = TodoItem(
+                id=int(item.get("id", 0)),
+                title=str(item.get("title", "")),
+                status=status,
+            )
+            todos.append(todo)
+            if status == TodoItemStatus.IN_PROGRESS:
+                current_step = todo.id
+        completed = sum(1 for t in todos if t.status == TodoItemStatus.COMPLETED)
+        percent = completed / len(todos) if todos else 0.0
+        return TaskProgress(
+            todos=todos,
+            current_step=current_step,
+            percent_complete=round(percent, 2),
+        )
+    except Exception:
+        return None
+
+
+async def _update_progress(
+    workflow: Workflow,
+    task_exec: TaskExecution | None,
+    progress: TaskProgress,
+) -> None:
+    """Persist progress to the task execution and publish to SSE."""
+    if task_exec:
+        task_exec.progress = progress
+        await task_exec.save()
+    await event_bus.publish(
+        str(workflow.id),
+        "progress",
+        {
+            "todos": [t.model_dump() for t in progress.todos],
+            "current_step": progress.current_step,
+            "percent_complete": progress.percent_complete,
+        },
     )
 
 
@@ -585,6 +640,13 @@ async def run_agent(
                                 tool_input_str = json.dumps(args_raw, indent=2, default=str) if isinstance(args_raw, (dict, list)) else str(args_raw)
                             except Exception:
                                 tool_input_str = str(args_raw)
+                        # Parse TODO progress from manage_todo_list calls
+                        if str(tool_name) == "manage_todo_list" and args_raw is not None:
+                            progress = _parse_todo_list(args_raw)
+                            if progress:
+                                asyncio.create_task(
+                                    _update_progress(workflow, task_exec, progress)
+                                )
                         mcp_server = getattr(data, "mcp_server_name", None)
                         detail = f"{tool_name}" + (f" (mcp:{mcp_server})" if mcp_server else "")
                         asyncio.create_task(

@@ -5,7 +5,12 @@ from app.api.deps import get_current_user
 from app.models.agent import Agent
 from app.models.task_execution import TaskExecution
 from app.models.workflow import Workflow
-from app.schemas.task_execution import TaskExecutionResponse, TaskExecutionSummary
+from app.schemas.task_execution import (
+    TaskExecutionResponse,
+    TaskExecutionSummary,
+    TaskProgressResponse,
+    TodoItemResponse,
+)
 from app.schemas.workflow import LogEntryResponse, MessageResponse, UsageStatsResponse
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -62,6 +67,16 @@ async def _to_summary(te: TaskExecution) -> TaskExecutionSummary:
     )
 
 
+def _progress_response(te: TaskExecution) -> TaskProgressResponse | None:
+    if not te.progress:
+        return None
+    return TaskProgressResponse(
+        todos=[TodoItemResponse(id=t.id, title=t.title, status=t.status) for t in te.progress.todos],
+        current_step=te.progress.current_step,
+        percent_complete=te.progress.percent_complete,
+    )
+
+
 async def _to_response(te: TaskExecution) -> TaskExecutionResponse:
     wf = await Workflow.get(PydanticObjectId(te.workflow_id))
     workflow_title = wf.title if wf else None
@@ -82,6 +97,7 @@ async def _to_response(te: TaskExecution) -> TaskExecutionResponse:
         reasoning_effort=te.reasoning_effort,
         tool_calls=te.tool_calls,
         response=te.response,
+        progress=_progress_response(te),
         logs=[LogEntryResponse(**le.model_dump()) for le in te.logs],
         messages=[MessageResponse(**m.model_dump()) for m in te.messages],
         usage=_usage_response(te),
@@ -113,6 +129,24 @@ async def get_task(task_id: str, user=Depends(get_current_user)):
     if not wf or wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your task")
     return await _to_response(te)
+
+
+@router.get("/{task_id}/progress", response_model=TaskProgressResponse)
+async def get_task_progress(task_id: str, user=Depends(get_current_user)):
+    """Get the current TODO progress for a task execution."""
+    te = await TaskExecution.get(PydanticObjectId(task_id))
+    if not te:
+        raise HTTPException(status_code=404, detail="Task execution not found")
+    wf = await Workflow.get(PydanticObjectId(te.workflow_id))
+    if not wf or wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your task")
+    if not te.progress:
+        return TaskProgressResponse()
+    return TaskProgressResponse(
+        todos=[TodoItemResponse(id=t.id, title=t.title, status=t.status) for t in te.progress.todos],
+        current_step=te.progress.current_step,
+        percent_complete=te.progress.percent_complete,
+    )
 
 
 @router.get("/workflow/{workflow_id}", response_model=list[TaskExecutionSummary])
