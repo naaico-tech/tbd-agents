@@ -15,7 +15,7 @@ This guide covers running TBD Agent on your development machine — both the Doc
 ## Option 1 — Docker Compose (recommended)
 
 ```bash
-git clone <repo-url> && cd copilot-agent-hub
+git clone <repo-url> && cd tbd-agents
 
 # Create your environment file
 cp .env.example .env

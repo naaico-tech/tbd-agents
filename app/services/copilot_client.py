@@ -31,7 +31,7 @@ def build_client(github_token: str) -> CopilotClient:
         telemetry = {
             "otlp_endpoint": settings.otel_http_endpoint,
             "exporter_type": "otlp-http",
-            "source_name": "copilot-agent-hub-sdk",
+            "source_name": "tbd-agents-sdk",
             "capture_content": False,
         }
 

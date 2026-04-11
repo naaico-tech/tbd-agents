@@ -22,5 +22,5 @@ scrape_configs:
         target_label: service
       # Only scrape containers from our compose project
       - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
-        regex: "copilot-agent-hub"
+        regex: "tbd-agents"
         action: keep

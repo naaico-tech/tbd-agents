@@ -117,7 +117,7 @@ def init_telemetry(app=None):
         logger.info("OTEL_EXPORTER_OTLP_ENDPOINT not set — telemetry disabled")
         return
 
-    service_name = os.environ.get("OTEL_SERVICE_NAME", "copilot-agent-hub")
+    service_name = os.environ.get("OTEL_SERVICE_NAME", "tbd-agents")
     resource_attrs = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
 
     attrs = {"service.name": service_name}

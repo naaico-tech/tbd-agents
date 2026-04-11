@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # OpenTelemetry
     otel_endpoint: str = "http://otel-collector:4317"
     otel_http_endpoint: str = "http://otel-collector:4318"
-    otel_service_name: str = "copilot-agent-hub"
+    otel_service_name: str = "tbd-agents"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

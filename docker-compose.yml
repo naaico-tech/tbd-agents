@@ -26,7 +26,7 @@ services:
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_SERVICE_NAME=copilot-agent-hub-api
+      - OTEL_SERVICE_NAME=tbd-agents-api
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
     depends_on:
       mongodb:
@@ -61,7 +61,7 @@ services:
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_SERVICE_NAME=copilot-agent-hub-worker
+      - OTEL_SERVICE_NAME=tbd-agents-worker
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
     depends_on:
       mongodb:

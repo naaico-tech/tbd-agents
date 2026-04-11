@@ -20,7 +20,7 @@ class TestSettings:
         assert s.notion_token is None
         assert s.slack_bot_token is None
         assert s.token_encryption_key is None
-        assert s.otel_service_name == "copilot-agent-hub"
+        assert s.otel_service_name == "tbd-agents"
 
     def test_env_override(self):
         """Settings should pick up environment variables."""

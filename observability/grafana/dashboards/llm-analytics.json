@@ -353,7 +353,7 @@
       "targets": [
         {
           "queryType": "nativeSearch",
-          "serviceName": "copilot-agent-hub",
+          "serviceName": "tbd-agents",
           "limit": 20,
           "refId": "A"
         }

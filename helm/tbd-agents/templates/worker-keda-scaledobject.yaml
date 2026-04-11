@@ -1,0 +1,34 @@
+{{- if .Values.worker.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "tbd-agents.fullname" . }}-worker
+  labels:
+    {{- include "tbd-agents.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    name: {{ include "tbd-agents.fullname" . }}-worker
+  pollingInterval: {{ .Values.worker.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.worker.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.worker.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.worker.keda.maxReplicaCount }}
+  {{- if .Values.worker.keda.idleReplicaCount }}
+  idleReplicaCount: {{ .Values.worker.keda.idleReplicaCount }}
+  {{- end }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ .Values.worker.keda.fallbackReplicas }}
+  triggers:
+    - type: redis
+      metadata:
+        # Celery default queue name — tasks land here unless routed elsewhere
+        listName: {{ .Values.worker.keda.celeryQueueName }}
+        listLength: {{ .Values.worker.keda.listLength | quote }}
+        activationListLength: {{ .Values.worker.keda.activationListLength | quote }}
+        {{- if .Values.worker.keda.databaseIndex }}
+        databaseIndex: {{ .Values.worker.keda.databaseIndex | quote }}
+        {{- end }}
+      authenticationRef:
+        name: {{ include "tbd-agents.fullname" . }}-keda-redis
+{{- end }}

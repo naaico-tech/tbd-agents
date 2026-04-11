@@ -1,0 +1,13 @@
+{{- if .Values.worker.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "tbd-agents.fullname" . }}-keda-redis
+  labels:
+    {{- include "tbd-agents.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: address
+      name: {{ include "tbd-agents.fullname" . }}-env
+      key: REDIS_URL
+{{- end }}

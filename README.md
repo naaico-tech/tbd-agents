@@ -30,7 +30,7 @@ Spin up purpose-built agents with distinct system prompts, wire them to any MCP 
 ## Quick Start
 
 ```bash
-git clone <repo-url> && cd copilot-agent-hub
+git clone <repo-url> && cd tbd-agents
 
 # Set your GitHub PAT (requires `copilot` scope)
 export GITHUB_TOKEN="ghp_your_token_here"

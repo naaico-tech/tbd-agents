@@ -21,7 +21,7 @@ exporters:
     endpoint: 0.0.0.0:8889
     namespace: copilot_hub
     const_labels:
-      service: copilot-agent-hub
+      service: tbd-agents
 
   # Tempo (traces)
   otlp/tempo:
