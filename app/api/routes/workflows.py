@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import extract_token, get_current_user
 from app.config import settings
 from app.core import event_bus
+from app.core.guardrails import enforce_guardrails
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
@@ -57,6 +58,8 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         output_format=wf.output_format,
         infinite_session=wf.infinite_session,
         reasoning_effort=wf.reasoning_effort,
+        guardrail_ids=wf.guardrail_ids,
+        guardrail_tags=wf.guardrail_tags,
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
@@ -100,6 +103,8 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         output_format=OutputFormat(body.output_format),
         infinite_session=body.infinite_session,
         reasoning_effort=body.reasoning_effort,
+        guardrail_ids=body.guardrail_ids,
+        guardrail_tags=body.guardrail_tags,
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
@@ -137,20 +142,25 @@ async def send_prompt(
 
     token = extract_token(authorization)
 
+    # ── Guardrail enforcement ─────────────────────────────────────────────────
+    effective_prompt = await enforce_guardrails(wf, body.prompt, body.request)
+
     # Resolve reasoning effort: prompt-time override > workflow default
     reasoning_effort = body.reasoning_effort or wf.reasoning_effort
 
     # Create a task execution record
     task_exec = TaskExecution(
         workflow_id=str(wf.id),
-        prompt=body.prompt,
+        prompt=effective_prompt,
         model=wf.model,
         reasoning_effort=reasoning_effort,
     )
     await task_exec.insert()
 
     # Dispatch to a Celery worker for scalable background execution
-    result = run_agent_task.delay(str(wf.id), body.prompt, token, str(task_exec.id), reasoning_effort)
+    result = run_agent_task.delay(
+        str(wf.id), effective_prompt, token, str(task_exec.id), reasoning_effort
+    )
 
     # Store the Celery task ID
     task_exec.celery_task_id = result.id

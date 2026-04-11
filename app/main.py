@@ -7,7 +7,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.api.routes import agents, health, mcps, models, skills, tasks, tokens, workflows
+from app.api.routes import (
+    agents,
+    guardrails,
+    health,
+    mcps,
+    models,
+    skills,
+    tasks,
+    tokens,
+    workflows,
+)
 from app.db import init_db
 from app.observability import init_telemetry
 
@@ -38,6 +48,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 
 app.include_router(health.router)
 app.include_router(agents.router)
+app.include_router(guardrails.router)
 app.include_router(skills.router)
 app.include_router(mcps.router)
 app.include_router(models.router)

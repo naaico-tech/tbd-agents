@@ -68,6 +68,8 @@ class Workflow(Document):
     output_destination: OutputDestination | None = None
     infinite_session: bool = True
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)
+    guardrail_ids: list[str] = Field(default_factory=list)  # Explicitly selected guardrail IDs
+    guardrail_tags: list[str] = Field(default_factory=list)  # Tag-based guardrail selection (union)
     repo_url: str | None = None  # GitHub repo URL to clone for agent access
     repo_branch: str | None = None  # Branch to checkout (default: main)
     repo_token_name: str | None = None  # Token Store key for private repo auth

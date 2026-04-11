@@ -28,6 +28,8 @@ class WorkflowCreate(BaseModel):
     skill_ids: list[str] = []
     infinite_session: bool = True
     reasoning_effort: str | None = None  # low | medium | high
+    guardrail_ids: list[str] = []  # Explicitly selected guardrail IDs
+    guardrail_tags: list[str] = []  # Tag-based guardrail selection
     repo_url: str | None = None  # GitHub repo URL
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
@@ -42,6 +44,8 @@ class WorkflowUpdate(BaseModel):
     skill_ids: list[str] | None = None
     infinite_session: bool | None = None
     reasoning_effort: str | None = None
+    guardrail_ids: list[str] | None = None
+    guardrail_tags: list[str] | None = None
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
@@ -49,7 +53,8 @@ class WorkflowUpdate(BaseModel):
 
 
 class PromptRequest(BaseModel):
-    prompt: str
+    prompt: str | None = None
+    request: dict | None = None  # Structured request object for request-guardrail workflows
     reasoning_effort: str | None = None  # Override workflow default at prompt time
 
 
@@ -95,6 +100,8 @@ class WorkflowResponse(BaseModel):
     output_format: str
     infinite_session: bool = True
     reasoning_effort: str | None = None
+    guardrail_ids: list[str] = []
+    guardrail_tags: list[str] = []
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
