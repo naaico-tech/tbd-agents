@@ -11,6 +11,7 @@ class AgentCreate(BaseModel):
     mcp_server_ids: list[str] = []
     mcp_server_tags: list[str] = []
     tool_definitions: list[dict] = []
+    provider_id: str | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -21,6 +22,7 @@ class AgentUpdate(BaseModel):
     mcp_server_ids: list[str] | None = None
     mcp_server_tags: list[str] | None = None
     tool_definitions: list[dict] | None = None
+    provider_id: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -32,5 +34,6 @@ class AgentResponse(BaseModel):
     mcp_server_ids: list[str]
     mcp_server_tags: list[str]
     tool_definitions: list[dict]
+    provider_id: str | None
     created_at: datetime
     updated_at: datetime

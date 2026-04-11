@@ -11,6 +11,7 @@ Capabilities wired:
 - Streaming (assistant.message_delta events)
 - Tag-based MCP server resolution (agents select MCPs by ID and/or tags)
 - Real-time SSE event publishing via event_bus
+- BYOK (Bring Your Own Key) provider support via external LLM APIs
 """
 
 import asyncio
@@ -19,13 +20,22 @@ import logging
 import os
 from datetime import UTC, datetime
 
+import httpx
+
 from app.config import settings
 from app.core import event_bus
 from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
 from app.models.mcp_server import McpServer
+from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderType
 from app.models.skill import Skill
-from app.models.task_execution import TaskExecution, TaskProgress, TaskStatus, TodoItem, TodoItemStatus
+from app.models.task_execution import (
+    TaskExecution,
+    TaskProgress,
+    TaskStatus,
+    TodoItem,
+    TodoItemStatus,
+)
 from app.models.workflow import (
     LogEntry,
     Message,
@@ -221,6 +231,174 @@ async def _sync_repo(workflow: Workflow) -> str | None:
     return repo_dir
 
 
+# ── BYOK Custom Provider Execution ───────────────────────────────────────────
+
+
+def _build_provider_request(
+    provider: Provider,
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+) -> tuple[str, dict, dict]:
+    """Build the endpoint URL, headers, and JSON body for a provider request.
+
+    Returns ``(url, headers, body)`` ready to pass to ``httpx.AsyncClient.post``.
+    """
+    provider_type = provider.provider_type
+
+    # Resolve base URL: explicit override > built-in default
+    base_url = (provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type, "")).rstrip("/")
+    if not base_url:
+        raise ValueError(
+            f"Provider '{provider.name}' has no base_url configured and none is available "
+            f"for provider_type '{provider_type}'."
+        )
+
+    # Build headers based on provider type
+    if provider_type == ProviderType.ANTHROPIC:
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+    elif provider_type == ProviderType.AZURE_OPENAI:
+        headers = {
+            "api-key": api_key,
+            "content-type": "application/json",
+        }
+    else:
+        # OpenAI, Custom, and anything else
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "content-type": "application/json",
+        }
+
+    url = f"{base_url}/chat/completions"
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    return url, headers, body
+
+
+async def _run_with_custom_provider(
+    workflow: Workflow,
+    user_prompt: str,
+    system_prompt: str,
+    provider: Provider,
+    api_key: str,
+    task_exec: TaskExecution | None,
+) -> str | None:
+    """Execute a prompt against an external OpenAI-compatible LLM API.
+
+    Used when the agent's attached provider is not ``github_copilot``.
+    Sends a single chat-completions request (no agentic tool-call loop).
+    """
+    model = workflow.model
+    task_start_time = datetime.now(UTC)
+    agent_tasks_active.inc()
+    final_text: str | None = None
+
+    try:
+        url, headers, body = _build_provider_request(
+            provider, api_key, model, system_prompt, user_prompt
+        )
+
+        await _log(
+            workflow,
+            "model_call",
+            f"Sending prompt to {model} via {provider.provider_type} provider '{provider.name}'",
+            task_exec,
+        )
+
+        async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
+            response = await http.post(url, headers=headers, json=body)
+            response.raise_for_status()
+
+        data = response.json()
+        choices = data.get("choices") or []
+        if choices:
+            message = choices[0].get("message", {})
+            final_text = message.get("content") or ""
+
+        # Track usage if the response includes it
+        usage_data = data.get("usage", {})
+        input_tok = int(usage_data.get("prompt_tokens", 0))
+        output_tok = int(usage_data.get("completion_tokens", 0))
+        usage = UsageStats(
+            total_input_tokens=input_tok,
+            total_output_tokens=output_tok,
+        )
+        workflow.usage = usage
+        if input_tok:
+            tokens_total.labels(direction="input", model=model).inc(input_tok)
+        if output_tok:
+            tokens_total.labels(direction="output", model=model).inc(output_tok)
+
+        workflow.messages.append(Message(role="assistant", content=final_text or ""))
+
+        # Format output
+        if final_text and workflow.output_format == OutputFormat.JSON:
+            final_text = json.dumps({"response": final_text})
+
+        workflow.status = WorkflowStatus.COMPLETED
+        await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
+        await _log(workflow, "completed", f"Final status: {workflow.status}", task_exec)
+        await _publish_status(workflow)
+
+        task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
+        agent_task_duration_seconds.labels(
+            model=model, status=WorkflowStatus.COMPLETED
+        ).observe(task_duration)
+
+        if task_exec:
+            task_exec.status = TaskStatus.COMPLETED
+            task_exec.finished_at = datetime.now(UTC)
+            task_exec.tool_calls = 0
+            task_exec.response = final_text
+            task_exec.usage = usage
+            task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
+            await task_exec.save()
+
+    except httpx.HTTPStatusError as exc:
+        workflow.status = WorkflowStatus.FAILED
+        await _log(
+            workflow,
+            "error",
+            f"Provider HTTP error {exc.response.status_code}: {exc.response.text[:500]}",
+            task_exec,
+        )
+        await _publish_status(workflow)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
+        final_text = None
+    except Exception as exc:
+        workflow.status = WorkflowStatus.FAILED
+        await _log(workflow, "error", str(exc), task_exec)
+        await _publish_status(workflow)
+        logger.exception("Custom provider run failed for workflow %s", workflow.id)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
+        final_text = None
+    finally:
+        agent_tasks_active.dec()
+        agent_tasks_total.labels(
+            status=workflow.status,
+            model=model,
+            reasoning_effort="default",
+        ).inc()
+
+    return final_text
+
+
 # ── Main Execution ───────────────────────────────────────────────────────────
 
 
@@ -231,13 +409,17 @@ async def run_agent(
     task_execution_id: str | None = None,
     reasoning_effort: str | None = None,
 ) -> str | None:
-    """Execute a prompt using the GitHub Copilot SDK.
+    """Execute a prompt using the GitHub Copilot SDK or a BYOK custom provider.
 
-    1. Creates a CopilotClient with the caller's GitHub token.
-    2. Builds session config (model, system prompt, MCP servers, hooks, infinite sessions).
-    3. Creates a session, sends the prompt, and waits for completion.
-    4. Logs every significant event to the workflow and publishes to SSE subscribers.
-    5. Tracks usage/cost data from SDK events.
+    1. Resolves the agent's attached provider (if any):
+       - ``github_copilot``: uses the stored token as the GitHub PAT.
+       - All other types: routes to ``_run_with_custom_provider`` for direct
+         HTTP execution against the provider's OpenAI-compatible API.
+    2. Creates a CopilotClient with the resolved GitHub token (default path).
+    3. Builds session config (model, system prompt, MCP servers, hooks, infinite sessions).
+    4. Creates a session, sends the prompt, and waits for completion.
+    5. Logs every significant event to the workflow and publishes to SSE subscribers.
+    6. Tracks usage/cost data from SDK events.
     """
     # Load task execution if provided
     task_exec: TaskExecution | None = None
@@ -267,6 +449,55 @@ async def run_agent(
             task_exec.finished_at = datetime.now(UTC)
             await task_exec.save()
         return None
+
+    # ── BYOK provider resolution ──────────────────────────────────────────────
+    # If the agent has a provider attached, resolve its API key and determine
+    # the execution path (SDK vs direct HTTP).
+    custom_provider: Provider | None = None
+    custom_provider_key: str | None = None
+
+    if agent.provider_id:
+        try:
+            from beanie import PydanticObjectId as _ObjId
+            provider = await Provider.get(_ObjId(agent.provider_id))
+        except Exception:
+            provider = None
+        if provider:
+            resolved_key = await token_manager.get_token_value(provider.api_key_token_name)
+            if resolved_key:
+                if provider.provider_type == ProviderType.GITHUB_COPILOT:
+                    # Override the caller-supplied GitHub token with the stored one
+                    github_token = resolved_key
+                    await _log(
+                        workflow,
+                        "provider_resolved",
+                        f"Using BYOK github_copilot provider '{provider.name}'",
+                        task_exec,
+                    )
+                else:
+                    custom_provider = provider
+                    custom_provider_key = resolved_key
+                    await _log(
+                        workflow,
+                        "provider_resolved",
+                        f"Using BYOK provider '{provider.name}' ({provider.provider_type})",
+                        task_exec,
+                    )
+            else:
+                await _log(
+                    workflow,
+                    "provider_warning",
+                    f"Provider '{provider.name}' token '{provider.api_key_token_name}' "
+                    "not found in token store — falling back to default execution",
+                    task_exec,
+                )
+        else:
+            await _log(
+                workflow,
+                "provider_warning",
+                f"Provider ID '{agent.provider_id}' not found — falling back to default execution",
+                task_exec,
+            )
 
     # Mark running
     workflow.status = WorkflowStatus.RUNNING
@@ -341,6 +572,17 @@ async def run_agent(
     elif workflow.repo_url:
         repo_sync_total.labels(status="failure").inc()
         await _log(workflow, "repo_sync_failed", f"Failed to sync {workflow.repo_url}", task_exec)
+
+    # ── Route to custom provider if set ──────────────────────────────────────
+    if custom_provider and custom_provider_key:
+        return await _run_with_custom_provider(
+            workflow,
+            user_prompt,
+            system_prompt,
+            custom_provider,
+            custom_provider_key,
+            task_exec,
+        )
 
     # ── Usage tracking state ──
     usage = UsageStats()

@@ -20,6 +20,7 @@ def _to_response(agent: Agent) -> AgentResponse:
         mcp_server_ids=agent.mcp_server_ids,
         mcp_server_tags=agent.mcp_server_tags,
         tool_definitions=agent.tool_definitions,
+        provider_id=agent.provider_id,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
