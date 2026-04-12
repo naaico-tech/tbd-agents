@@ -10,7 +10,7 @@ Agents are the core building block. Each agent encapsulates:
 
 - **System prompt** — defines the agent's personality, domain expertise, and behavioural constraints
 - **Model** — which Copilot-supported model to use (e.g. `gpt-4.1`, `o3-mini`, `claude-sonnet-4.5`)
-- **MCP servers** — which tool servers the agent has access to
+- **MCP servers** — which tool servers the agent has access to (by ID or tags)
 
 Create as many agents as you need — a code reviewer, an incident responder, a documentation writer — each with their own configuration. Agents are reusable across workflows.
 
@@ -22,7 +22,8 @@ curl -X POST http://localhost:8000/api/agents \
     "name": "incident-responder",
     "system_prompt": "You are an SRE investigating production incidents. Use Datadog to gather metrics and logs, then create a Jira ticket with your findings.",
     "model": "gpt-4.1",
-    "mcp_server_ids": ["<DATADOG_MCP_ID>", "<JIRA_MCP_ID>"]
+    "mcp_server_ids": ["<DATADOG_MCP_ID>", "<JIRA_MCP_ID>"],
+    "mcp_server_tags": ["observability", "ticketing"]
   }'
 ```
 
@@ -53,7 +54,8 @@ curl -X POST http://localhost:8000/api/mcps \
       "command": "npx",
       "args": ["-y", "@anthropic/mcp-server-atlassian"],
       "env": {"ATLASSIAN_API_TOKEN": "...", "ATLASSIAN_EMAIL": "...", "ATLASSIAN_URL": "..."}
-    }
+    },
+    "tags": ["ticketing", "project-management"]
   }'
 
 # SSE-based
@@ -66,13 +68,21 @@ curl -X POST http://localhost:8000/api/mcps \
     "connection_config": {
       "url": "http://my-tool-server:3000/sse",
       "headers": {"Authorization": "Bearer secret"}
-    }
+    },
+    "tags": ["internal"]
   }'
 ```
 
-### Auto-injected MCPs
+### MCP Tags
 
-When a workflow has **output destinations** configured (Notion or Slack), TBD Agent automatically injects the corresponding MCP servers into the session. The agent decides autonomously whether and when to use them based on its system prompt and the task at hand.
+Every MCP server can have **tags** — free-form labels that categorise the server by domain or function (e.g. `observability`, `ticketing`, `documentation`, `messaging`).
+
+Agents select which MCP servers to use in two ways:
+
+- **By ID** — explicit `mcp_server_ids` list for known servers
+- **By tag** — `mcp_server_tags` list; any MCP server matching at least one tag is included
+
+Both are unioned at runtime with deduplication, so an MCP server that matches both by ID and by tag is only loaded once. This is how you support different "flavors of work" — tag your Notion MCP as `documentation`, your Slack MCP as `messaging`, your Datadog MCP as `observability`, and then agents pick up the right tools by declaring the categories they need.
 
 ---
 
@@ -111,7 +121,6 @@ A workflow ties an agent to a specific execution context:
 - **Max turns** — limit on tool-call rounds (prevents runaway loops)
 - **Output format** — `json` or `markdown`
 - **Infinite session** — enable/disable automatic context compaction
-- **Output destinations** — optional Notion/Slack targets
 - **Skills** — installed instruction modules
 
 Workflows persist their full state: messages, logs, usage stats, and status.
@@ -194,26 +203,6 @@ The **permission handler** enforces max turns by counting tool calls and returni
 
 ---
 
-## Output Destinations
-
-Workflows can optionally specify where the agent should send its output:
-
-- **Notion** — provide a `notion_base_page_id`; the agent creates sub-pages under it
-- **Slack** — provide a `slack_channel_id` or `slack_user_id`; the agent posts messages there
-
-The agent decides autonomously when to use these destinations based on the task. Output destination hints are injected into the system prompt, and the corresponding MCP servers are auto-configured with the tokens from environment variables (`NOTION_TOKEN`, `SLACK_BOT_TOKEN`).
-
-```json
-{
-  "output_destination": {
-    "notion_base_page_id": "abc123-def456",
-    "slack_channel_id": "C01ABCDEF"
-  }
-}
-```
-
----
-
 ## Dashboard
 
 TBD Agent ships with a built-in single-page dashboard at `/dashboard` that provides:
@@ -222,7 +211,7 @@ TBD Agent ships with a built-in single-page dashboard at `/dashboard` that provi
 - **Agent management** — create, edit, delete agents; assign MCP servers
 - **MCP management** — register servers, test connections
 - **Skill management** — create and manage instruction modules
-- **Workflow management** — create workflows with infinite session and output destination settings
+- **Workflow management** — create workflows with infinite session settings
 - **Run Task** — select a workflow, type a prompt, and watch the agent work in real-time with streaming logs, token-by-token responses, and live usage metrics
 
 ---

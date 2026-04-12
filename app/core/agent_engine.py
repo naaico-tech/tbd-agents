@@ -9,7 +9,7 @@ Capabilities wired:
 - Usage / cost / token tracking (assistant.usage + session.usage_info events)
 - Hooks system (pre/post tool use, error recovery, session lifecycle)
 - Streaming (assistant.message_delta events)
-- Notion / Slack MCP auto-injection based on workflow output destinations
+- Tag-based MCP server resolution (agents select MCPs by ID and/or tags)
 - Real-time SSE event publishing via event_bus
 """
 
@@ -154,7 +154,7 @@ async def _build_system_prompt(
     skill_ids: list[str],
     workflow: Workflow,
 ) -> str:
-    """Assemble the system prompt from agent config + skills + output destination hints."""
+    """Assemble the system prompt from agent config + skills."""
     system_prompt = agent.system_prompt
 
     # Skills
@@ -169,96 +169,7 @@ async def _build_system_prompt(
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
 
-    # Output destination hints
-    dest = workflow.output_destination
-    if dest:
-        hints: list[str] = []
-        if dest.notion_base_page_id:
-            notion_token = await token_manager.get_token_value("notion") or settings.notion_token
-            if notion_token:
-                hints.append(
-                    f"You have access to Notion. When producing document output, "
-                    f"create a sub-page under page ID {dest.notion_base_page_id}."
-                )
-            else:
-                hints.append(
-                    "Notion output was requested but no Notion token is configured. "
-                    "Skip Notion output."
-                )
-        if dest.slack_channel_id:
-            slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
-            if slack_token:
-                hints.append(
-                    f"You have access to Slack. Send output to channel {dest.slack_channel_id}."
-                )
-            else:
-                hints.append(
-                    "Slack output was requested but no Slack bot token is configured. "
-                    "Skip Slack output."
-                )
-        elif dest.slack_user_id:
-            slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
-            if slack_token:
-                hints.append(
-                    f"You have access to Slack. Send output to user {dest.slack_user_id}."
-                )
-            else:
-                hints.append(
-                    "Slack output was requested but no Slack bot token is configured. "
-                    "Skip Slack output."
-                )
-        if hints:
-            system_prompt += (
-                "\n\n<output_destinations>\n" + "\n".join(hints) + "\n</output_destinations>"
-            )
-
     return system_prompt
-
-
-async def _build_dynamic_mcp_config(workflow: Workflow) -> dict:
-    """Build MCP server configs for Notion/Slack based on workflow settings.
-
-    Looks up tokens from the encrypted token store first, falls back to
-    environment-based settings for backward compatibility.
-    """
-    config: dict = {}
-    dest = workflow.output_destination
-    if not dest:
-        return config
-
-    # Notion MCP
-    if dest.notion_base_page_id:
-        notion_token = await token_manager.get_token_value("notion") or settings.notion_token
-        if notion_token:
-            headers_json = json.dumps({
-                "Authorization": f"Bearer {notion_token}",
-                "Notion-Version": "2022-06-28",
-            })
-            env = dict(os.environ)
-            env["OPENAPI_MCP_HEADERS"] = headers_json
-            config["notion"] = {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@notionhq/notion-mcp-server"],
-                "env": env,
-                "tools": ["*"],
-            }
-
-    # Slack MCP
-    if dest.slack_channel_id or dest.slack_user_id:
-        slack_token = await token_manager.get_token_value("slack") or settings.slack_bot_token
-        if slack_token:
-            env = dict(os.environ)
-            env["SLACK_BOT_TOKEN"] = slack_token
-            config["slack"] = {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-slack"],
-                "env": env,
-                "tools": ["*"],
-            }
-
-    return config
 
 
 REPOS_BASE = "/repos"
@@ -366,12 +277,21 @@ async def run_agent(
     workflow.messages.append(Message(role="user", content=user_prompt))
     await workflow.save()
 
-    # Load MCP servers from DB
-    mcp_servers_db: list[McpServer] = []
+    # Load MCP servers from DB — by explicit IDs and by tags (union, deduplicated)
+    mcp_servers_map: dict[str, McpServer] = {}
     for server_id in agent.mcp_server_ids:
         server = await McpServer.get(server_id)
         if server:
-            mcp_servers_db.append(server)
+            mcp_servers_map[str(server.id)] = server
+
+    if agent.mcp_server_tags:
+        tag_matches = await McpServer.find(
+            McpServer.tags.in_(agent.mcp_server_tags),  # type: ignore[attr-defined]
+        ).to_list()
+        for server in tag_matches:
+            mcp_servers_map[str(server.id)] = server
+
+    mcp_servers_db: list[McpServer] = list(mcp_servers_map.values())
 
     mcp_config = await build_mcp_servers_config(mcp_servers_db)
 
@@ -394,10 +314,6 @@ async def run_agent(
                 # time, so we mark it as unrestricted by adding a sentinel.
                 allowed_tools_set = None
                 break
-
-    # Auto-inject Notion/Slack MCPs based on workflow output destinations
-    dynamic_mcps = await _build_dynamic_mcp_config(workflow)
-    mcp_config.update(dynamic_mcps)
 
     await _log(
         workflow,

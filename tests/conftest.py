@@ -83,6 +83,7 @@ def sample_agent():
         "system_prompt": "You are a test assistant.",
         "model": "gpt-4.1",
         "mcp_server_ids": [],
+        "mcp_server_tags": [],
         "tool_definitions": [],
         "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),
@@ -114,7 +115,6 @@ def sample_workflow(sample_agent, github_user):
         "repo_branch": None,
         "repo_token_name": None,
         "usage": None,
-        "output_destination": None,
         "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),
     }

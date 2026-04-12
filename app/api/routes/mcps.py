@@ -16,6 +16,7 @@ def _to_response(server: McpServer) -> McpServerResponse:
         transport_type=server.transport_type,
         connection_config=server.connection_config,
         allowed_tools=server.allowed_tools,
+        tags=server.tags,
         status=server.status,
         last_error=server.last_error,
         created_at=server.created_at,
@@ -32,6 +33,7 @@ async def register_mcp_server(body: McpServerCreate, _user=Depends(get_current_u
         transport_type=TransportType(body.transport_type),
         connection_config=body.connection_config,
         allowed_tools=body.allowed_tools,
+        tags=body.tags,
     )
     await server.insert()
     return _to_response(server)
@@ -97,6 +99,8 @@ async def update_mcp_server(
         server.connection_config = body.connection_config
     if body.allowed_tools is not None:
         server.allowed_tools = body.allowed_tools
+    if body.tags is not None:
+        server.tags = body.tags
     from datetime import UTC, datetime
     server.updated_at = datetime.now(UTC)
     server.status = McpServerStatus.REGISTERED

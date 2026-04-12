@@ -10,7 +10,6 @@ from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
 from app.models.workflow import (
-    OutputDestination,
     OutputFormat,
     Workflow,
     WorkflowStatus,
@@ -18,7 +17,6 @@ from app.models.workflow import (
 from app.schemas.workflow import (
     LogEntryResponse,
     MessageResponse,
-    OutputDestinationCreate,
     PromptRequest,
     PromptResponse,
     UsageStatsResponse,
@@ -35,12 +33,6 @@ def _usage_response(wf: Workflow) -> UsageStatsResponse | None:
     if not wf.usage:
         return None
     return UsageStatsResponse(**wf.usage.model_dump())
-
-
-def _dest_response(wf: Workflow) -> OutputDestinationCreate | None:
-    if not wf.output_destination:
-        return None
-    return OutputDestinationCreate(**wf.output_destination.model_dump())
 
 
 def _to_response(wf: Workflow) -> WorkflowResponse:
@@ -64,7 +56,6 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
         usage=_usage_response(wf),
-        output_destination=_dest_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
         created_at=wf.created_at,
@@ -84,15 +75,6 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
     if body.output_format not in ("json", "markdown"):
         raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
 
-    # Build output destination from request
-    output_dest = None
-    if body.output_destination:
-        output_dest = OutputDestination(
-            notion_base_page_id=body.output_destination.notion_base_page_id,
-            slack_channel_id=body.output_destination.slack_channel_id,
-            slack_user_id=body.output_destination.slack_user_id,
-        )
-
     wf = Workflow(
         title=body.title,
         agent_id=str(agent.id),
@@ -108,7 +90,6 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
-        output_destination=output_dest,
     )
     await wf.insert()
     return _to_response(wf)
@@ -175,7 +156,6 @@ async def send_prompt(
         output_format=wf.output_format,
         infinite_session=wf.infinite_session,
         usage=_usage_response(wf),
-        output_destination=_dest_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
     )
@@ -248,9 +228,6 @@ async def update_workflow(
     updates = body.model_dump(exclude_unset=True)
     if "output_format" in updates and updates["output_format"] not in ("json", "markdown"):
         raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
-    if "output_destination" in updates:
-        od = updates.pop("output_destination")
-        wf.output_destination = OutputDestination(**od) if od else None
     if "output_format" in updates:
         updates["output_format"] = OutputFormat(updates["output_format"])
     for k, v in updates.items():

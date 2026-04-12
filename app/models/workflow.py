@@ -65,7 +65,6 @@ class Workflow(Document):
     status: WorkflowStatus = WorkflowStatus.ACTIVE
     output_format: OutputFormat = OutputFormat.JSON
     usage: UsageStats | None = None
-    output_destination: OutputDestination | None = None
     infinite_session: bool = True
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)
     guardrail_ids: list[str] = Field(default_factory=list)  # Explicitly selected guardrail IDs

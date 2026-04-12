@@ -17,8 +17,6 @@ class TestSettings:
         assert s.default_max_turns == 5
         assert s.session_timeout == 600
         assert s.github_token is None
-        assert s.notion_token is None
-        assert s.slack_bot_token is None
         assert s.token_encryption_key is None
         assert s.otel_service_name == "tbd-agents"
 

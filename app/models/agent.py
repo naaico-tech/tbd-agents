@@ -10,6 +10,7 @@ class Agent(Document):
     system_prompt: str = "You are a helpful assistant."
     model: str | None = None  # None → use workflow/global default
     mcp_server_ids: list[str] = Field(default_factory=list)
+    mcp_server_tags: list[str] = Field(default_factory=list)
     tool_definitions: list[dict] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

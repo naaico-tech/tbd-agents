@@ -9,6 +9,7 @@ class AgentCreate(BaseModel):
     system_prompt: str = "You are a helpful assistant."
     model: str | None = None
     mcp_server_ids: list[str] = []
+    mcp_server_tags: list[str] = []
     tool_definitions: list[dict] = []
 
 
@@ -18,6 +19,7 @@ class AgentUpdate(BaseModel):
     system_prompt: str | None = None
     model: str | None = None
     mcp_server_ids: list[str] | None = None
+    mcp_server_tags: list[str] | None = None
     tool_definitions: list[dict] | None = None
 
 
@@ -28,6 +30,7 @@ class AgentResponse(BaseModel):
     system_prompt: str
     model: str | None
     mcp_server_ids: list[str]
+    mcp_server_tags: list[str]
     tool_definitions: list[dict]
     created_at: datetime
     updated_at: datetime

@@ -20,7 +20,6 @@ from app.models.task_execution import (
 from app.models.workflow import (
     LogEntry,
     Message,
-    OutputDestination,
     OutputFormat,
     UsageStats,
     WorkflowStatus,
@@ -54,9 +53,11 @@ class TestAgentModel:
             system_prompt="Be brief.",
             model="gpt-4.1",
             mcp_server_ids=["s1", "s2"],
+            mcp_server_tags=["data", "messaging"],
         )
         assert a.model == "gpt-4.1"
         assert len(a.mcp_server_ids) == 2
+        assert a.mcp_server_tags == ["data", "messaging"]
 
 
 # ── Skill ────────────────────────────────────────────────────────────────────
@@ -157,6 +158,18 @@ class TestMcpServerModel:
     def test_allowed_tools_default_empty(self):
         assert McpServer.model_fields["allowed_tools"].default_factory() == []
 
+    def test_tags_default_empty(self):
+        assert McpServer.model_fields["tags"].default_factory() == []
+
+    def test_server_with_tags(self):
+        s = McpServer.model_construct(
+            name="tagged",
+            transport_type=TransportType.STDIO,
+            connection_config={"command": "npx"},
+            tags=["observability", "ticketing"],
+        )
+        assert s.tags == ["observability", "ticketing"]
+
 
 # ── Workflow ─────────────────────────────────────────────────────────────────
 
@@ -176,14 +189,6 @@ class TestWorkflowModel:
         assert WorkflowStatus.FAILED == "failed"
         assert WorkflowStatus.HALTED == "halted"
         assert WorkflowStatus.MAX_TURNS_REACHED == "max_turns_reached"
-
-    def test_output_destination(self):
-        od = OutputDestination(
-            notion_base_page_id="page-123",
-            slack_channel_id="C12345",
-        )
-        assert od.notion_base_page_id == "page-123"
-        assert od.slack_user_id is None
 
 
 # ── UsageStats ───────────────────────────────────────────────────────────────

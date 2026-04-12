@@ -110,8 +110,6 @@ secrets:
   ddAppKey: ""
   atlassianApiToken: ""
   atlassianEmail: ""
-  notionToken: ""
-  slackBotToken: ""
 
 # ── Persistent Storage ────────────────────────────────────────────────────────
 

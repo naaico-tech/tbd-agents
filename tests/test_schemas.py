@@ -10,7 +10,6 @@ from app.schemas.mcp import McpServerCreate, McpServerUpdate, McpTestResponse
 from app.schemas.skill import SkillCreate, SkillUpdate
 from app.schemas.token import TokenCreate, TokenUpdate
 from app.schemas.workflow import (
-    OutputDestinationCreate,
     PromptRequest,
     WorkflowCreate,
     WorkflowUpdate,
@@ -34,10 +33,12 @@ class TestAgentSchemas:
             system_prompt="Be concise.",
             model="gpt-4.1",
             mcp_server_ids=["s1"],
+            mcp_server_tags=["data", "messaging"],
             tool_definitions=[{"type": "function", "name": "search"}],
         )
         assert c.model == "gpt-4.1"
         assert len(c.tool_definitions) == 1
+        assert c.mcp_server_tags == ["data", "messaging"]
 
     def test_update_partial(self):
         u = AgentUpdate(name="new-name")
@@ -112,6 +113,16 @@ class TestMcpSchemas:
             connection_config={"command": "npx", "args": []},
         )
         assert m.transport_type == "stdio"
+        assert m.tags == []
+
+    def test_create_with_tags(self):
+        m = McpServerCreate(
+            name="notion",
+            transport_type="stdio",
+            connection_config={"command": "npx", "args": []},
+            tags=["documentation", "productivity"],
+        )
+        assert m.tags == ["documentation", "productivity"]
 
     def test_create_sse(self):
         m = McpServerCreate(
@@ -175,13 +186,8 @@ class TestWorkflowSchemas:
             guardrail_tags=["safety"],
             repo_url="https://github.com/test/repo",
             repo_branch="develop",
-            output_destination=OutputDestinationCreate(
-                notion_base_page_id="page1",
-                slack_channel_id="C123",
-            ),
         )
         assert w.model == "gpt-4.1"
-        assert w.output_destination.slack_channel_id == "C123"
 
     def test_update(self):
         u = WorkflowUpdate(max_turns=20, reasoning_effort="low")
@@ -197,10 +203,3 @@ class TestWorkflowSchemas:
         p = PromptRequest(request={"query": "search term"})
         assert p.request["query"] == "search term"
         assert p.prompt is None
-
-    def test_output_destination(self):
-        od = OutputDestinationCreate(
-            slack_user_id="U123",
-        )
-        assert od.notion_base_page_id is None
-        assert od.slack_user_id == "U123"

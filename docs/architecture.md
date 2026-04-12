@@ -79,10 +79,10 @@ This decoupling is what enables multi-process and multi-node scaling — any wor
 
 Stores all persistent state:
 
-- **Agents** — name, system prompt, model, MCP server IDs
-- **MCP Servers** — name, transport type (stdio/SSE), connection config, status
+- **Agents** — name, system prompt, model, MCP server IDs, MCP server tags
+- **MCP Servers** — name, transport type (stdio/SSE), connection config, tags, status
 - **Skills** — name, instructions, tags
-- **Workflows** — agent reference, model, max turns, session ID, status, messages, logs, usage stats, output destinations
+- **Workflows** — agent reference, model, max turns, session ID, status, messages, logs, usage stats
 
 Each worker initialises its own Motor/Beanie connection on startup.
 
@@ -141,11 +141,13 @@ SSE connections are per-client, and each API instance independently subscribes t
 Agent
 ├── name, description, system_prompt
 ├── model (e.g. "gpt-4.1")
-└── mcp_server_ids[] ──► McpServer
+├── mcp_server_ids[] ──► McpServer
+└── mcp_server_tags[] (tag-based MCP resolution)
 
 McpServer
 ├── name, transport_type (stdio | sse)
 ├── connection_config (command/args/env or url/headers)
+├── tags[]
 └── status (registered | connected | error)
 
 Skill
@@ -158,7 +160,6 @@ Workflow
 ├── status (active | running | completed | failed | max_turns_reached)
 ├── output_format (json | markdown)
 ├── infinite_session (bool)
-├── output_destination { notion_base_page_id, slack_channel_id, slack_user_id }
 ├── usage { premium_requests, input_tokens, output_tokens, cache_tokens, cost }
 ├── skill_ids[] ──► Skill
 ├── messages[] { role, content, tool_calls }
