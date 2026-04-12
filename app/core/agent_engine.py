@@ -286,7 +286,7 @@ async def run_agent(
 
     if agent.mcp_server_tags:
         tag_matches = await McpServer.find(
-            McpServer.tags.in_(agent.mcp_server_tags),  # type: ignore[attr-defined]
+            {"tags": {"$in": agent.mcp_server_tags}},
         ).to_list()
         for server in tag_matches:
             mcp_servers_map[str(server.id)] = server

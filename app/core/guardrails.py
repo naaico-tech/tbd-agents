@@ -35,7 +35,7 @@ async def _load_guardrails(workflow: Workflow) -> list[Guardrail]:
 
     if workflow.guardrail_tags:
         tag_matches = await Guardrail.find(
-            Guardrail.tags.in_(workflow.guardrail_tags),  # type: ignore[attr-defined]
+            {"tags": {"$in": workflow.guardrail_tags}},
             Guardrail.enabled == True,  # noqa: E712
         ).to_list()
         for g in tag_matches:
