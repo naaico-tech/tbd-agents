@@ -179,6 +179,18 @@ async def _build_system_prompt(
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
 
+    # Autonomous execution directive
+    system_prompt += (
+        "\n\n<execution_policy>"
+        "\nYou are running as an autonomous agent. You MUST act on your own using "
+        "the tools and context available to you. NEVER ask the user follow-up questions, "
+        "request clarification, or suggest that the user do something manually. "
+        "If information is ambiguous or incomplete, make reasonable assumptions based on "
+        "your system prompt and available tools, then proceed. Always produce a concrete, "
+        "actionable result."
+        "\n</execution_policy>"
+    )
+
     return system_prompt
 
 
@@ -234,56 +246,154 @@ async def _sync_repo(workflow: Workflow) -> str | None:
 # ── BYOK Custom Provider Execution ───────────────────────────────────────────
 
 
-def _build_provider_request(
-    provider: Provider,
-    api_key: str,
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-) -> tuple[str, dict, dict]:
-    """Build the endpoint URL, headers, and JSON body for a provider request.
-
-    Returns ``(url, headers, body)`` ready to pass to ``httpx.AsyncClient.post``.
-    """
+def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
+    """Build HTTP headers for a provider request."""
     provider_type = provider.provider_type
-
-    # Resolve base URL: explicit override > built-in default
-    raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type)
-    if raw_url is None:
-        raise ValueError(
-            f"Provider '{provider.name}' has no base_url configured and none is available "
-            f"for provider_type '{provider_type}'."
-        )
-    base_url = raw_url.rstrip("/")
-
-    # Build headers based on provider type
     if provider_type == ProviderType.ANTHROPIC:
-        headers = {
+        return {
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
     elif provider_type == ProviderType.AZURE_OPENAI:
-        headers = {
+        return {
             "api-key": api_key,
             "content-type": "application/json",
         }
     else:
-        # OpenAI, Custom, and anything else
-        headers = {
+        return {
             "Authorization": f"Bearer {api_key}",
             "content-type": "application/json",
         }
 
-    url = f"{base_url}/chat/completions"
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+
+def _resolve_provider_url(provider: Provider) -> str:
+    """Resolve the chat completions endpoint URL for a provider."""
+    raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider.provider_type)
+    if raw_url is None:
+        raise ValueError(
+            f"Provider '{provider.name}' has no base_url configured and none is available "
+            f"for provider_type '{provider.provider_type}'."
+        )
+    return raw_url.rstrip("/") + "/chat/completions"
+
+
+def _mcp_tool_to_openai(tool) -> dict:
+    """Convert an MCP Tool object to OpenAI function-calling tool format."""
+    schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
+    # Ensure the schema has type: object at the top level
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description or "",
+            "parameters": schema,
+        },
     }
-    return url, headers, body
+
+
+async def _connect_mcp_and_list_tools(
+    mcp_config: dict,
+    allowed_tools_set: set[str] | None,
+    exit_stack,
+) -> tuple[list[dict], dict]:
+    """Connect to MCP servers and list their tools.
+
+    Returns ``(openai_tools, tool_server_map)`` where ``tool_server_map``
+    maps tool names to ``(session, server_name)`` tuples for later invocation.
+
+    The caller-provided ``exit_stack`` (``AsyncExitStack``) manages the
+    lifetime of all MCP connections so they stay open for tool invocations.
+    """
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
+    from mcp.client.stdio import stdio_client
+    from mcp.client.streamable_http import streamablehttp_client
+
+    openai_tools: list[dict] = []
+    tool_server_map: dict[str, tuple[ClientSession, str]] = {}
+
+    for server_name, server_cfg in mcp_config.items():
+        transport_type = server_cfg.get("type", "")
+
+        try:
+            if transport_type == "stdio":
+                server_params = StdioServerParameters(
+                    command=server_cfg["command"],
+                    args=server_cfg.get("args", []),
+                    env=server_cfg.get("env"),
+                )
+                # Use /dev/null for stderr to avoid Celery's LoggingProxy
+                # which lacks fileno() needed by subprocess.
+                devnull = open(os.devnull, "w")  # noqa: SIM115
+                exit_stack.callback(devnull.close)
+                streams = await exit_stack.enter_async_context(
+                    stdio_client(server_params, errlog=devnull)
+                )
+                read_stream, write_stream = streams
+            elif transport_type == "sse":
+                url = server_cfg["url"]
+                headers = server_cfg.get("headers", {})
+                streams = await exit_stack.enter_async_context(
+                    sse_client(url, headers=headers)
+                )
+                read_stream, write_stream = streams
+            elif transport_type == "http":
+                url = server_cfg["url"]
+                headers = server_cfg.get("headers", {})
+                streams = await exit_stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers)
+                )
+                read_stream, write_stream = streams[0], streams[1]
+            else:
+                continue
+
+            session = await exit_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await session.initialize()
+            result = await session.list_tools()
+
+            for tool in result.tools:
+                # Respect allowed_tools filter
+                if allowed_tools_set is not None and tool.name not in allowed_tools_set:
+                    continue
+                openai_tools.append(_mcp_tool_to_openai(tool))
+                tool_server_map[tool.name] = (session, server_name)
+        except Exception as exc:
+            logger.warning("Failed to connect MCP server '%s' for BYOK tools: %s", server_name, exc)
+
+    return openai_tools, tool_server_map
+
+
+async def _execute_mcp_tool(
+    tool_name: str,
+    arguments: dict,
+    tool_server_map: dict,
+) -> str:
+    """Call a tool on its MCP server and return the text result."""
+    entry = tool_server_map.get(tool_name)
+    if not entry:
+        return json.dumps({"error": f"Tool '{tool_name}' not found in any connected MCP server"})
+
+    session, _server_name = entry
+    try:
+        result = await session.call_tool(tool_name, arguments)
+        # Combine text content blocks
+        parts = []
+        for block in result.content:
+            if hasattr(block, "text"):
+                parts.append(block.text)
+            elif hasattr(block, "data"):
+                parts.append(f"[binary: {getattr(block, 'mimeType', 'unknown')}]")
+        text = "\n".join(parts) if parts else ""
+        if result.isError:
+            return json.dumps({"error": text})
+        return text
+    except Exception as exc:
+        return json.dumps({"error": f"Tool execution failed: {exc}"})
 
 
 async def _run_with_custom_provider(
@@ -293,52 +403,173 @@ async def _run_with_custom_provider(
     provider: Provider,
     api_key: str,
     task_exec: TaskExecution | None,
+    *,
+    mcp_config: dict | None = None,
+    allowed_tools_set: set[str] | None = None,
 ) -> str | None:
     """Execute a prompt against an external OpenAI-compatible LLM API.
 
     Used when the agent's attached provider is not ``github_copilot``.
-    Sends a single chat-completions request (no agentic tool-call loop).
+    Supports an agentic tool-call loop: if MCP servers are configured,
+    their tools are discovered and provided to the model. When the model
+    returns tool_calls, they are executed via MCP and results fed back
+    until the model produces a final text response or max_turns is reached.
     """
     model = workflow.model
+    max_turns = workflow.max_turns
     task_start_time = datetime.now(UTC)
     agent_tasks_active.inc()
     final_text: str | None = None
+    tool_call_count = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
 
     try:
-        url, headers, body = _build_provider_request(
-            provider, api_key, model, system_prompt, user_prompt
-        )
+        from contextlib import AsyncExitStack
+        mcp_exit_stack = AsyncExitStack()
+        await mcp_exit_stack.__aenter__()
+
+        url = _resolve_provider_url(provider)
+        headers = _build_provider_headers(provider, api_key)
+
+        # Build conversation messages
+        messages: list[dict] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # ── Discover MCP tools ───────────────────────────────────────────────
+        openai_tools: list[dict] = []
+        tool_server_map: dict = {}
+
+        if mcp_config:
+            openai_tools, tool_server_map = await _connect_mcp_and_list_tools(
+                mcp_config, allowed_tools_set, mcp_exit_stack
+            )
+            if openai_tools:
+                await _log(
+                    workflow,
+                    "tools_discovered",
+                    f"{len(openai_tools)} tool(s) available: {[t['function']['name'] for t in openai_tools]}"[:200],
+                    task_exec,
+                )
 
         await _log(
             workflow,
             "model_call",
-            f"Sending prompt to {model} via {provider.provider_type} provider '{provider.name}'",
+            f"Sending prompt to {model} via {provider.provider_type} provider '{provider.name}'"
+            f" (tools: {len(openai_tools)})",
             task_exec,
         )
 
+        # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
-            response = await http.post(url, headers=headers, json=body)
-            response.raise_for_status()
+            while True:
+                body: dict = {"model": model, "messages": messages}
+                if openai_tools:
+                    body["tools"] = openai_tools
+                    body["tool_choice"] = "auto"
 
-        data = response.json()
-        choices = data.get("choices") or []
-        if choices:
-            message = choices[0].get("message", {})
-            final_text = message.get("content") or ""
+                response = await http.post(url, headers=headers, json=body)
+                response.raise_for_status()
 
-        # Track usage if the response includes it
-        usage_data = data.get("usage", {})
-        input_tok = int(usage_data.get("prompt_tokens", 0))
-        output_tok = int(usage_data.get("completion_tokens", 0))
+                data = response.json()
+
+                # Track token usage
+                usage_data = data.get("usage", {})
+                total_input_tokens += int(usage_data.get("prompt_tokens", 0))
+                total_output_tokens += int(usage_data.get("completion_tokens", 0))
+
+                choices = data.get("choices") or []
+                if not choices:
+                    break
+
+                choice = choices[0]
+                message = choice.get("message", {})
+                finish_reason = choice.get("finish_reason", "")
+
+                # ── Handle tool calls ────────────────────────────────────────
+                tool_calls = message.get("tool_calls")
+                if tool_calls and finish_reason != "stop":
+                    # Append assistant message with tool_calls to conversation
+                    messages.append(message)
+
+                    for tc in tool_calls:
+                        tool_call_count += 1
+                        func = tc.get("function", {})
+                        tool_name = func.get("name", "unknown")
+                        raw_args = func.get("arguments", "{}")
+                        try:
+                            tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                        except json.JSONDecodeError:
+                            tool_args = {}
+
+                        await _log(
+                            workflow, "tool_call", tool_name, task_exec,
+                            tool_input=json.dumps(tool_args)[:500],
+                        )
+
+                        # Execute the tool via MCP
+                        tool_result = await _execute_mcp_tool(
+                            tool_name, tool_args, tool_server_map
+                        )
+
+                        await _log(
+                            workflow, "tool_result", f"{tool_name} completed", task_exec,
+                            tool_output=tool_result[:500],
+                        )
+
+                        # Append tool result to conversation
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            "content": tool_result,
+                        })
+
+                    # Check max turns
+                    if tool_call_count >= max_turns:
+                        await _log(
+                            workflow, "max_turns",
+                            f"Reached max tool turns ({max_turns}), requesting final answer",
+                            task_exec,
+                        )
+                        # Ask model for a final answer without tools
+                        messages.append({
+                            "role": "user",
+                            "content": "You have reached the maximum number of tool calls. "
+                            "Please provide your final answer based on the information gathered so far.",
+                        })
+                        final_body = {"model": model, "messages": messages}
+                        final_resp = await http.post(url, headers=headers, json=final_body)
+                        final_resp.raise_for_status()
+                        final_data = final_resp.json()
+                        fu = final_data.get("usage", {})
+                        total_input_tokens += int(fu.get("prompt_tokens", 0))
+                        total_output_tokens += int(fu.get("completion_tokens", 0))
+                        fc = final_data.get("choices") or []
+                        if fc:
+                            final_text = fc[0].get("message", {}).get("content") or ""
+                        break
+
+                    # Continue the loop for the next model call
+                    continue
+
+                # ── Final text response (no tool calls) ──────────────────────
+                final_text = message.get("content") or ""
+                break
+
+        # ── Record usage & finalize ──────────────────────────────────────────
         usage = UsageStats(
-            total_input_tokens=input_tok,
-            total_output_tokens=output_tok,
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
         )
         workflow.usage = usage
-        if input_tok:
-            tokens_total.labels(direction="input", model=model).inc(input_tok)
-        if output_tok:
-            tokens_total.labels(direction="output", model=model).inc(output_tok)
+        if total_input_tokens:
+            tokens_total.labels(direction="input", model=model).inc(total_input_tokens)
+        if total_output_tokens:
+            tokens_total.labels(direction="output", model=model).inc(total_output_tokens)
+        if tool_call_count:
+            tool_calls_total.labels(tool_name="byok_aggregate").inc(tool_call_count)
 
         workflow.messages.append(Message(role="assistant", content=final_text or ""))
 
@@ -348,7 +579,11 @@ async def _run_with_custom_provider(
 
         workflow.status = WorkflowStatus.COMPLETED
         await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
-        await _log(workflow, "completed", f"Final status: {workflow.status}", task_exec)
+        await _log(
+            workflow, "completed",
+            f"Final status: {workflow.status} (tool_calls: {tool_call_count})",
+            task_exec,
+        )
         await _publish_status(workflow)
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
@@ -359,7 +594,7 @@ async def _run_with_custom_provider(
         if task_exec:
             task_exec.status = TaskStatus.COMPLETED
             task_exec.finished_at = datetime.now(UTC)
-            task_exec.tool_calls = 0
+            task_exec.tool_calls = tool_call_count
             task_exec.response = final_text
             task_exec.usage = usage
             task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
@@ -390,6 +625,11 @@ async def _run_with_custom_provider(
             await task_exec.save()
         final_text = None
     finally:
+        # Close MCP server connections
+        try:
+            await mcp_exit_stack.__aexit__(None, None, None)
+        except Exception:
+            pass
         agent_tasks_active.dec()
         agent_tasks_total.labels(
             status=workflow.status,
@@ -586,6 +826,8 @@ async def run_agent(
             custom_provider,
             custom_provider_key,
             task_exec,
+            mcp_config=mcp_config,
+            allowed_tools_set=allowed_tools_set,
         )
 
     # ── Usage tracking state ──
