@@ -31,6 +31,7 @@ class WorkflowCreate(BaseModel):
 
 class WorkflowUpdate(BaseModel):
     title: str | None = None
+    agent_id: str | None = None
     max_turns: int | None = None
     output_format: str | None = None
     model: str | None = None

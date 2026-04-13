@@ -1056,7 +1056,7 @@ async function deleteGuardrail(id) {
 // ── Workflows ──
 async function loadWorkflows() {
   try {
-    [workflows, agents, guardrails] = await Promise.all([api('/api/workflows'), api('/api/agents'), api('/api/guardrails')]);
+    [workflows, agents, guardrails, skills] = await Promise.all([api('/api/workflows'), api('/api/agents'), api('/api/guardrails'), api('/api/skills')]);
     document.getElementById('workflows-body').innerHTML = workflows.length
       ? workflows.map(w => `<tr>
           <td><strong>${esc(w.title || w.id.slice(0,8))}</strong>${(w.guardrail_ids?.length||w.guardrail_tags?.length) ? ' <span title="Has guardrails" style="color:var(--muted);font-size:11px">🛡️</span>' : ''}</td>
@@ -1216,6 +1216,8 @@ async function saveWorkflow() {
 function openEditWorkflowModal(id) {
   const w = workflows.find(x => x.id === id);
   if (!w) return;
+  const agentEditOpts = agents.map(a =>
+    `<option value="${a.id}" ${a.id === w.agent_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
   const guardrailEditOpts = guardrails.map(g =>
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" class="gr-id-check" value="${g.id}" ${(w.guardrail_ids||[]).includes(g.id) ? 'checked' : ''}>
@@ -1225,6 +1227,7 @@ function openEditWorkflowModal(id) {
   document.getElementById('modal-title').textContent = 'Edit Workflow';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group"><label>Title</label><input id="f-wf-edit-title" value="${esc(w.title||'')}"></div>
+    <div class="form-group"><label>Agent</label><select id="f-wf-edit-agent">${agentEditOpts}</select></div>
     <div class="form-group"><label>Model</label>
       <select id="f-wf-edit-model"><option value="">Loading models…</option></select>
       <div id="f-wf-edit-model-info" class="hint"></div>
@@ -1302,6 +1305,7 @@ async function updateWorkflow(id) {
     .split(',').map(t=>t.trim()).filter(Boolean);
   const body = {
     title: document.getElementById('f-wf-edit-title').value || null,
+    agent_id: document.getElementById('f-wf-edit-agent').value || undefined,
     model: document.getElementById('f-wf-edit-model').value || undefined,
     max_turns: parseInt(document.getElementById('f-wf-edit-turns').value) || undefined,
     output_format: document.getElementById('f-wf-edit-format').value,

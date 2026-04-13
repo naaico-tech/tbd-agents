@@ -226,6 +226,11 @@ async def update_workflow(
         raise HTTPException(status_code=403, detail="Not your workflow")
 
     updates = body.model_dump(exclude_unset=True)
+    if "agent_id" in updates:
+        agent = await Agent.get(PydanticObjectId(updates["agent_id"]))
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        updates["agent_id"] = str(agent.id)
     if "output_format" in updates and updates["output_format"] not in ("json", "markdown"):
         raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
     if "output_format" in updates:
