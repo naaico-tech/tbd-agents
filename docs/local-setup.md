@@ -118,7 +118,12 @@ export REDIS_URL=redis://localhost:6379/0
 export GITHUB_TOKEN="ghp_your_token_here"
 ```
 
-Or create a `.env` file — Pydantic Settings loads it automatically.
+Or create a `.env` file from the template — Pydantic Settings loads it automatically:
+
+```bash
+cp .env.example .env
+# Edit .env and fill in your values
+```
 
 ### ► Step 4 — Start the API server
 
@@ -182,10 +187,30 @@ open http://localhost:8000/dashboard
 
 ---
 
+## ✅ Running Tests
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run a specific test file
+python -m pytest tests/test_agent_engine.py -v
+
+# Lint check
+ruff check app/ tests/
+
+# Auto-format
+ruff format app/ tests/
+```
+
+> 💡 Tests use `pytest-asyncio` with `asyncio_mode = "auto"` — all async test functions are picked up automatically.
+
+---
+
 ## 🔧 Troubleshooting
 
 ```
- ┌─────────────────────────────────────┬─────────────────────────────────────────────────────────┐
+ ┌─────────────────────────────────────┐─────────────────────────────────────────────────────────┐
  │  ░░ PROBLEM                         │  ░░ SOLUTION                                            │
  ├─────────────────────────────────────┼─────────────────────────────────────────────────────────┤
  │  Connection refused on port 8000    │  Ensure uvicorn or the app container is running          │
@@ -193,8 +218,19 @@ open http://localhost:8000/dashboard
  │  Workers not picking up tasks       │  Verify REDIS_URL matches between API and worker         │
  │  MCP server fails to start          │  Ensure Node.js 22+ is installed (npx needs it)         │
  │  copilot scope errors               │  Regenerate your GitHub PAT with copilot scope enabled  │
+ │  Token encryption errors            │  Set TOKEN_ENCRYPTION_KEY in .env (see .env.example)    │
  └─────────────────────────────────────┴─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 📚 What's Next?
+
+Now that you're up and running:
+
+- 🏗️ Read [Architecture](architecture.md) to understand how the system components fit together
+- 🎮 Read [Features](features.md) for a deep dive into agents, MCP tools, skills, and streaming
+- 🤝 Read [Contributing](../CONTRIBUTING.md) if you want to contribute changes
 
 ---
 

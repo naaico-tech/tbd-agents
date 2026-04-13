@@ -10,6 +10,8 @@
 <p align="center"><sub>⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜</sub></p>
 
 > 🎮 A deep dive into what TBD Agent offers and how each capability works.
+>
+> **Prerequisites:** Make sure you have a running instance first — see [Local Setup](local-setup.md).
 
 ---
 

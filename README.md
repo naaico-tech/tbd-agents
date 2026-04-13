@@ -70,11 +70,13 @@ Spin up purpose-built agents with distinct system prompts, wire them to any MCP 
 ```bash
 git clone <repo-url> && cd tbd-agents
 
-# Set your GitHub PAT (requires `copilot` scope)
-export GITHUB_TOKEN="ghp_your_token_here"
+# Create your environment file and fill in at least GITHUB_TOKEN
+cp .env.example .env
 
 docker-compose up --build
 ```
+
+Your GitHub PAT needs the `copilot` scope — [create one here](https://github.com/settings/tokens).
 
 ```
  ┌──────────────────────────────────────────────────┐
@@ -98,8 +100,7 @@ See [docs/local-setup.md](docs/local-setup.md) for detailed local development in
  ║  [1] Local Setup                      ║
  ║  [2] Architecture                     ║
  ║  [3] Features                         ║
- ║  [4] GitHub Settings Guide            ║
- ║  [5] Contributing                     ║
+ ║  [4] Contributing                     ║
  ║                                       ║
  ╚═══════════════════════════════════════╝
 ```
@@ -109,7 +110,6 @@ See [docs/local-setup.md](docs/local-setup.md) for detailed local development in
 | [Local Setup](docs/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
 | [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
 | [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
-| [GitHub Settings Guide](docs/github-settings-guide.md) | Repository configuration for open source with controlled access |
 | [Contributing](CONTRIBUTING.md) | How to contribute: setup, coding standards, PR guidelines |
 
 ---

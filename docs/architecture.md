@@ -9,8 +9,8 @@
 
 <p align="center"><sub>⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜⬛⬜</sub></p>
 
-> 🏛️ TBD Agent is a distributed system designed to run custom AI agents at scale. This document covers the system design, how requests flow through the stack, and how horizontal scaling works.
-
+> 🏛️ TBD Agent is a distributed system designed to run custom AI agents at scale. This document covers the system design, how requests flow through the stack, and how horizontal scaling works.>
+> **New here?** Start with [Local Setup](local-setup.md) to get the system running first, then come back here to understand how the pieces connect.
 ---
 
 ## 🗺️ High-Level Overview
