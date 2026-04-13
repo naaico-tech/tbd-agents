@@ -127,6 +127,8 @@ Stores all persistent state:
 - 🤖 **Agents** — name, system prompt, model, MCP server IDs, MCP server tags
 - 🔧 **MCP Servers** — name, transport type (stdio/SSE), connection config, tags, status
 - 🧩 **Skills** — name, instructions, tags
+- 📚 **Knowledge Bases** — name, description, tags
+- 📄 **Knowledge Chunks** — content, pre-tokenised terms, source attribution
 - ⚙️ **Workflows** — agent reference, model, max turns, session ID, status, messages, logs, usage stats
 
 Each worker initialises its own Motor/Beanie connection on startup.
@@ -215,6 +217,15 @@ SSE connections are per-client, and each API instance independently subscribes t
 ║  ├── name, description, instructions                      ║
 ║  └── tags[]                                               ║
 ║                                                           ║
+║  📚 KnowledgeBase                                         ║
+║  ├── name, description                                    ║
+║  └── tags[]                                               ║
+║                                                           ║
+║  📄 KnowledgeChunk                                        ║
+║  ├── knowledge_base_id ──► KnowledgeBase                  ║
+║  ├── content, tokens[] (BM25 pre-tokenised)               ║
+║  └── source (attribution label)                           ║
+║                                                           ║
 ║  ⚙️ Workflow                                               ║
 ║  ├── agent_id ──► Agent                                   ║
 ║  ├── model, max_turns, current_turn                       ║
@@ -223,6 +234,7 @@ SSE connections are per-client, and each API instance independently subscribes t
 ║  ├── infinite_session (bool)                              ║
 ║  ├── usage { premium_req, in_tok, out_tok, cache, cost }  ║
 ║  ├── skill_ids[] ──► Skill                                ║
+║  ├── knowledge_base_ids[] ──► KnowledgeBase               ║
 ║  ├── messages[] { role, content, tool_calls }             ║
 ║  └── logs[] { timestamp, event, detail }                  ║
 ║                                                           ║

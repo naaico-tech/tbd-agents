@@ -72,6 +72,7 @@ class Workflow(Document):
     repo_url: str | None = None  # GitHub repo URL to clone for agent access
     repo_branch: str | None = None  # Branch to checkout (default: main)
     repo_token_name: str | None = None  # Token Store key for private repo auth
+    knowledge_base_ids: list[str] = Field(default_factory=list)  # KBs to query at runtime
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

@@ -145,6 +145,45 @@ curl -X POST http://localhost:8000/api/workflows/<WF_ID>/skills/<SKILL_ID> \
 
 ---
 
+## 📚 Knowledge Bases
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ░░ CODEX ░░  ·  Give your agent a searchable memory        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Knowledge Bases let you store domain-specific documents (runbooks, API docs, policies, FAQs) in MongoDB and have the agent automatically retrieve the most relevant chunks at run time using **BM25 ranking** — no vector database required.
+
+- Each knowledge base holds **named, tagged chunks** of text
+- Chunks are **pre-tokenised on write** for fast BM25 scoring
+- At run time, the top-5 most relevant chunks are injected into the system prompt as a `<knowledge_context>` block
+- Knowledge bases are **shared across workflows** — attach as many KBs to a workflow as you need
+
+```bash
+# ► Create a knowledge base
+curl -X POST http://localhost:8000/api/knowledge-bases \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "sre-runbooks", "description": "On-call runbooks", "tags": ["sre"]}'
+
+# ► Add a chunk
+curl -X POST http://localhost:8000/api/knowledge-bases/<KB_ID>/chunks \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "## DB Connection Exhaustion\nStep 1: Check pg_stat_activity...", "source": "runbooks/db.md"}'
+
+# ► Attach to a workflow
+curl -X POST http://localhost:8000/api/workflows \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "<AGENT_ID>", "knowledge_base_ids": ["<KB_ID>"]}'
+```
+
+See [knowledge-base.md](knowledge-base.md) for the full design report, API reference, chunking strategies, and vector-search upgrade path.
+
+---
+
 ## ⚙️ Workflows
 
 ```

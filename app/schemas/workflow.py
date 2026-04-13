@@ -27,6 +27,7 @@ class WorkflowCreate(BaseModel):
     repo_url: str | None = None  # GitHub repo URL
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
+    knowledge_base_ids: list[str] = []  # Knowledge bases to query at runtime
 
 
 class WorkflowUpdate(BaseModel):
@@ -43,6 +44,7 @@ class WorkflowUpdate(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    knowledge_base_ids: list[str] | None = None
 
 
 class PromptRequest(BaseModel):
@@ -97,6 +99,7 @@ class WorkflowResponse(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    knowledge_base_ids: list[str] = []
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

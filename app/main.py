@@ -11,6 +11,7 @@ from app.api.routes import (
     agents,
     guardrails,
     health,
+    knowledge_bases,
     mcps,
     models,
     providers,
@@ -50,6 +51,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(guardrails.router)
+app.include_router(knowledge_bases.router)
 app.include_router(providers.router)
 app.include_router(skills.router)
 app.include_router(mcps.router)

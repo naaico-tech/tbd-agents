@@ -163,8 +163,9 @@ async def _build_system_prompt(
     agent: Agent,
     skill_ids: list[str],
     workflow: Workflow,
+    user_prompt: str = "",
 ) -> str:
-    """Assemble the system prompt from agent config + skills."""
+    """Assemble the system prompt from agent config + skills + knowledge context."""
     system_prompt = agent.system_prompt
 
     # Skills
@@ -178,6 +179,14 @@ async def _build_system_prompt(
                 )
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
+
+    # Knowledge bases — retrieve relevant chunks and inject as context
+    if workflow.knowledge_base_ids:
+        from app.core.knowledge_retriever import retrieve
+
+        kb_context = await retrieve(workflow.knowledge_base_ids, user_prompt)
+        if kb_context:
+            system_prompt += "\n\n" + kb_context
 
     # Autonomous execution directive
     system_prompt += (
@@ -797,8 +806,8 @@ async def run_agent(
         task_exec,
     )
 
-    # Build system prompt with skills + output destination hints
-    system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow)
+    # Build system prompt with skills + knowledge context + output destination hints
+    system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow, user_prompt)
 
     # Sync repository if configured
     repo_path = await _sync_repo(workflow)

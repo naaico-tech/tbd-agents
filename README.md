@@ -109,7 +109,8 @@ See [docs/local-setup.md](docs/local-setup.md) for detailed local development in
 |---|---|
 | [Local Setup](docs/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
 | [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
-| [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
+| [Features](docs/features.md) | Deep dive into agents, MCP, skills, knowledge bases, streaming, and more |
+| [Knowledge Bases](docs/knowledge-base.md) | Design report: BM25 retrieval, API reference, chunking strategies, vector-search upgrade path |
 | [Contributing](CONTRIBUTING.md) | How to contribute: setup, coding standards, PR guidelines |
 
 ---

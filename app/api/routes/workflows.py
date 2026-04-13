@@ -55,6 +55,7 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        knowledge_base_ids=wf.knowledge_base_ids,
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
@@ -90,6 +91,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
+        knowledge_base_ids=body.knowledge_base_ids,
     )
     await wf.insert()
     return _to_response(wf)
