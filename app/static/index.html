@@ -1,0 +1,1868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TBD Agent</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a2e;
+    --border: #2a2a3a; --text: #e0e0f0; --muted: #7878a0;
+    --accent: #a976f9; --accent-bg: rgba(169,118,249,.12);
+    --green: #2ce574; --red: #ff3a5e; --yellow: #ff9e4a; --purple: #a976f9;
+    --cyan: #36e0e0;
+    --radius: 4px;
+    --glow: 0 0 12px rgba(169,118,249,.3);
+    --glow-cyan: 0 0 12px rgba(54,224,224,.3);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-brand { padding: 20px; font-family: 'Press Start 2P', cursive; font-size: 11px; font-weight: 700;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; letter-spacing: 1px; }
+  .sidebar-brand svg { width: 24px; height: 24px; fill: var(--accent); filter: drop-shadow(0 0 6px rgba(169,118,249,.5)); }
+  .sidebar nav { flex: 1; padding: 12px 0; }
+  .sidebar nav a { display: flex; align-items: center; gap: 10px; padding: 10px 20px;
+    color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: all .2s; cursor: pointer;
+    border-left: 2px solid transparent; }
+  .sidebar nav a:hover { color: var(--text); background: var(--surface2); }
+  .sidebar nav a.active { color: var(--accent); background: var(--accent-bg); border-left: 2px solid var(--accent);
+    border-right: none; text-shadow: 0 0 10px rgba(169,118,249,.4); }
+  .sidebar nav a .icon { font-size: 18px; width: 22px; text-align: center; }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted);
+    font-family: 'VT323', monospace; font-size: 14px; letter-spacing: .5px; }
+
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; background: var(--surface); }
+  .topbar h1 { font-size: 18px; font-weight: 600; letter-spacing: -.2px; }
+  .content { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* Cards & Grids */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; transition: border-color .2s, box-shadow .2s; }
+  .stat-card:hover { border-color: var(--accent); box-shadow: var(--glow); }
+  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+    font-family: 'VT323', monospace; font-size: 14px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.blue { color: var(--cyan); }
+  .stat-card .value.green { color: var(--green); }
+  .stat-card .value.purple { color: var(--purple); }
+  .stat-card .value.yellow { color: var(--yellow); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    transition: border-color .2s; }
+  .card:hover { border-color: #3a3a5a; }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; }
+  .card-header h2 { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+  .card-body { padding: 20px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    font-family: 'VT323', monospace; font-size: 14px; }
+  tr:hover td { background: var(--surface2); }
+  td .mono { font-family: 'VT323', monospace; font-size: 14px; color: var(--muted); }
+
+  /* Buttons */
+  .btn { padding: 8px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text); transition: all .2s;
+    display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { border-color: var(--accent); box-shadow: var(--glow); color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #0a0a0f; font-weight: 600; }
+  .btn-primary:hover { background: #b98aff; border-color: #b98aff; box-shadow: var(--glow); color: #0a0a0f; }
+  .btn-danger { color: var(--red); }
+  .btn-danger:hover { background: rgba(255,58,94,.1); border-color: var(--red); box-shadow: 0 0 12px rgba(255,58,94,.3); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-group { display: flex; gap: 6px; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 11px; font-weight: 600;
+    letter-spacing: .3px; text-transform: uppercase; }
+  .badge-green { background: rgba(44,229,116,.12); color: var(--green); border: 1px solid rgba(44,229,116,.25); }
+  .badge-blue { background: rgba(54,224,224,.12); color: var(--cyan); border: 1px solid rgba(54,224,224,.25); }
+  .badge-yellow { background: rgba(255,158,74,.12); color: var(--yellow); border: 1px solid rgba(255,158,74,.25); }
+  .badge-red { background: rgba(255,58,94,.12); color: var(--red); border: 1px solid rgba(255,58,94,.25); }
+  .badge-purple { background: rgba(169,118,249,.12); color: var(--purple); border: 1px solid rgba(169,118,249,.25); }
+  .badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .badge-gray { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 11px; background: var(--surface2);
+    color: var(--cyan); margin-right: 3px; border: 1px solid rgba(54,224,224,.2); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(10,10,15,.85); backdrop-filter: blur(4px);
+    display: none; justify-content: center; align-items: flex-start; padding-top: 80px; z-index: 100; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    width: 700px; max-width: 90vw; max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 0 40px rgba(169,118,249,.15), 0 20px 60px rgba(0,0,0,.5); }
+  .modal.modal-wide { width: 960px; }
+  .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex;
+    justify-content: space-between; align-items: center; }
+  .modal-header h3 { font-size: 15px; font-weight: 600; }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer;
+    transition: color .2s; }
+  .modal-close:hover { color: var(--red); }
+  .modal-body { padding: 20px; }
+  .modal-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex;
+    justify-content: flex-end; gap: 8px; }
+
+  /* Forms */
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .5px; }
+  .form-group input, .form-group textarea, .form-group select {
+    width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 14px; font-family: inherit; transition: border-color .2s, box-shadow .2s; }
+  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 8px rgba(169,118,249,.2); }
+  .form-group textarea { resize: vertical; min-height: 80px; }
+  .form-group .hint { font-size: 11px; color: var(--muted); margin-top: 4px; font-family: 'VT323', monospace; font-size: 13px; }
+
+  /* Sections */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Prompt area */
+  .prompt-area { display: flex; gap: 12px; }
+  .prompt-area textarea { flex: 1; min-height: 60px; }
+  .prompt-area .btn { align-self: flex-end; }
+
+  /* Logs */
+  .log-list { max-height: 400px; overflow-y: auto; }
+  .log-entry { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
+    font-family: 'VT323', monospace; font-size: 15px; }
+  .log-entry .ts { color: var(--muted); margin-right: 8px; }
+  .log-entry .ev { color: var(--cyan); margin-right: 8px; }
+  .log-entry.log-tool { cursor: pointer; transition: background .15s; }
+  .log-entry.log-tool:hover { background: var(--surface2); }
+  .log-entry.log-tool .tool-hint { margin-left: 6px; font-size: 11px; color: var(--muted); }
+  .log-entry.log-tool-fail .ev { color: var(--red); }
+
+  /* Tool detail modal content */
+  .tool-detail-section { margin-bottom: 16px; }
+  .tool-detail-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin-bottom: 6px; font-family: 'VT323', monospace; font-size: 14px; }
+  .tool-detail-pre { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; font-family: 'VT323', monospace; font-size: 14px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; color: var(--text); }
+
+  /* Messages */
+  .msg { padding: 12px 16px; margin-bottom: 10px; border-radius: var(--radius); font-size: 14px;
+    line-height: 1.6; word-break: break-word; position: relative; }
+  .msg-user { background: rgba(169,118,249,.08); border: 1px solid rgba(169,118,249,.2); margin-left: 40px; }
+  .msg-assistant { background: var(--surface2); border: 1px solid var(--border); margin-right: 40px; }
+  .msg-system { background: rgba(54,224,224,.06); border: 1px solid rgba(54,224,224,.15); font-size: 12px; color: var(--muted); }
+  .msg-tool { background: rgba(44,229,116,.06); border: 1px solid rgba(44,229,116,.15); font-size: 13px; }
+  .msg .role-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+    font-family: 'VT323', monospace; font-size: 14px; }
+  .msg-user .role-label { color: var(--accent); }
+  .msg-assistant .role-label { color: var(--text); }
+  .msg-system .role-label { color: var(--cyan); }
+  .msg-tool .role-label { color: var(--green); }
+  .msg .msg-content { white-space: pre-wrap; }
+  .msg .msg-content code { background: var(--bg); padding: 1px 5px; border-radius: 2px; font-size: 13px; font-family: 'VT323', monospace; font-size: 15px; }
+  .msg .msg-content pre { background: var(--bg); padding: 10px 14px; border-radius: var(--radius); overflow-x: auto;
+    font-size: 13px; font-family: 'VT323', monospace; margin: 8px 0; line-height: 1.4; border: 1px solid var(--border); }
+  .msg .msg-content pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* Tool call cards */
+  .tool-call-card { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .tool-call-card summary { padding: 8px 12px; background: var(--surface2); cursor: pointer; font-size: 12px;
+    font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .tool-call-card summary::marker { color: var(--muted); }
+  .tool-call-card summary .tool-name { color: var(--green); font-family: 'VT323', monospace; font-size: 15px; }
+  .tool-call-card summary .tool-id { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: auto; }
+  .tool-call-card .tool-args { padding: 8px 12px; background: var(--bg); font-size: 13px;
+    font-family: 'VT323', monospace; white-space: pre-wrap; max-height: 300px; overflow-y: auto;
+    border-top: 1px solid var(--border); }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* Progress panel */
+  .progress-panel { margin-bottom: 16px; }
+  .progress-bar-track { height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; margin: 10px 0 12px; }
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--cyan)); border-radius: 2px;
+    transition: width .3s ease; box-shadow: 0 0 8px rgba(169,118,249,.4); }
+  .todo-list { list-style: none; padding: 0; }
+  .todo-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: var(--radius); }
+  .todo-item:hover { background: var(--surface2); }
+  .todo-icon { width: 18px; text-align: center; font-size: 14px; flex-shrink: 0; }
+  .todo-title { flex: 1; }
+  .todo-item.completed .todo-title { color: var(--muted); text-decoration: line-through; }
+  .todo-item.in-progress .todo-title { color: var(--cyan); font-weight: 500; }
+  .todo-item.not-started .todo-title { color: var(--text); }
+  .progress-percent { font-size: 12px; color: var(--muted); font-weight: 600; font-family: 'VT323', monospace; font-size: 14px; }
+
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 200; display: flex;
+    flex-direction: column; gap: 8px; }
+  .toast { padding: 12px 16px; border-radius: var(--radius); font-size: 13px; background: var(--surface);
+    border: 1px solid var(--border); animation: slideIn .2s; max-width: 360px; }
+  .toast-error { border-color: var(--red); color: var(--red); box-shadow: 0 0 12px rgba(255,58,94,.2); }
+  .toast-success { border-color: var(--green); color: var(--green); box-shadow: 0 0 12px rgba(44,229,116,.2); }
+  @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+  /* Selection */
+  ::selection { background: rgba(169,118,249,.3); color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+    <span style="background:linear-gradient(135deg,var(--accent),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent">TBD AGENT</span>
+  </div>
+  <nav>
+    <a data-page="dashboard" class="active"><span class="icon">📊</span> Dashboard</a>
+    <a data-page="agents"><span class="icon">🤖</span> Agents</a>
+    <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
+    <a data-page="skills"><span class="icon">⚡</span> Skills</a>
+    <a data-page="guardrails"><span class="icon">🛡️</span> Guardrails</a>
+    <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
+    <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
+    <a data-page="tasks"><span class="icon">📋</span> Task Executions</a>
+    <a data-page="task"><span class="icon">💬</span> Run Task</a>
+  </nav>
+  <div class="sidebar-footer">v0.1.0 · Copilot SDK · NAAICO</div>
+</aside>
+
+<!-- Main Content -->
+<div class="main">
+  <div class="topbar">
+    <h1 id="page-title">Dashboard</h1>
+    <div id="topbar-actions"></div>
+  </div>
+  <div class="content">
+
+    <!-- Dashboard Page -->
+    <div id="page-dashboard" class="page active">
+      <div class="stats">
+        <div class="stat-card"><div class="label">Agents</div><div class="value blue" id="stat-agents">-</div></div>
+        <div class="stat-card"><div class="label">MCP Servers</div><div class="value green" id="stat-mcps">-</div></div>
+        <div class="stat-card"><div class="label">Skills</div><div class="value purple" id="stat-skills">-</div></div>
+        <div class="stat-card"><div class="label">Tokens</div><div class="value green" id="stat-tokens">-</div></div>
+        <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
+        <div class="stat-card"><div class="label">Task Executions</div><div class="value purple" id="stat-tasks">-</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Recent Workflows</h2></div>
+        <div class="card-body"><table><thead><tr>
+          <th>ID</th><th>Agent</th><th>Status</th><th>Model</th><th>Created</th>
+        </tr></thead><tbody id="dash-workflows-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Agents Page -->
+    <div id="page-agents" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openAgentModal()">+ New Agent</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Model</th><th>MCP Servers</th><th>Created</th><th></th>
+        </tr></thead><tbody id="agents-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- MCP Servers Page -->
+    <div id="page-mcps" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openMcpModal()">+ Register MCP</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Transport</th><th>Status</th><th>Tools</th><th>Created</th><th></th>
+        </tr></thead><tbody id="mcps-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Skills Page -->
+    <div id="page-skills" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openSkillModal()">+ New Skill</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Tags</th><th>Created</th><th></th>
+        </tr></thead><tbody id="skills-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Guardrails Page -->
+    <div id="page-guardrails" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openGuardrailModal()">+ New Guardrail</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Type</th><th>Tags</th><th>Status</th><th>Created</th><th></th>
+        </tr></thead><tbody id="guardrails-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Tokens Page -->
+    <div id="page-tokens" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openTokenModal()">+ New Token</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Value</th><th>Description</th><th>Created By</th><th>Created</th><th></th>
+        </tr></thead><tbody id="tokens-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Workflows Page -->
+    <div id="page-workflows" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openWorkflowModal()">+ New Workflow</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Title</th><th>Agent</th><th>Status</th><th>Model</th><th>Turns</th><th>Created</th><th></th>
+        </tr></thead><tbody id="workflows-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Task Executions Page -->
+    <div id="page-tasks" class="page">
+      <div class="card">
+        <div class="card-header">
+          <h2>Task Executions</h2>
+          <button class="btn btn-sm" onclick="loadTaskExecutions()">↻ Refresh</button>
+        </div>
+        <div class="card-body"><table><thead><tr>
+          <th>Prompt</th><th>Workflow</th><th>Agent</th><th>Status</th><th>Worker</th><th>Tool Calls</th><th>Elapsed</th><th>Created</th><th></th>
+        </tr></thead><tbody id="task-execs-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Run Task Page -->
+    <div id="page-task" class="page">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h2>Assign Task to Agent</h2></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Select Workflow</label>
+            <select id="task-workflow"></select>
+          </div>
+          <div class="form-group" id="task-prompt-group">
+            <label>Prompt</label>
+            <textarea id="task-prompt" rows="4" placeholder="Describe the task you want the agent to perform..."></textarea>
+          </div>
+          <div class="form-group" id="task-request-group" style="display:none">
+            <label>Request Object (JSON) <span class="badge badge-purple" style="vertical-align:middle;margin-left:4px">request guardrail</span></label>
+            <textarea id="task-request" rows="6" placeholder='{"key": "value"}'></textarea>
+            <div class="hint">This workflow has request guardrails — provide a JSON object to validate against the schema.</div>
+          </div>
+          <div class="form-group" id="task-reasoning-group" style="display:none">
+            <label>Thinking Level <span style="font-weight:400;color:var(--muted);font-size:12px">(override workflow default)</span></label>
+            <select id="task-reasoning"><option value="">Use workflow default</option></select>
+          </div>
+          <button class="btn btn-primary" id="task-send" onclick="sendTask()">▶ Send Task</button>
+          <button class="btn btn-danger" id="task-halt" onclick="haltTask()" style="display:none">⏹ Stop</button>
+        </div>
+      </div>
+
+      <div id="task-result" style="display:none">
+        <!-- Progress Panel -->
+        <div id="task-progress-panel" class="card progress-panel" style="display:none;margin-bottom:16px">
+          <div class="card-header">
+            <h2>Progress</h2>
+            <span id="progress-percent" class="progress-percent">0%</span>
+          </div>
+          <div class="card-body">
+            <div class="progress-bar-track"><div id="progress-bar" class="progress-bar-fill" style="width:0%"></div></div>
+            <ul id="progress-todos" class="todo-list"></ul>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">
+            <h2>Status</h2>
+            <span id="task-status-badge" class="badge"></span>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;gap:24px;font-size:14px;color:var(--muted);flex-wrap:wrap">
+              <span>Turn: <strong id="task-turn" style="color:var(--text)">-</strong></span>
+              <span>Model: <strong id="task-model" style="color:var(--text)">-</strong></span>
+              <span>Format: <strong id="task-format" style="color:var(--text)">-</strong></span>
+
+            </div>
+            <div id="task-usage" style="display:none;gap:24px;font-size:13px;color:var(--muted);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap">
+              <span>Requests: <strong id="usage-requests" style="color:var(--purple)">-</strong></span>
+              <span>In: <strong id="usage-input" style="color:var(--accent)">-</strong></span>
+              <span>Out: <strong id="usage-output" style="color:var(--green)">-</strong></span>
+              <span>Cost: <strong id="usage-cost" style="color:var(--yellow)">-</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h2>Messages</h2></div>
+          <div class="card-body" id="task-messages" style="max-height:600px;overflow-y:auto"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h2>Logs</h2></div>
+          <div class="card-body log-list" id="task-logs"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Create</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+const API = '';  // same origin
+let agents = [], mcps = [], skills = [], guardrails = [], workflows = [], tokens = [];
+let pollTimer = null;
+let sseSource = null;         // current EventSource
+let streamingMsgEl = null;    // element receiving message_delta tokens
+
+// ── Helpers ──
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+  return data;
+}
+
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function statusBadge(s) {
+  const map = { active:'blue', running:'yellow', completed:'green', failed:'red', halted:'purple', max_turns_reached:'purple',
+    registered:'muted', connected:'green', error:'red' };
+  return `<span class="badge badge-${map[s]||'muted'}">${s}</span>`;
+}
+
+function agentName(id) {
+  const a = agents.find(a => a.id === id);
+  return a ? a.name : id?.slice(0,8) || '-';
+}
+
+// ── Navigation ──
+document.querySelectorAll('.sidebar nav a').forEach(a => {
+  a.addEventListener('click', () => {
+    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    const page = a.dataset.page;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    document.getElementById('page-title').textContent =
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', guardrails:'Guardrails', tokens:'Tokens', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
+    loadPage(page);
+  });
+});
+
+function loadPage(page) {
+  if (page === 'dashboard') loadDashboard();
+  else if (page === 'agents') loadAgents();
+  else if (page === 'mcps') loadMcps();
+  else if (page === 'skills') loadSkills();
+  else if (page === 'guardrails') loadGuardrails();
+  else if (page === 'tokens') loadTokens();
+  else if (page === 'workflows') loadWorkflows();
+  else if (page === 'tasks') loadTaskExecutions();
+  else if (page === 'task') loadTaskPage();
+}
+
+// ── Dashboard ──
+async function loadDashboard() {
+  try {
+    [agents, mcps, skills, workflows, tokens, taskExecs] = await Promise.all([
+      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/tasks')
+    ]);
+    document.getElementById('stat-agents').textContent = agents.length;
+    document.getElementById('stat-mcps').textContent = mcps.length;
+    document.getElementById('stat-skills').textContent = skills.length;
+    document.getElementById('stat-tokens').textContent = tokens.length;
+    document.getElementById('stat-workflows').textContent = workflows.length;
+    document.getElementById('stat-tasks').textContent = taskExecs.length;
+
+    const recent = workflows.slice(-5).reverse();
+    document.getElementById('dash-workflows-body').innerHTML = recent.length
+      ? recent.map(w => `<tr>
+          <td><strong>${esc(w.title || w.id.slice(0,8))}</strong></td>
+          <td>${agentName(w.agent_id)}</td>
+          <td>${statusBadge(w.status)}</td>
+          <td>${w.model}</td>
+          <td>${fmtDate(w.created_at)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No workflows yet</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Agents ──
+async function loadAgents() {
+  try {
+    agents = await api('/api/agents');
+    document.getElementById('agents-body').innerHTML = agents.length
+      ? agents.map(a => `<tr>
+          <td><strong>${esc(a.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(a.description||'')}</span></td>
+          <td>${a.model || 'default'}</td>
+          <td>${a.mcp_server_ids.length}</td>
+          <td>${fmtDate(a.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openAgentModal('${a.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteAgent('${a.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="5" class="empty-state">No agents. Create one to get started.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openAgentModal(id) {
+  const a = id ? agents.find(x => x.id === id) : null;
+  const mcpOpts = mcps.map(m =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${m.id}" ${a?.mcp_server_ids?.includes(m.id)?'checked':''}> ${esc(m.name)}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No MCP servers registered</span>';
+
+  document.getElementById('modal-title').textContent = a ? 'Edit Agent' : 'Create Agent';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-agent-name" value="${esc(a?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-agent-desc" value="${esc(a?.description||'')}"></div>
+    <div class="form-group"><label>System Prompt</label>
+      <textarea id="f-agent-prompt" rows="4">${esc(a?.system_prompt||'You are a helpful assistant.')}</textarea></div>
+    <div class="form-group"><label>Model</label><input id="f-agent-model" value="${esc(a?.model||'')}" placeholder="gpt-4.1"></div>
+    <div class="form-group"><label>MCP Servers</label><div id="f-agent-mcps">${mcpOpts}</div></div>
+    <div class="form-group"><label>MCP Server Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching MCP servers)</span></label>
+      <input id="f-agent-mcp-tags" value="${esc(a?.mcp_server_tags?.join(', ')||'')}" placeholder="e.g. dev-tools, communication">
+      <div class="hint">Any MCP server that has at least one of these tags will be available to this agent.</div></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveAgent('${id||''}')">${a?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveAgent(id) {
+  const mcpIds = [...document.querySelectorAll('#f-agent-mcps input:checked')].map(c => c.value);
+  const mcpTags = document.getElementById('f-agent-mcp-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
+  const body = {
+    name: document.getElementById('f-agent-name').value,
+    description: document.getElementById('f-agent-desc').value,
+    system_prompt: document.getElementById('f-agent-prompt').value,
+    model: document.getElementById('f-agent-model').value || null,
+    mcp_server_ids: mcpIds,
+    mcp_server_tags: mcpTags,
+  };
+  try {
+    if (id) await api(`/api/agents/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/agents', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Agent updated' : 'Agent created');
+    closeModal(); loadAgents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteAgent(id) {
+  if (!confirm('Delete this agent?')) return;
+  try { await api(`/api/agents/${id}`, { method:'DELETE' }); toast('Agent deleted'); loadAgents(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── MCP Servers ──
+async function loadMcps() {
+  try {
+    mcps = await api('/api/mcps');
+    document.getElementById('mcps-body').innerHTML = mcps.length
+      ? mcps.map(m => {
+          const toolCount = m.allowed_tools?.length || 0;
+          const toolLabel = toolCount ? `${toolCount} tool(s)` : 'All tools';
+          const tagBadges = m.tags?.length ? m.tags.map(t => `<span class="badge badge-purple">${esc(t)}</span> `).join('') : '';
+          return `<tr>
+          <td><strong>${esc(m.name)}</strong>${tagBadges ? '<br>'+tagBadges : ''}</td>
+          <td><span class="badge badge-blue">${m.transport_type}</span></td>
+          <td>${statusBadge(m.status)}</td>
+          <td><span class="badge" style="background:var(--border);color:var(--text)">${toolLabel}</span></td>
+          <td>${fmtDate(m.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openMcpModal('${m.id}')">Edit</button>
+            <button class="btn btn-sm" onclick="openToolsModal('${m.id}')">Tools</button>
+            <button class="btn btn-sm" onclick="testMcp('${m.id}')">Test</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteMcp('${m.id}')">Delete</button>
+          </div></td>
+        </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" class="empty-state">No MCP servers. Register one to enable tool use.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openMcpModal(id) {
+  const m = id ? mcps.find(x => x.id === id) : null;
+  const transport = m ? m.transport_type : 'stdio';
+  const isStdio = transport === 'stdio';
+  const isUrl = transport === 'sse' || transport === 'http';
+  const cc = m?.connection_config || {};
+  document.getElementById('modal-title').textContent = m ? 'Edit MCP Server' : 'Register MCP Server';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-mcp-name" value="${esc(m?.name||'')}" placeholder="e.g. datadog-mcp"></div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-mcp-tags" value="${esc(m?.tags?.join(', ')||'')}" placeholder="e.g. dev-tools, monitoring">
+      <div class="hint">Categorize this MCP server. Agents can select MCPs by tag.</div></div>
+    <div class="form-group"><label>Transport Type</label>
+      <select id="f-mcp-transport">
+        <option value="stdio" ${transport==='stdio'?'selected':''}>stdio</option>
+        <option value="sse" ${transport==='sse'?'selected':''}>sse</option>
+        <option value="http" ${transport==='http'?'selected':''}>http (streamable)</option>
+      </select></div>
+    <div id="mcp-stdio-fields" style="display:${isStdio?'block':'none'}">
+      <div class="form-group"><label>Command</label><input id="f-mcp-cmd" value="${esc(cc.command||'')}" placeholder="npx"></div>
+      <div class="form-group"><label>Args (JSON array)</label><input id="f-mcp-args" value="${cc.args?esc(JSON.stringify(cc.args)):''}" placeholder='["-y","@datadog/mcp"]'></div>
+      <div class="form-group"><label>Env (JSON object, optional)</label>
+        <textarea id="f-mcp-env" rows="3" placeholder='{"API_KEY":"{{token:my-api-key}}"}'>${cc.env?esc(JSON.stringify(cc.env,null,2)):''}</textarea>
+        <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store instead of pasting raw values.</div></div>
+    </div>
+    <div id="mcp-url-fields" style="display:${isUrl?'block':'none'}">
+      <div class="form-group"><label>URL</label><input id="f-mcp-url" value="${esc(cc.url||'')}" placeholder="http://localhost:3000/mcp"></div>
+      <div class="form-group"><label>Headers (JSON object, optional)</label>
+        <textarea id="f-mcp-headers" rows="2" placeholder='{"Authorization":"Bearer {{token:my-token}}"}'>${cc.headers?esc(JSON.stringify(cc.headers,null,2)):''}</textarea>
+        <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store.</div></div>
+    </div>`;
+  document.getElementById('f-mcp-transport').addEventListener('change', e => {
+    const v = e.target.value;
+    document.getElementById('mcp-stdio-fields').style.display = v==='stdio'?'block':'none';
+    document.getElementById('mcp-url-fields').style.display = (v==='sse'||v==='http')?'block':'none';
+  });
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveMcp('${id||''}')">${m?'Update':'Register'}</button>`;
+  showModal();
+}
+
+async function saveMcp(id) {
+  const transport = document.getElementById('f-mcp-transport').value;
+  let config;
+  if (transport === 'stdio') {
+    config = { command: document.getElementById('f-mcp-cmd').value };
+    const argsVal = document.getElementById('f-mcp-args').value.trim();
+    if (argsVal) config.args = JSON.parse(argsVal);
+    const envVal = document.getElementById('f-mcp-env').value.trim();
+    if (envVal) config.env = JSON.parse(envVal);
+  } else {
+    // sse and http both use url + headers
+    config = { url: document.getElementById('f-mcp-url').value };
+    const hdrVal = document.getElementById('f-mcp-headers').value.trim();
+    if (hdrVal) config.headers = JSON.parse(hdrVal);
+  }
+  try {
+    const body = {
+      name: document.getElementById('f-mcp-name').value,
+      transport_type: transport,
+      connection_config: config,
+      tags: document.getElementById('f-mcp-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+    };
+    if (id) {
+      await api(`/api/mcps/${id}`, { method:'PUT', body:JSON.stringify(body) });
+      toast('MCP server updated');
+    } else {
+      await api('/api/mcps', { method:'POST', body:JSON.stringify(body) });
+      toast('MCP server registered');
+    }
+    closeModal(); loadMcps();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function testMcp(id) {
+  try {
+    const res = await api(`/api/mcps/${id}/test`, { method:'POST' });
+    if (res.success) toast(`Connected! ${res.tools.length} tools found`);
+    else toast(res.error || 'Connection failed', 'error');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteMcp(id) {
+  if (!confirm('Delete this MCP server?')) return;
+  try { await api(`/api/mcps/${id}`, { method:'DELETE' }); toast('MCP server deleted'); loadMcps(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+async function openToolsModal(id) {
+  const m = mcps.find(x => x.id === id);
+  if (!m) return;
+  const allowed = m.allowed_tools || [];
+  document.getElementById('modal-title').textContent = `Configure Tools — ${m.name}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="text-align:center;padding:24px;color:var(--muted)">Discovering tools…</div>`;
+  document.getElementById('modal-footer').innerHTML = '';
+  showModal();
+  try {
+    const res = await api(`/api/mcps/${id}/tools`);
+    const tools = res.tools || [];
+    if (!tools.length) {
+      document.getElementById('modal-body').innerHTML =
+        '<div style="padding:16px;color:var(--muted)">No tools found. Test the connection first to ensure the MCP server is reachable.</div>';
+      document.getElementById('modal-footer').innerHTML =
+        '<button class="btn" onclick="closeModal()">Close</button>';
+      return;
+    }
+    const allChecked = allowed.length === 0;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="margin-bottom:12px;font-size:13px;color:var(--muted)">
+        Select which tools the agent may use. Leave all checked to allow everything.
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="cursor:pointer;font-size:13px;color:var(--accent)">
+          <input type="checkbox" id="tools-select-all" ${allChecked?'checked':''} onchange="toggleAllTools(this.checked)"> Select All
+        </label>
+      </div>
+      <div id="tools-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+        ${tools.map(t => {
+          const checked = allChecked || allowed.includes(t.name);
+          return `<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:6px 8px;border-radius:6px;background:var(--bg)">
+            <input type="checkbox" class="tool-cb" value="${esc(t.name)}" ${checked?'checked':''} style="margin-top:3px">
+            <div>
+              <div style="font-weight:600;font-size:13px">${esc(t.name)}</div>
+              ${t.description ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(t.description)}</div>` : ''}
+            </div>
+          </label>`;
+        }).join('')}
+      </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTools('${id}')">Save</button>`;
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML =
+      `<div style="padding:16px;color:#e44">${esc(e.message)}</div>`;
+    document.getElementById('modal-footer').innerHTML =
+      '<button class="btn" onclick="closeModal()">Close</button>';
+  }
+}
+
+function toggleAllTools(checked) {
+  document.querySelectorAll('.tool-cb').forEach(cb => cb.checked = checked);
+}
+
+async function saveTools(id) {
+  const allCbs = document.querySelectorAll('.tool-cb');
+  const selectAll = document.getElementById('tools-select-all');
+  let allowed = [];
+  if (selectAll && selectAll.checked) {
+    // All selected → store empty list (= unrestricted)
+    allowed = [];
+  } else {
+    allowed = [...allCbs].filter(cb => cb.checked).map(cb => cb.value);
+  }
+  try {
+    await api(`/api/mcps/${id}/tools`, {
+      method: 'PUT',
+      body: JSON.stringify({ allowed_tools: allowed }),
+    });
+    toast('Tool configuration saved');
+    closeModal();
+    loadMcps();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Tokens ──
+async function loadTokens() {
+  try {
+    tokens = await api('/api/tokens');
+    document.getElementById('tokens-body').innerHTML = tokens.length
+      ? tokens.map(t => `<tr>
+          <td><strong>${esc(t.name)}</strong></td>
+          <td><code style="color:var(--muted);font-size:12px">${esc(t.masked_value)}</code></td>
+          <td>${esc(t.description || '-')}</td>
+          <td>${esc(t.created_by)}</td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openTokenModal('${t.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteToken('${t.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No tokens. Create one, then reference it in MCP configs as <code>{{token:NAME}}</code>.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openTokenModal(id) {
+  const t = id ? tokens.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = t ? 'Edit Token' : 'Create Token';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label>
+      <input id="f-token-name" value="${esc(t?.name||'')}" ${t?'readonly style="opacity:0.6"':''} placeholder="e.g. dd-api-key">
+      <div class="hint">Unique key used in MCP configs as <code style="color:var(--accent)">{{token:${t?.name||'NAME'}}}</code></div></div>
+    <div class="form-group"><label>Value</label>
+      <input id="f-token-value" type="password" placeholder="${t?'Leave blank to keep current':'Enter secret value'}">
+      <div class="hint">Encrypted at rest. Never exposed in API responses.</div></div>
+    <div class="form-group"><label>Description</label>
+      <input id="f-token-desc" value="${esc(t?.description||'')}" placeholder="What this token is for"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveToken('${id||''}')">${t?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveToken(id) {
+  const name = document.getElementById('f-token-name').value.trim();
+  const value = document.getElementById('f-token-value').value;
+  const description = document.getElementById('f-token-desc').value;
+  if (!name) return toast('Name is required', 'error');
+  if (!id && !value) return toast('Value is required', 'error');
+
+  try {
+    if (id) {
+      const body = { description };
+      if (value) body.value = value;
+      await api(`/api/tokens/${id}`, { method:'PUT', body:JSON.stringify(body) });
+      toast('Token updated');
+    } else {
+      await api('/api/tokens', { method:'POST', body:JSON.stringify({ name, value, description }) });
+      toast('Token created');
+    }
+    closeModal(); loadTokens();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteToken(id) {
+  if (!confirm('Delete this token? MCP configs referencing it will fail.')) return;
+  try { await api(`/api/tokens/${id}`, { method:'DELETE' }); toast('Token deleted'); loadTokens(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Skills ──
+async function loadSkills() {
+  try {
+    skills = await api('/api/skills');
+    document.getElementById('skills-body').innerHTML = skills.length
+      ? skills.map(s => `<tr>
+          <td><strong>${esc(s.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(s.description||'')}</span></td>
+          <td>${s.tags.map(t=>`<span class="badge badge-purple">${esc(t)}</span> `).join('')||'-'}</td>
+          <td>${fmtDate(s.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openSkillModal('${s.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSkill('${s.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="empty-state">No skills. Create one to enhance agent capabilities.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openSkillModal(id) {
+  const s = id ? skills.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = s ? 'Edit Skill' : 'Create Skill';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-skill-name" value="${esc(s?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-skill-desc" value="${esc(s?.description||'')}"></div>
+    <div class="form-group"><label>Instructions</label>
+      <textarea id="f-skill-instr" rows="6">${esc(s?.instructions||'')}</textarea></div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-skill-tags" value="${esc(s?.tags?.join(', ')||'')}"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveSkill('${id||''}')">${s?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveSkill(id) {
+  const body = {
+    name: document.getElementById('f-skill-name').value,
+    description: document.getElementById('f-skill-desc').value,
+    instructions: document.getElementById('f-skill-instr').value,
+    tags: document.getElementById('f-skill-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+  };
+  try {
+    if (id) await api(`/api/skills/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/skills', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Skill updated' : 'Skill created'); closeModal(); loadSkills();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteSkill(id) {
+  if (!confirm('Delete this skill?')) return;
+  try { await api(`/api/skills/${id}`, { method:'DELETE' }); toast('Skill deleted'); loadSkills(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Guardrails ──
+async function loadGuardrails() {
+  try {
+    guardrails = await api('/api/guardrails');
+    document.getElementById('guardrails-body').innerHTML = guardrails.length
+      ? guardrails.map(g => `<tr>
+          <td><strong>${esc(g.name)}</strong>${g.description ? `<div style="font-size:12px;color:var(--muted)">${esc(g.description)}</div>` : ''}</td>
+          <td><span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}">${g.guardrail_type}</span></td>
+          <td>${g.tags.map(t => `<span class="tag">${esc(t)}</span>`).join(' ') || '<span style="color:var(--muted)">—</span>'}</td>
+          <td><span class="badge ${g.enabled ? 'badge-green' : 'badge-gray'}">${g.enabled ? 'Enabled' : 'Disabled'}</span></td>
+          <td>${fmtDate(g.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openGuardrailModal('${g.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteGuardrail('${g.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No guardrails. Create one to add validation rules to workflows.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openGuardrailModal(id) {
+  const g = id ? guardrails.find(x => x.id === id) : null;
+  const isPrompt = !g || g.guardrail_type === 'prompt';
+  document.getElementById('modal-title').textContent = g ? 'Edit Guardrail' : 'Create Guardrail';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-gr-name" value="${esc(g?.name||'')}"></div>
+    <div class="form-group"><label>Description</label><input id="f-gr-desc" value="${esc(g?.description||'')}"></div>
+    <div class="form-group"><label>Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — workflows use these to select guardrails)</span></label>
+      <input id="f-gr-tags" value="${esc(g?.tags?.join(', ')||'')}">
+      <div class="hint">e.g. <code>safety, pii, production</code></div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-gr-enabled" ${!g || g.enabled ? 'checked' : ''}> Enabled
+      </label>
+    </div>
+    ${g ? '' : `<div class="form-group"><label>Type</label>
+      <select id="f-gr-type" onchange="toggleGuardrailType()">
+        <option value="prompt">Prompt — validate the prompt text</option>
+        <option value="request">Request — validate a structured request object (JSON Schema)</option>
+      </select>
+      <div class="hint">Cannot be changed after creation.</div>
+    </div>`}
+    <div id="f-gr-prompt-section" style="${(!g || g.guardrail_type === 'prompt') ? '' : 'display:none'}">
+      <div style="padding-top:16px;border-top:1px solid var(--border);margin-top:8px">
+        <label style="font-size:14px;font-weight:600;display:block;margin-bottom:12px">Prompt Rules</label>
+        <div class="form-group"><label>Min Length <span style="font-weight:400;font-size:11px;color:var(--muted)">(characters, optional)</span></label>
+          <input id="f-gr-min-len" type="number" min="0" value="${esc(String(g?.prompt_config?.min_length ?? ''))}">
+        </div>
+        <div class="form-group"><label>Max Length <span style="font-weight:400;font-size:11px;color:var(--muted)">(characters, optional)</span></label>
+          <input id="f-gr-max-len" type="number" min="0" value="${esc(String(g?.prompt_config?.max_length ?? ''))}">
+        </div>
+        <div class="form-group"><label>Forbidden Patterns <span style="font-weight:400;font-size:11px;color:var(--muted)">(regex, one per line)</span></label>
+          <textarea id="f-gr-forbidden" rows="4" placeholder="e.g.&#10;ignore.*(previous|all).*(instructions|rules)&#10;jailbreak">${esc((g?.prompt_config?.forbidden_patterns||[]).join('\n'))}</textarea>
+          <div class="hint">Prompts matching any of these patterns will be rejected (case-insensitive).</div>
+        </div>
+        <div class="form-group"><label>Required Patterns <span style="font-weight:400;font-size:11px;color:var(--muted)">(regex, one per line)</span></label>
+          <textarea id="f-gr-required" rows="3" placeholder="e.g.&#10;^(review|analyse|summarise)">${esc((g?.prompt_config?.required_patterns||[]).join('\n'))}</textarea>
+          <div class="hint">All patterns must match the prompt or the request will be rejected.</div>
+        </div>
+      </div>
+    </div>
+    <div id="f-gr-request-section" style="${g && g.guardrail_type === 'request' ? '' : 'display:none'}">
+      <div style="padding-top:16px;border-top:1px solid var(--border);margin-top:8px">
+        <label style="font-size:14px;font-weight:600;display:block;margin-bottom:12px">Request Schema</label>
+        <div class="form-group">
+          <label>JSON Schema (draft-07) <span style="font-weight:400;font-size:11px;color:var(--muted)">(required)</span></label>
+          <textarea id="f-gr-schema" rows="10" placeholder='{\n  "type": "object",\n  "required": ["task", "priority"],\n  "properties": {\n    "task": { "type": "string" },\n    "priority": { "type": "string", "enum": ["low", "medium", "high"] }\n  }\n}'>${esc(g?.request_config?.json_schema ? JSON.stringify(g.request_config.json_schema, null, 2) : '')}</textarea>
+          <div class="hint">The incoming <code>request</code> object will be validated against this schema before the workflow runs.</div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveGuardrail('${id||''}')">${g ? 'Update' : 'Create'}</button>`;
+  showModal();
+}
+
+function toggleGuardrailType() {
+  const t = document.getElementById('f-gr-type').value;
+  document.getElementById('f-gr-prompt-section').style.display = t === 'prompt' ? '' : 'none';
+  document.getElementById('f-gr-request-section').style.display = t === 'request' ? '' : 'none';
+}
+
+async function saveGuardrail(id) {
+  const g = id ? guardrails.find(x => x.id === id) : null;
+  const type = g ? g.guardrail_type : document.getElementById('f-gr-type').value;
+
+  const body = {
+    name: document.getElementById('f-gr-name').value.trim(),
+    description: document.getElementById('f-gr-desc').value.trim(),
+    tags: document.getElementById('f-gr-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+    enabled: document.getElementById('f-gr-enabled').checked,
+  };
+  if (!id) body.guardrail_type = type;
+
+  if (type === 'prompt') {
+    const minLen = document.getElementById('f-gr-min-len').value;
+    const maxLen = document.getElementById('f-gr-max-len').value;
+    const forbidden = document.getElementById('f-gr-forbidden').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    const required = document.getElementById('f-gr-required').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    body.prompt_config = {
+      min_length: minLen ? parseInt(minLen) : null,
+      max_length: maxLen ? parseInt(maxLen) : null,
+      forbidden_patterns: forbidden,
+      required_patterns: required,
+    };
+  } else {
+    const raw = document.getElementById('f-gr-schema').value.trim();
+    if (!raw) return toast('JSON Schema is required for request guardrails', 'error');
+    try { body.request_config = { json_schema: JSON.parse(raw) }; }
+    catch { return toast('Invalid JSON Schema — check syntax', 'error'); }
+  }
+
+  try {
+    if (id) await api(`/api/guardrails/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/guardrails', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Guardrail updated' : 'Guardrail created'); closeModal(); loadGuardrails();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteGuardrail(id) {
+  if (!confirm('Delete this guardrail?')) return;
+  try { await api(`/api/guardrails/${id}`, { method:'DELETE' }); toast('Guardrail deleted'); loadGuardrails(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Workflows ──
+async function loadWorkflows() {
+  try {
+    [workflows, agents, guardrails, skills] = await Promise.all([api('/api/workflows'), api('/api/agents'), api('/api/guardrails'), api('/api/skills')]);
+    document.getElementById('workflows-body').innerHTML = workflows.length
+      ? workflows.map(w => `<tr>
+          <td><strong>${esc(w.title || w.id.slice(0,8))}</strong>${(w.guardrail_ids?.length||w.guardrail_tags?.length) ? ' <span title="Has guardrails" style="color:var(--muted);font-size:11px">🛡️</span>' : ''}</td>
+          <td>${agentName(w.agent_id)}</td>
+          <td>${statusBadge(w.status)}</td>
+          <td>${w.model}</td>
+          <td>${w.current_turn}/${w.max_turns}${w.infinite_session?' ∞':''}</td>
+          <td>${fmtDate(w.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="viewWorkflow('${w.id}')">View</button>
+            <button class="btn btn-sm" onclick="openEditWorkflowModal('${w.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${w.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty-state">No workflows yet.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openWorkflowModal() {
+  const agentOpts = agents.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const skillOpts = skills.map(s =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${s.id}"> ${esc(s.name)}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No skills available</span>';
+  const guardrailOpts = guardrails.map(g =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" class="gr-id-check" value="${g.id}">
+      ${esc(g.name)} <span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}" style="margin-left:4px">${g.guardrail_type}</span>
+      ${g.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No guardrails available</span>';
+
+  document.getElementById('modal-title').textContent = 'Create Workflow';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Title</label><input id="f-wf-title" placeholder="Optional workflow title"></div>
+    <div class="form-group"><label>Agent</label><select id="f-wf-agent">${agentOpts}</select></div>
+    <div class="form-group"><label>Model</label>
+      <select id="f-wf-model"><option value="">Loading models…</option></select>
+      <div id="f-wf-model-info" class="hint"></div>
+    </div>
+    <div class="form-group" id="f-wf-reasoning-group" style="display:none">
+      <label>Thinking Level</label>
+      <select id="f-wf-reasoning">
+        <option value="">Default (none)</option>
+      </select>
+      <div class="hint">Controls depth of reasoning. Higher = slower but more thorough.</div>
+    </div>
+    <div class="form-group"><label>Max Turns</label><input id="f-wf-turns" type="number" value="5"></div>
+    <div class="form-group"><label>Output Format</label>
+      <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
+    <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Guardrails <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — validate inputs before running)</span></label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-guardrails">${guardrailOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching guardrails)</span></label>
+        <input id="f-wf-guardrail-tags" placeholder="e.g. safety, pii">
+        <div class="hint">Any guardrail that has at least one of these tags will be applied.</div>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-infinite" checked> Infinite Session
+      </label>
+      <div class="hint">Auto-compacts context when the window fills up, allowing longer sessions.</div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Repository <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — cloned fresh each run)</span></label>
+      <div class="form-group"><label>Repo URL</label>
+        <input id="f-wf-repo-url" placeholder="https://github.com/owner/repo">
+        <div class="hint">HTTPS URL of a GitHub repository to clone for agent access.</div>
+      </div>
+      <div class="form-group"><label>Branch</label>
+        <input id="f-wf-repo-branch" placeholder="main">
+      </div>
+      <div class="form-group"><label>Auth Token <span style="font-weight:400;color:var(--muted);font-size:12px">(Token Store key name)</span></label>
+        <input id="f-wf-repo-token" placeholder="e.g. github-pat">
+        <div class="hint">Name of a token in the Token Store for private repos. Leave blank for public repos.</div>
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveWorkflow()">Create</button>`;
+  showModal();
+
+  // Load models from the SDK
+  loadModelOptions();
+}
+
+let _cachedModels = null;
+async function loadModelOptions() {
+  const sel = document.getElementById('f-wf-model');
+  const info = document.getElementById('f-wf-model-info');
+  try {
+    if (!_cachedModels) {
+      _cachedModels = await api('/api/models');
+    }
+    const models = _cachedModels;
+    sel.innerHTML = models.map(m => {
+      const mult = m.billing?.multiplier;
+      const badge = mult != null ? ` (${mult}x)` : '';
+      const policy = m.policy?.state;
+      const disabled = policy === 'disabled' ? ' disabled' : '';
+      return `<option value="${esc(m.id)}"${disabled}>${esc(m.name)}${badge}</option>`;
+    }).join('');
+    sel.addEventListener('change', () => updateModelInfo(models, sel.value, info, 'f-wf-reasoning'));
+    updateModelInfo(models, sel.value, info, 'f-wf-reasoning');
+  } catch(e) {
+    sel.innerHTML = '<option value="">Failed to load models</option>';
+    info.textContent = e.message;
+  }
+}
+
+function updateModelInfo(models, modelId, infoEl) {
+  const m = models.find(x => x.id === modelId);
+  if (!m) { infoEl.innerHTML = ''; return; }
+  const parts = [];
+  if (m.billing?.multiplier != null) {
+    const mult = m.billing.multiplier;
+    const color = mult <= 1 ? 'var(--accent)' : mult <= 5 ? '#e8a838' : '#e44';
+    parts.push(`<span style="color:${color};font-weight:600">Premium: ${mult}x</span>`);
+  }
+  if (m.supportedReasoningEfforts) {
+    parts.push(`Reasoning: ${m.supportedReasoningEfforts.join(', ')}`);
+  }
+  if (m.policy?.state === 'disabled') {
+    parts.push('<span style="color:#e44">Policy: disabled</span>');
+  }
+  infoEl.innerHTML = parts.join(' · ');
+}
+
+async function saveWorkflow() {
+  const skillIds = [...document.querySelectorAll('#f-wf-skills input:checked')].map(c => c.value);
+  const guardrailIds = [...document.querySelectorAll('#f-wf-guardrails .gr-id-check:checked')].map(c => c.value);
+  const guardrailTags = (document.getElementById('f-wf-guardrail-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
+  const body = {
+    title: document.getElementById('f-wf-title').value || null,
+    agent_id: document.getElementById('f-wf-agent').value,
+    model: document.getElementById('f-wf-model').value || null,
+    max_turns: parseInt(document.getElementById('f-wf-turns').value) || 5,
+    output_format: document.getElementById('f-wf-format').value,
+    skill_ids: skillIds,
+    guardrail_ids: guardrailIds,
+    guardrail_tags: guardrailTags,
+    infinite_session: document.getElementById('f-wf-infinite').checked,
+    reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
+    repo_url: document.getElementById('f-wf-repo-url').value || null,
+    repo_branch: document.getElementById('f-wf-repo-branch').value || null,
+    repo_token_name: document.getElementById('f-wf-repo-token').value || null,
+  };
+
+  try {
+    await api('/api/workflows', { method:'POST', body:JSON.stringify(body) });
+    toast('Workflow created'); closeModal(); loadWorkflows();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openEditWorkflowModal(id) {
+  const w = workflows.find(x => x.id === id);
+  if (!w) return;
+  const agentEditOpts = agents.map(a =>
+    `<option value="${a.id}" ${a.id === w.agent_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  const guardrailEditOpts = guardrails.map(g =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" class="gr-id-check" value="${g.id}" ${(w.guardrail_ids||[]).includes(g.id) ? 'checked' : ''}>
+      ${esc(g.name)} <span class="badge ${g.guardrail_type === 'prompt' ? 'badge-blue' : 'badge-purple'}" style="margin-left:4px">${g.guardrail_type}</span>
+      ${g.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No guardrails available</span>';
+  document.getElementById('modal-title').textContent = 'Edit Workflow';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Title</label><input id="f-wf-edit-title" value="${esc(w.title||'')}"></div>
+    <div class="form-group"><label>Agent</label><select id="f-wf-edit-agent">${agentEditOpts}</select></div>
+    <div class="form-group"><label>Model</label>
+      <select id="f-wf-edit-model"><option value="">Loading models…</option></select>
+      <div id="f-wf-edit-model-info" class="hint"></div>
+    </div>
+    <div class="form-group" id="f-wf-edit-reasoning-group" style="display:none">
+      <label>Thinking Level</label>
+      <select id="f-wf-edit-reasoning">
+        <option value="">Default (none)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Max Turns</label><input id="f-wf-edit-turns" type="number" value="${w.max_turns}"></div>
+    <div class="form-group"><label>Output Format</label>
+      <select id="f-wf-edit-format">
+        <option value="json" ${w.output_format==='json'?'selected':''}>JSON</option>
+        <option value="markdown" ${w.output_format==='markdown'?'selected':''}>Markdown</option>
+      </select></div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-edit-infinite" ${w.infinite_session?'checked':''}> Infinite Session
+      </label>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Guardrails</label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-guardrails">${guardrailEditOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated)</span></label>
+        <input id="f-wf-edit-guardrail-tags" value="${esc((w.guardrail_tags||[]).join(', '))}">
+        <div class="hint">Any guardrail that has at least one of these tags will be applied.</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Repository</label>
+      <div class="form-group"><label>Repo URL</label>
+        <input id="f-wf-edit-repo-url" value="${esc(w.repo_url||'')}" placeholder="https://github.com/owner/repo">
+      </div>
+      <div class="form-group"><label>Branch</label>
+        <input id="f-wf-edit-repo-branch" value="${esc(w.repo_branch||'')}" placeholder="main">
+      </div>
+      <div class="form-group"><label>Auth Token (Token Store key)</label>
+        <input id="f-wf-edit-repo-token" value="${esc(w.repo_token_name||'')}" placeholder="e.g. github-pat">
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="updateWorkflow('${id}')">Update</button>`;
+  showModal();
+
+  // Load models dropdown for edit
+  (async () => {
+    const sel = document.getElementById('f-wf-edit-model');
+    const info = document.getElementById('f-wf-edit-model-info');
+    try {
+      if (!_cachedModels) _cachedModels = await api('/api/models');
+      sel.innerHTML = _cachedModels.map(m => {
+        const mult = m.billing?.multiplier;
+        const badge = mult != null ? ` (${mult}x)` : '';
+        const selected = m.id === w.model ? ' selected' : '';
+        return `<option value="${esc(m.id)}"${selected}>${esc(m.name)}${badge}</option>`;
+      }).join('');
+      sel.addEventListener('change', () => updateModelInfo(_cachedModels, sel.value, info, 'f-wf-edit-reasoning'));
+      updateModelInfo(_cachedModels, sel.value, info, 'f-wf-edit-reasoning');
+      // Set previously saved reasoning effort
+      if (w.reasoning_effort) {
+        const rSel = document.getElementById('f-wf-edit-reasoning');
+        if (rSel) rSel.value = w.reasoning_effort;
+      }
+    } catch(e) {
+      sel.innerHTML = `<option value="${esc(w.model)}" selected>${esc(w.model)}</option>`;
+    }
+  })();
+}
+
+async function updateWorkflow(id) {
+  const guardrailIds = [...document.querySelectorAll('#f-wf-edit-guardrails .gr-id-check:checked')].map(c => c.value);
+  const guardrailTags = (document.getElementById('f-wf-edit-guardrail-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
+  const body = {
+    title: document.getElementById('f-wf-edit-title').value || null,
+    agent_id: document.getElementById('f-wf-edit-agent').value || undefined,
+    model: document.getElementById('f-wf-edit-model').value || undefined,
+    max_turns: parseInt(document.getElementById('f-wf-edit-turns').value) || undefined,
+    output_format: document.getElementById('f-wf-edit-format').value,
+    infinite_session: document.getElementById('f-wf-edit-infinite').checked,
+    reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
+    guardrail_ids: guardrailIds,
+    guardrail_tags: guardrailTags,
+    repo_url: document.getElementById('f-wf-edit-repo-url').value || null,
+    repo_branch: document.getElementById('f-wf-edit-repo-branch').value || null,
+    repo_token_name: document.getElementById('f-wf-edit-repo-token').value || null,
+  };
+  // Remove undefined keys so they're not sent (leave workflow values unchanged)
+  Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+  try {
+    await api(`/api/workflows/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    toast('Workflow updated'); closeModal(); loadWorkflows();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteWorkflow(id) {
+  if (!confirm('Delete this workflow and all its data?')) return;
+  try { await api(`/api/workflows/${id}`, { method:'DELETE' }); toast('Workflow deleted'); loadWorkflows(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+function viewWorkflow(id) {
+  // Switch to task page and load this workflow's details
+  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+  document.querySelector('[data-page="task"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-task').classList.add('active');
+  document.getElementById('page-title').textContent = 'Run Task';
+  loadTaskPage().then(() => {
+    document.getElementById('task-workflow').value = id;
+    fetchAndRenderWorkflow(id);
+  });
+}
+
+// ── Task Runner ──
+async function loadTaskPage() {
+  try {
+    [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
+    const sel = document.getElementById('task-workflow');
+    sel.innerHTML = workflows.map(w =>
+      `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)} (${w.status})</option>`
+    ).join('') || '<option value="">No workflows — create one first</option>';
+    sel.addEventListener('change', () => { updateTaskReasoningDropdown(); updateTaskGuardrailUI(); });
+    updateTaskReasoningDropdown();
+    updateTaskGuardrailUI();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function updateTaskGuardrailUI() {
+  const wfId = document.getElementById('task-workflow').value;
+  const w = workflows.find(x => x.id === wfId);
+  const hasGuardrails = w && ((w.guardrail_ids && w.guardrail_ids.length > 0) || (w.guardrail_tags && w.guardrail_tags.length > 0));
+  const reqGroup = document.getElementById('task-request-group');
+  if (reqGroup) reqGroup.style.display = hasGuardrails ? '' : 'none';
+  const promptGroup = document.getElementById('task-prompt-group');
+  if (promptGroup) promptGroup.style.display = '';
+}
+
+async function updateTaskReasoningDropdown() {
+  const wfId = document.getElementById('task-workflow').value;
+  const w = workflows.find(x => x.id === wfId);
+  const group = document.getElementById('task-reasoning-group');
+  const sel = document.getElementById('task-reasoning');
+  if (!w || !sel || !group) return;
+  try {
+    if (!_cachedModels) _cachedModels = await api('/api/models');
+    const m = _cachedModels.find(x => x.id === w.model);
+    if (m?.supportedReasoningEfforts?.length) {
+      sel.innerHTML = '<option value="">Use workflow default' + (w.reasoning_effort ? ` (${w.reasoning_effort})` : '') + '</option>' +
+        m.supportedReasoningEfforts.map(e => `<option value="${esc(e)}">${esc(e.charAt(0).toUpperCase()+e.slice(1))}</option>`).join('');
+      group.style.display = '';
+    } else {
+      group.style.display = 'none';
+    }
+  } catch { group.style.display = 'none'; }
+}
+
+async function sendTask() {
+  const wfId = document.getElementById('task-workflow').value;
+  const prompt = document.getElementById('task-prompt').value.trim();
+  const requestRaw = document.getElementById('task-request')?.value?.trim();
+  if (!wfId) return toast('Select a workflow', 'error');
+  if (!prompt && !requestRaw) return toast('Enter a prompt or request object', 'error');
+
+  let requestObj = undefined;
+  if (requestRaw) {
+    try { requestObj = JSON.parse(requestRaw); }
+    catch { return toast('Request Object must be valid JSON', 'error'); }
+  }
+
+  document.getElementById('task-send').disabled = true;
+  document.getElementById('task-send').innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('task-halt').style.display = 'inline-block';
+  document.getElementById('task-result').style.display = 'block';
+  document.getElementById('task-progress-panel').style.display = 'none';
+
+  // Append user message immediately
+  appendMessage({ role: 'user', content: prompt || JSON.stringify(requestObj) });
+
+  const payload = { reasoning_effort: document.getElementById('task-reasoning')?.value || null };
+  if (prompt) payload.prompt = prompt;
+  if (requestObj !== undefined) payload.request = requestObj;
+
+  try {
+    await api(`/api/workflows/${wfId}/prompt`, { method:'POST', body:JSON.stringify(payload) });
+    toast('Task submitted');
+    connectSSE(wfId);
+  } catch(e) {
+    toast(e.message, 'error');
+    resetSendButton();
+  }
+}
+
+async function haltTask() {
+  const wfId = document.getElementById('task-workflow').value;
+  if (!wfId) return;
+  document.getElementById('task-halt').disabled = true;
+  document.getElementById('task-halt').textContent = 'Stopping…';
+  try {
+    await api(`/api/workflows/${wfId}/halt`, { method:'POST' });
+    toast('Halt signal sent');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── SSE Streaming ──
+function connectSSE(wfId) {
+  disconnectSSE();
+  sseSource = new EventSource(`/api/workflows/${wfId}/stream`);
+  streamingMsgEl = null;
+
+  sseSource.onmessage = (ev) => {
+    let parsed;
+    try { parsed = JSON.parse(ev.data); } catch { return; }
+    const { type, data } = parsed;
+
+    if (type === 'log') {
+      appendLog(data);
+    } else if (type === 'message') {
+      // Full message from the agent (role-based)
+      finishStreamingMsg();
+      appendMessage(data);
+    } else if (type === 'message_delta') {
+      // Streaming token — append to current assistant bubble
+      appendDelta(data.content || '');
+    } else if (type === 'progress') {
+      renderProgress(data);
+    } else if (type === 'usage') {
+      updateUsageStats(data);
+    } else if (type === 'status') {
+      updateStatusBadge(data.status);
+      if (data.current_turn !== undefined) {
+        document.getElementById('task-turn').textContent =
+          `${data.current_turn}/${data.max_turns || '-'}`;
+      }
+      // Terminal states — close SSE and do a final fetch for complete data
+      if (['completed','failed','halted','max_turns_reached'].includes(data.status)) {
+        disconnectSSE();
+        resetSendButton();
+        fetchAndRenderWorkflow(wfId);
+      }
+    }
+  };
+
+  sseSource.onerror = () => {
+    // SSE dropped — fall back to polling
+    disconnectSSE();
+    pollWorkflowResult(wfId);
+  };
+}
+
+function disconnectSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  finishStreamingMsg();
+}
+
+function resetSendButton() {
+  document.getElementById('task-send').disabled = false;
+  document.getElementById('task-send').textContent = '▶ Send Task';
+  const haltBtn = document.getElementById('task-halt');
+  haltBtn.style.display = 'none';
+  haltBtn.disabled = false;
+  haltBtn.textContent = '⏹ Stop';
+}
+
+// ── Streaming message helpers ──
+function appendDelta(text) {
+  if (!text) return;
+  if (!streamingMsgEl) {
+    const msgEl = document.getElementById('task-messages');
+    const empty = msgEl.querySelector('.empty-state');
+    if (empty) empty.remove();
+    streamingMsgEl = document.createElement('div');
+    streamingMsgEl.className = 'msg msg-assistant';
+    streamingMsgEl.innerHTML = '<div class="role-label">🤖 assistant <span class="spinner" style="margin-left:6px"></span></div>';
+    const contentSpan = document.createElement('div');
+    contentSpan.className = 'msg-content streaming-content';
+    contentSpan.style.whiteSpace = 'pre-wrap';
+    streamingMsgEl.appendChild(contentSpan);
+    msgEl.appendChild(streamingMsgEl);
+  }
+  const contentEl = streamingMsgEl.querySelector('.streaming-content');
+  contentEl.textContent += text;
+  const msgContainer = document.getElementById('task-messages');
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+function finishStreamingMsg() {
+  if (streamingMsgEl) {
+    // Remove spinner
+    const spinner = streamingMsgEl.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    streamingMsgEl = null;
+  }
+}
+
+// ── Message rendering helpers ──
+const ROLE_ICONS = { user: '👤', assistant: '🤖', system: '⚙️', tool: '🔧' };
+
+function formatContent(raw) {
+  if (!raw) return '';
+  // Escape HTML first
+  let s = esc(raw);
+  // Convert fenced code blocks: ```lang\n...\n```
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code>${code.replace(/&lt;/g,'<').replace(/&gt;/g,'>')}</code></pre>`);
+  // Convert inline code: `...`
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return s;
+}
+
+function renderToolCalls(toolCalls) {
+  if (!toolCalls || !toolCalls.length) return '';
+  return toolCalls.map(tc => {
+    const fn = tc.function || tc;
+    const name = fn.name || tc.name || 'unknown';
+    const id = tc.id || '';
+    let args = fn.arguments || tc.arguments || '';
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch {}
+    }
+    const argsStr = typeof args === 'object' ? JSON.stringify(args, null, 2) : String(args);
+    return `<details class="tool-call-card">
+      <summary><span class="tool-name">${esc(name)}</span>${id ? `<span class="tool-id">${esc(id)}</span>` : ''}</summary>
+      <div class="tool-args">${esc(argsStr)}</div>
+    </details>`;
+  }).join('');
+}
+
+function renderMsgHtml(m) {
+  const icon = ROLE_ICONS[m.role] || '💬';
+  const nameTag = m.name ? ' · ' + esc(m.name) : '';
+  return `<div class="role-label">${icon} ${esc(m.role)}${nameTag}</div>` +
+    (m.content ? `<div class="msg-content">${formatContent(m.content)}</div>` : '') +
+    renderToolCalls(m.tool_calls);
+}
+
+function appendMessage(m) {
+  const msgEl = document.getElementById('task-messages');
+  // Remove "No messages yet" empty state
+  const empty = msgEl.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const div = document.createElement('div');
+  div.className = `msg msg-${m.role}`;
+  div.innerHTML = renderMsgHtml(m);
+  msgEl.appendChild(div);
+  msgEl.scrollTop = msgEl.scrollHeight;
+}
+
+function appendLog(l) {
+  const logEl = document.getElementById('task-logs');
+  // Remove "No logs" placeholder
+  const placeholder = logEl.querySelector('div[style]');
+  if (placeholder && placeholder.textContent.includes('No logs')) placeholder.remove();
+
+  const div = document.createElement('div');
+  const isToolEvent = l.event === 'tool_call' || l.event === 'tool_result';
+  const isFailed = l.event === 'tool_result' && l.detail && l.detail.includes('FAILED');
+  div.className = 'log-entry' + (isToolEvent ? ' log-tool' : '') + (isFailed ? ' log-tool-fail' : '');
+  div.innerHTML = `<span class="ts">${fmtDate(l.timestamp || new Date().toISOString())}</span>` +
+    `<span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}` +
+    (isToolEvent ? '<span class="tool-hint">click for details</span>' : '');
+  if (isToolEvent) {
+    div.dataset.toolInput = l.tool_input || '';
+    div.dataset.toolOutput = l.tool_output || '';
+    div.dataset.toolEvent = l.event;
+    div.dataset.toolDetail = l.detail || '';
+    div.addEventListener('click', () => showToolDetailModal(div.dataset));
+  }
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateUsageStats(u) {
+  const el = document.getElementById('task-usage');
+  if (!el) return;
+  el.style.display = 'flex';
+  document.getElementById('usage-requests').textContent = u.total_premium_requests ?? '-';
+  document.getElementById('usage-input').textContent = (u.total_input_tokens ?? 0).toLocaleString();
+  document.getElementById('usage-output').textContent = (u.total_output_tokens ?? 0).toLocaleString();
+  document.getElementById('usage-cost').textContent = '$' + (u.total_cost ?? 0).toFixed(4);
+}
+
+function updateStatusBadge(status) {
+  const badge = document.getElementById('task-status-badge');
+  badge.className = 'badge badge-' +
+    ({active:'blue',running:'yellow',completed:'green',failed:'red',max_turns_reached:'purple'}[status]||'muted');
+  badge.textContent = status;
+}
+
+// ── Progress rendering ──
+function renderProgress(data) {
+  const panel = document.getElementById('task-progress-panel');
+  const todosEl = document.getElementById('progress-todos');
+  const barEl = document.getElementById('progress-bar');
+  const pctEl = document.getElementById('progress-percent');
+  if (!data || !data.todos || !data.todos.length) return;
+  panel.style.display = '';
+  const pct = Math.round((data.percent_complete || 0) * 100);
+  pctEl.textContent = pct + '%';
+  barEl.style.width = pct + '%';
+  const STATUS_ICON = {'not-started':'○','in-progress':'◉','completed':'✓'};
+  todosEl.innerHTML = data.todos.map(t => {
+    const s = t.status || 'not-started';
+    return `<li class="todo-item ${s}">
+      <span class="todo-icon">${STATUS_ICON[s]||'○'}</span>
+      <span class="todo-title">${esc(t.title)}</span>
+    </li>`;
+  }).join('');
+}
+
+// ── Polling fallback ──
+async function pollWorkflowResult(wfId) {
+  if (pollTimer) clearInterval(pollTimer);
+  const update = async () => {
+    try {
+      const w = await api(`/api/workflows/${wfId}`);
+      renderTaskResult(w);
+      if (w.status !== 'running') {
+        clearInterval(pollTimer); pollTimer = null;
+        resetSendButton();
+      }
+    } catch(e) { clearInterval(pollTimer); toast(e.message, 'error'); }
+  };
+  await update();
+  if (document.getElementById('task-send').disabled) {
+    pollTimer = setInterval(update, 2000);
+  }
+}
+
+async function fetchAndRenderWorkflow(wfId) {
+  try {
+    const w = await api(`/api/workflows/${wfId}`);
+    renderTaskResult(w);
+    // Show request input if the workflow has request guardrails configured
+    const hasRequestGuardrails = (w.guardrail_ids && w.guardrail_ids.length > 0) || (w.guardrail_tags && w.guardrail_tags.length > 0);
+    document.getElementById('task-request-group').style.display = hasRequestGuardrails ? '' : 'none';
+    // Fetch latest task execution for progress data
+    const tasks = await api(`/api/tasks/workflow/${wfId}`);
+    if (tasks.length) {
+      const latestTask = await api(`/api/tasks/${tasks[0].id}`);
+      if (latestTask.progress) renderProgress(latestTask.progress);
+    }
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function renderTaskResult(w) {
+  document.getElementById('task-result').style.display = 'block';
+  updateStatusBadge(w.status);
+  document.getElementById('task-turn').textContent = `${w.current_turn}/${w.max_turns}${w.infinite_session?' ∞':''}`;
+  document.getElementById('task-model').textContent = w.model;
+  document.getElementById('task-format').textContent = w.output_format;
+
+  // Usage stats
+  if (w.usage) updateUsageStats(w.usage);
+
+  // Messages
+  const msgEl = document.getElementById('task-messages');
+  msgEl.innerHTML = (w.messages||[]).map(m => `
+    <div class="msg msg-${m.role}">
+      ${renderMsgHtml(m)}
+    </div>`).join('') || '<div class="empty-state">No messages yet</div>';
+
+  // Logs
+  const logEl = document.getElementById('task-logs');
+  if ((w.logs||[]).length) {
+    logEl.innerHTML = '';
+    (w.logs||[]).forEach(l => {
+      const isToolEvent = l.event === 'tool_call' || l.event === 'tool_result';
+      const isFailed = l.event === 'tool_result' && l.detail && l.detail.includes('FAILED');
+      const div = document.createElement('div');
+      div.className = 'log-entry' + (isToolEvent ? ' log-tool' : '') + (isFailed ? ' log-tool-fail' : '');
+      div.innerHTML = `<span class="ts">${fmtDate(l.timestamp)}</span>` +
+        `<span class="ev">[${l.event}]</span> ${esc(l.detail)}` +
+        (isToolEvent ? '<span class="tool-hint">click for details</span>' : '');
+      if (isToolEvent) {
+        div.dataset.toolInput = l.tool_input || '';
+        div.dataset.toolOutput = l.tool_output || '';
+        div.dataset.toolEvent = l.event;
+        div.dataset.toolDetail = l.detail || '';
+        div.addEventListener('click', () => showToolDetailModal(div.dataset));
+      }
+      logEl.appendChild(div);
+    });
+  } else {
+    logEl.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No logs</div>';
+  }
+}
+
+// ── Modal helpers ──
+function showModal() { document.getElementById('modal-overlay').classList.add('show'); }
+function closeModal() { document.querySelector('.modal').classList.remove('modal-wide'); document.getElementById('modal-overlay').classList.remove('show'); }
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+function showToolDetailModal(ds) {
+  const isFailed = ds.toolEvent === 'tool_result' && ds.toolDetail && ds.toolDetail.includes('FAILED');
+  const modal = document.querySelector('.modal');
+  modal.classList.add('modal-wide');
+  const title = ds.toolEvent === 'tool_call' ? 'Tool Call Details' : 'Tool Result Details';
+  let body = `<h3 style="margin:0 0 8px">${esc(title)}</h3>`;
+  body += `<p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(ds.toolDetail)}</p>`;
+  if (isFailed) {
+    body += '<div style="background:#3a1a1a;border:1px solid #ff4d4d;border-radius:6px;padding:10px 14px;margin-bottom:14px;color:#ff8080;font-weight:600">⚠ Tool execution failed</div>';
+  }
+  if (ds.toolInput) {
+    body += '<div class="tool-detail-section"><h4>Input / Arguments</h4>';
+    let formatted = ds.toolInput;
+    try { formatted = JSON.stringify(JSON.parse(ds.toolInput), null, 2); } catch {}
+    body += `<pre class="tool-detail-pre">${esc(formatted)}</pre></div>`;
+  }
+  if (ds.toolOutput) {
+    body += '<div class="tool-detail-section"><h4>Output / Result</h4>';
+    let formatted = ds.toolOutput;
+    try { formatted = JSON.stringify(JSON.parse(ds.toolOutput), null, 2); } catch {}
+    body += `<pre class="tool-detail-pre">${esc(formatted)}</pre></div>`;
+  }
+  if (!ds.toolInput && !ds.toolOutput) {
+    body += '<p style="color:var(--muted);font-style:italic">No detailed tool data available for this event.</p>';
+  }
+  body += '<div style="text-align:right;margin-top:16px"><button class="btn" onclick="closeModal()">Close</button></div>';
+  document.getElementById('modal-body').innerHTML = body;
+  showModal();
+}
+
+// ── Escape HTML ──
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ── Task Executions ──
+let taskExecs = [];
+
+function fmtElapsed(seconds) {
+  if (seconds == null) return '-';
+  if (seconds < 60) return seconds.toFixed(1) + 's';
+  const mins = Math.floor(seconds / 60);
+  const secs = (seconds % 60).toFixed(0);
+  return `${mins}m ${secs}s`;
+}
+
+async function loadTaskExecutions() {
+  try {
+    taskExecs = await api('/api/tasks');
+    document.getElementById('task-execs-body').innerHTML = taskExecs.length
+      ? taskExecs.map(t => `<tr>
+          <td><strong title="${esc(t.prompt)}">${esc(t.prompt.length > 60 ? t.prompt.slice(0,60)+'…' : t.prompt)}</strong></td>
+          <td>${esc(t.workflow_title || t.workflow_id.slice(0,8))}</td>
+          <td>${esc(t.agent_name || '-')}</td>
+          <td>${statusBadge(t.status)}</td>
+          <td><span class="mono">${esc(t.worker || '-')}</span></td>
+          <td>${t.tool_calls}</td>
+          <td>${fmtElapsed(t.elapsed_seconds)}</td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td><button class="btn btn-sm" onclick="viewTaskExecution('${t.id}')">View Logs</button></td>
+        </tr>`).join('')
+      : '<tr><td colspan="9" class="empty-state">No task executions yet. Run a task to see results here.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function viewTaskExecution(id) {
+  try {
+    const t = await api(`/api/tasks/${id}`);
+    document.querySelector('.modal').classList.add('modal-wide');
+    document.getElementById('modal-title').textContent = `Task Execution — ${t.status}`;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:16px">
+        <span>Status: ${statusBadge(t.status)}</span>
+        <span>Model: <strong style="color:var(--text)">${esc(t.model || '-')}</strong></span>
+        ${t.reasoning_effort ? `<span>Thinking: <strong style="color:var(--purple)">${esc(t.reasoning_effort)}</strong></span>` : ''}
+        <span>Worker: <strong style="color:var(--text)">${esc(t.worker || '-')}</strong></span>
+        <span>Tool Calls: <strong style="color:var(--text)">${t.tool_calls}</strong></span>
+        <span>Elapsed: <strong style="color:var(--text)">${fmtElapsed(t.elapsed_seconds)}</strong></span>
+      </div>
+      ${t.usage ? `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:16px;padding:8px 12px;background:var(--bg);border-radius:6px">
+        <span>Requests: <strong style="color:var(--purple)">${t.usage.total_premium_requests}</strong></span>
+        <span>In: <strong style="color:var(--accent)">${t.usage.total_input_tokens.toLocaleString()}</strong></span>
+        <span>Out: <strong style="color:var(--green)">${t.usage.total_output_tokens.toLocaleString()}</strong></span>
+        <span>Cost: <strong style="color:var(--yellow)">$${t.usage.total_cost.toFixed(4)}</strong></span>
+      </div>` : ''}
+      ${t.progress && t.progress.todos.length ? `<div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Progress (${Math.round((t.progress.percent_complete||0)*100)}%)</div>
+        <div style="height:4px;background:var(--surface2);border-radius:2px;margin-bottom:8px;overflow:hidden">
+          <div style="height:100%;background:var(--accent);width:${Math.round((t.progress.percent_complete||0)*100)}%;border-radius:2px"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${t.progress.todos.map(td => {
+            const icon = td.status==='completed'?'✓':td.status==='in-progress'?'◉':'○';
+            const color = td.status==='completed'?'var(--muted)':td.status==='in-progress'?'var(--accent)':'var(--text)';
+            const strike = td.status==='completed'?'text-decoration:line-through;':'';
+            return `<div style="display:flex;align-items:center;gap:6px;font-size:13px"><span style="color:${color}">${icon}</span><span style="color:${color};${strike}">${esc(td.title)}</span></div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Prompt</div>
+        <div class="msg msg-user" style="margin:0">${renderMsgHtml({role:'user',content:t.prompt})}</div>
+      </div>
+      ${t.response ? `<div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Response</div>
+        <div class="msg msg-assistant" style="margin:0">${renderMsgHtml({role:'assistant',content:t.response})}</div>
+      </div>` : ''}
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Conversation (${t.messages.length})</div>
+        <div style="max-height:400px;overflow-y:auto">
+          ${t.messages.length ? t.messages.map(m => `
+            <div class="msg msg-${m.role}" style="margin-bottom:6px">
+              ${renderMsgHtml(m)}
+            </div>`).join('') : '<div style="color:var(--muted);font-size:13px">No messages</div>'}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Logs (${t.logs.length})</div>
+        <div class="log-list" style="max-height:300px">
+          ${t.logs.length ? t.logs.map(l => `
+            <div class="log-entry">
+              <span class="ts">${fmtDate(l.timestamp)}</span>
+              <span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}
+            </div>`).join('') : '<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px">No logs</div>'}
+        </div>
+      </div>`;
+    document.getElementById('modal-footer').innerHTML =
+      '<button class="btn" onclick="closeModal()">Close</button>';
+    showModal();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Init ──
+loadDashboard();
+</script>
+</body>
+</html>
