@@ -1,0 +1,86 @@
+site_name: TBD Agents
+site_description: "Your agents. Your rules. Your infrastructure."
+site_url: https://naaico-tech.github.io/tbd-agents/
+repo_url: https://github.com/naaico-tech/tbd-agents
+repo_name: naaico-tech/tbd-agents
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: custom
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: black
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.instant.progress
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - header.autohide
+    - toc.follow
+
+extra_css:
+  - stylesheets/naaico.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/naaico-tech/tbd-agents
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/company/naaico
+  generator: false
+
+copyright: "&copy; 2026 NAAICO. All rights reserved."
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Local Setup: local-setup.md
+      - Quick Start: quickstart.md
+  - Guide:
+      - Architecture: architecture.md
+      - Features: features.md
+      - API Reference: api-reference.md
+  - Contributing: contributing.md

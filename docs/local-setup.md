@@ -230,7 +230,7 @@ Now that you're up and running:
 
 - 🏗️ Read [Architecture](architecture.md) to understand how the system components fit together
 - 🎮 Read [Features](features.md) for a deep dive into agents, MCP tools, skills, and streaming
-- 🤝 Read [Contributing](../CONTRIBUTING.md) if you want to contribute changes
+- 🤝 Read [Contributing](contributing.md) if you want to contribute changes
 
 ---
 

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api-reference/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/architecture/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/contributing/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/features/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/local-setup/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/quickstart/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+</urlset>
