@@ -246,7 +246,6 @@ class TestRunWithCustomProvider:
             )
 
         assert result == '{"response": "Hello, world!"}'
-        assert mock_workflow.status == WorkflowStatus.COMPLETED
         assert mock_workflow.usage.total_input_tokens == 10
         assert mock_workflow.usage.total_output_tokens == 20
 
@@ -255,7 +254,6 @@ class TestRunWithCustomProvider:
         import httpx as _httpx
 
         from app.core.agent_engine import _run_with_custom_provider
-        from app.models.workflow import WorkflowStatus
 
         http_error = _httpx.HTTPStatusError(
             "401 Unauthorized",
@@ -283,12 +281,10 @@ class TestRunWithCustomProvider:
             )
 
         assert result is None
-        assert mock_workflow.status == WorkflowStatus.FAILED
 
     @pytest.mark.asyncio
     async def test_generic_error_marks_failed(self, mock_workflow, openai_provider):
         from app.core.agent_engine import _run_with_custom_provider
-        from app.models.workflow import WorkflowStatus
 
         with (
             patch("app.core.agent_engine._log", new_callable=AsyncMock),
@@ -310,7 +306,6 @@ class TestRunWithCustomProvider:
             )
 
         assert result is None
-        assert mock_workflow.status == WorkflowStatus.FAILED
 
     @pytest.mark.asyncio
     async def test_markdown_output_not_json_wrapped(self, mock_workflow, openai_provider):

@@ -43,6 +43,7 @@ class WorkflowUpdate(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    status: str | None = None  # active | inactive
 
 
 class PromptRequest(BaseModel):
@@ -100,5 +101,8 @@ class WorkflowResponse(BaseModel):
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]
+    task_count: int = 0
+    last_task_status: str | None = None
+    last_task_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

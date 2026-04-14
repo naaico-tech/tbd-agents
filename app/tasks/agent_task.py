@@ -54,7 +54,7 @@ async def _execute(workflow_id: str, user_prompt: str, github_token: str, task_e
 
 
 async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
-    """Mark a workflow as failed when the Celery task crashes unexpectedly."""
+    """Mark a task as failed when the Celery task crashes unexpectedly."""
     from datetime import UTC, datetime
 
     from beanie import PydanticObjectId
@@ -62,21 +62,13 @@ async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
     from app.core import event_bus
     from app.db import init_db
     from app.models.task_execution import TaskExecution, TaskStatus
-    from app.models.workflow import Workflow, WorkflowStatus
 
     await init_db()
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
-    if wf and wf.status not in (
-        WorkflowStatus.COMPLETED,
-        WorkflowStatus.FAILED,
-        WorkflowStatus.HALTED,
-        WorkflowStatus.MAX_TURNS_REACHED,
-    ):
-        wf.status = WorkflowStatus.FAILED
-        await wf.save()
-        await event_bus.publish(
-            workflow_id, "status", {"status": "failed", "current_turn": wf.current_turn}
-        )
+
+    # Publish failure to SSE subscribers
+    await event_bus.publish(
+        workflow_id, "status", {"status": "failed", "current_turn": 0}
+    )
 
     if task_execution_id:
         te = await TaskExecution.get(PydanticObjectId(task_execution_id))
