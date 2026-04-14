@@ -1,30 +1,30 @@
 /* ═══════════════════════════════════════════════════════════
-   NAAICO Dark Neon Theme for MkDocs Material
-   Based on naaico.com brand: dark background + neon accents
+   NAAICO Light Theme for MkDocs Material
+   Based on naaico.com brand: clean light with teal accents
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  --naaico-bg:           #0a0a0f;
-  --naaico-bg-alt:       #0e0e14;
-  --naaico-surface:      #13131b;
-  --naaico-surface-alt:  #1a1a24;
-  --naaico-neon:         #00e5ff;
-  --naaico-neon-dim:     rgba(0, 229, 255, 0.15);
-  --naaico-neon-glow:    rgba(0, 229, 255, 0.4);
-  --naaico-text:         #e0e0e0;
-  --naaico-text-dim:     #9e9e9e;
-  --naaico-border:       rgba(255, 255, 255, 0.06);
+  --naaico-bg:           #ffffff;
+  --naaico-bg-alt:       #f8f9fa;
+  --naaico-surface:      #f1f3f5;
+  --naaico-surface-alt:  #e9ecef;
+  --naaico-accent:       #0097a7;
+  --naaico-accent-dim:   rgba(0, 151, 167, 0.10);
+  --naaico-accent-hover: #00838f;
+  --naaico-text:         #1a1a2e;
+  --naaico-text-dim:     #5f6368;
+  --naaico-border:       rgba(0, 0, 0, 0.08);
 }
 
-/* ── Dark scheme (slate) ─────────────────────────────────── */
+/* ── Light scheme ────────────────────────────────────────── */
 
-[data-md-color-scheme="slate"] {
+[data-md-color-scheme="default"] {
   --md-default-bg-color:         var(--naaico-bg);
   --md-default-fg-color:         var(--naaico-text);
-  --md-primary-fg-color:         var(--naaico-neon);
-  --md-primary-bg-color:         var(--naaico-surface);
-  --md-accent-fg-color:          var(--naaico-neon);
-  --md-typeset-a-color:          var(--naaico-neon);
+  --md-primary-fg-color:         var(--naaico-text);
+  --md-primary-bg-color:         var(--naaico-bg);
+  --md-accent-fg-color:          var(--naaico-accent);
+  --md-typeset-a-color:          var(--naaico-accent);
   --md-code-bg-color:            var(--naaico-surface);
   --md-code-fg-color:            var(--naaico-text);
   --md-footer-bg-color:          var(--naaico-bg-alt);
@@ -32,99 +32,91 @@
 }
 
 /* Header */
-[data-md-color-scheme="slate"] .md-header {
+[data-md-color-scheme="default"] .md-header {
   background-color: var(--naaico-bg);
-  border-bottom: 1px solid var(--naaico-neon-dim);
-  box-shadow: 0 1px 12px rgba(0, 229, 255, 0.05);
+  border-bottom: 1px solid var(--naaico-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 /* Tabs */
-[data-md-color-scheme="slate"] .md-tabs {
+[data-md-color-scheme="default"] .md-tabs {
   background-color: var(--naaico-bg-alt);
   border-bottom: 1px solid var(--naaico-border);
 }
 
-/* Active nav link — subtle neon glow */
-[data-md-color-scheme="slate"] .md-nav__link--active {
-  color: var(--naaico-neon);
-  text-shadow: 0 0 8px var(--naaico-neon-glow);
+/* Active nav link */
+[data-md-color-scheme="default"] .md-nav__link--active {
+  color: var(--naaico-accent);
+  font-weight: 600;
 }
 
 /* Sidebar */
-[data-md-color-scheme="slate"] .md-sidebar {
-  background-color: var(--naaico-bg-alt);
+[data-md-color-scheme="default"] .md-sidebar {
+  background-color: var(--naaico-bg);
 }
 
 /* Code blocks */
-[data-md-color-scheme="slate"] .highlight pre,
-[data-md-color-scheme="slate"] .highlighttable {
+[data-md-color-scheme="default"] .highlight pre,
+[data-md-color-scheme="default"] .highlighttable {
   background-color: var(--naaico-surface) !important;
   border: 1px solid var(--naaico-border);
   border-radius: 8px;
 }
 
 /* Inline code */
-[data-md-color-scheme="slate"] code {
-  background-color: var(--naaico-surface-alt);
-  color: var(--naaico-neon);
+[data-md-color-scheme="default"] code {
+  background-color: var(--naaico-surface);
+  color: var(--naaico-accent-hover);
   border-radius: 4px;
   padding: 0.1em 0.3em;
 }
 
 /* Admonitions */
-[data-md-color-scheme="slate"] .md-typeset .admonition,
-[data-md-color-scheme="slate"] .md-typeset details {
-  background-color: var(--naaico-surface);
-  border-left-color: var(--naaico-neon);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+[data-md-color-scheme="default"] .md-typeset .admonition,
+[data-md-color-scheme="default"] .md-typeset details {
+  background-color: var(--naaico-bg-alt);
+  border-left-color: var(--naaico-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 /* Tables */
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
-  background-color: var(--naaico-surface);
+[data-md-color-scheme="default"] .md-typeset table:not([class]) {
+  background-color: var(--naaico-bg);
   border: 1px solid var(--naaico-border);
 }
 
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
-  background-color: var(--naaico-surface-alt);
-  color: var(--naaico-neon);
+[data-md-color-scheme="default"] .md-typeset table:not([class]) th {
+  background-color: var(--naaico-surface);
+  color: var(--naaico-text);
+  font-weight: 600;
 }
 
 /* Search bar */
-[data-md-color-scheme="slate"] .md-search__input {
+[data-md-color-scheme="default"] .md-search__input {
   background-color: var(--naaico-surface);
 }
 
 /* Footer */
-[data-md-color-scheme="slate"] .md-footer {
-  border-top: 1px solid var(--naaico-neon-dim);
+[data-md-color-scheme="default"] .md-footer {
+  border-top: 1px solid var(--naaico-border);
 }
 
-/* ── Light scheme overrides ──────────────────────────────── */
+/* ── Scrollbar ───────────────────────────────────────────── */
 
-[data-md-color-scheme="default"] {
-  --md-primary-fg-color:  #111118;
-  --md-primary-bg-color:  #ffffff;
-  --md-accent-fg-color:   #0097a7;
-  --md-typeset-a-color:   #0097a7;
-}
-
-/* ── Scrollbar (dark) ────────────────────────────────────── */
-
-[data-md-color-scheme="slate"] ::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-[data-md-color-scheme="slate"] ::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: var(--naaico-bg-alt);
 }
 
-[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: var(--naaico-surface-alt);
   border-radius: 4px;
 }
 
-[data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--naaico-neon-dim);
+::-webkit-scrollbar-thumb:hover {
+  background: var(--naaico-accent-dim);
 }
