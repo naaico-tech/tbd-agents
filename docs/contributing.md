@@ -113,7 +113,7 @@ observability/      ← Grafana dashboards, Prometheus, Loki, Tempo
     docker-compose up --build
     ```
 - **MongoDB, Redis, and observability** services are included in the compose file.
-- See [Local Setup](local-setup.md) for bare-metal setup.
+- See [Local Setup](getting-started/local-setup.md) for bare-metal setup.
 
 ---
 

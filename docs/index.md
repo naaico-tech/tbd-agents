@@ -6,69 +6,110 @@ hide:
 
 # TBD Agents
 
-<p style="font-size: 1.3em; opacity: 0.85;">
+<p style="font-size: 1.4em; opacity: 0.85; text-align: center;">
 <strong>Your agents. Your rules. Your infrastructure.</strong>
 </p>
 
----
+<p style="text-align: center; max-width: 720px; margin: 0 auto; opacity: 0.75;">
+Build, control, and trigger custom AI agents over the web — no black boxes, no vendor lock-in. A clean API backed by the GitHub Copilot SDK that you run on your own infrastructure.
+</p>
 
-TBD Agent lets you build, control, and trigger your own custom AI agents over the web — no black boxes, no vendor lock-in, just a clean API backed by the GitHub Copilot SDK that you run on your own infrastructure.
+<div class="grid cards" markdown>
 
-Spin up purpose-built agents with distinct system prompts, wire them to any MCP tool server, send a prompt over HTTP, and watch them work in real-time through streaming Server-Sent Events. Need to scale? Celery workers distribute agent execution across as many nodes as you want.
+-   :rocket:{ .lg .middle } **Quick Start**
 
-!!! tip "TBD — *To Be Decided* by you"
-    What your agents do, which tools they use, and how far they go.
+    ---
+
+    Get running in under 5 minutes with Docker Compose.
+
+    [:octicons-arrow-right-24: Quick Start](getting-started/quickstart.md)
+
+-   :books:{ .lg .middle } **Guide**
+
+    ---
+
+    Learn about agents, MCP tools, skills, workflows, and streaming.
+
+    [:octicons-arrow-right-24: Guide](guide/index.md)
+
+-   :building_construction:{ .lg .middle } **Architecture**
+
+    ---
+
+    System design, data model, request flow, and scaling strategy.
+
+    [:octicons-arrow-right-24: Architecture](architecture/index.md)
+
+-   :material-api:{ .lg .middle } **API Reference**
+
+    ---
+
+    Complete REST API endpoint reference for every resource.
+
+    [:octicons-arrow-right-24: API Reference](api/index.md)
+
+</div>
 
 ---
 
 ## Highlights
 
-- :house: **Fully self-hosted** — runs on your infra via Docker Compose; no SaaS dependency beyond GitHub Copilot billing
-- :robot: **Custom agents over HTTP** — create, configure, and trigger agents with a simple REST API or the built-in dashboard
-- :zap: **Real-time streaming** — SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live
-- :twisted_rightwards_arrows: **Distributed workers** — Celery + Redis architecture lets you scale agent execution horizontally
-- :wrench: **MCP tool ecosystem** — connect any MCP-compatible tool server (Datadog, Jira, Notion, Slack, and more)
-- :infinity: **Infinite sessions** — automatic context compaction keeps long-running agents alive
-- :chart_with_upwards_trend: **Usage & cost tracking** — per-workflow token counts, premium request quotas, and cost data
-- :jigsaw: **Skills system** — modular instruction sets installed per workflow to shape agent behaviour
-- :books: **Knowledge bases** — vector databases (Qdrant) or file/text uploads with automatic retrieval
+<div class="grid cards" markdown>
+
+-   :house:{ .lg .middle } **Fully Self-Hosted**
+
+    Runs on your infrastructure via Docker Compose. No SaaS dependency beyond GitHub Copilot billing.
+
+-   :zap:{ .lg .middle } **Real-Time Streaming**
+
+    SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client.
+
+-   :material-cog-sync:{ .lg .middle } **Distributed Workers**
+
+    Celery + Redis architecture scales agent execution horizontally. Add workers to handle load.
+
+-   :wrench:{ .lg .middle } **MCP Tool Ecosystem**
+
+    Connect Datadog, Jira, Notion, Slack, and hundreds more via the Model Context Protocol.
+
+-   :infinity:{ .lg .middle } **Infinite Sessions**
+
+    Automatic context compaction keeps long-running agents alive without hitting context limits.
+
+-   :material-shield-check:{ .lg .middle } **Guardrails**
+
+    Prompt and request guardrails enforce safety policies before agent execution begins.
+
+</div>
 
 ---
 
-## Quick Start
+## System at a Glance
 
-```bash
-git clone https://github.com/naaico-tech/tbd-agents.git && cd tbd-agents
-
-# Create your environment file and fill in at least GITHUB_TOKEN
-cp .env.example .env
-
-docker-compose up --build
+```mermaid
+graph LR
+    Client([Client / Dashboard]) -->|HTTP| API[FastAPI API]
+    API -->|Enqueue| Redis[(Redis)]
+    Redis -->|Task| Worker[Celery Workers]
+    Worker -->|SDK Session| SDK[Copilot SDK]
+    SDK --> Models[Copilot Models API]
+    SDK --> MCP[MCP Servers]
+    Worker -->|Publish Events| Redis
+    Redis -->|Subscribe| API
+    API -->|SSE Stream| Client
+    Worker -->|Persist| Mongo[(MongoDB)]
+    API -->|Read/Write| Mongo
 ```
 
-| Endpoint | URL |
-|---|---|
-| Dashboard | [http://localhost:8000/dashboard](http://localhost:8000/dashboard) |
-| API Docs (Swagger) | [http://localhost:8000/docs](http://localhost:8000/docs) |
-| API Base | [http://localhost:8000/api](http://localhost:8000/api) |
-
 ---
 
-## Tech Stack
+<div style="text-align: center;" markdown>
 
-| Component | Technology |
-|---|---|
-| API | FastAPI + Uvicorn |
-| Agent engine | GitHub Copilot SDK (JSON-RPC) |
-| Task queue | Celery + Redis |
-| Event bus | Redis Pub/Sub |
-| Database | MongoDB + Beanie ODM |
-| Vector DB | Qdrant (optional, for knowledge) |
-| Frontend | Single-page dashboard (JS, SSE) |
-| Containers | Docker Compose |
+[:octicons-mark-github-16: View on GitHub](https://github.com/naaico-tech/tbd-agents){ .md-button .md-button--primary }
+[:material-rocket-launch: Quick Start](getting-started/quickstart.md){ .md-button }
 
----
+</div>
 
-<p style="text-align: center; opacity: 0.6;">
+<p style="text-align: center; opacity: 0.5; margin-top: 2em;">
 Built by <a href="https://www.naaico.com"><strong>NAAICO</strong></a> — Navigate · Automate · Accelerate · Innovate · Create · Optimise
 </p>

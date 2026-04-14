@@ -5,7 +5,51 @@
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
-         <loc>https://naaico-tech.github.io/tbd-agents/api-reference/</loc>
+         <loc>https://naaico-tech.github.io/tbd-agents/contributing/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/agents/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/guardrails/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/knowledge/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/mcp-servers/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/models/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/providers/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/skills/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/tasks/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/tokens/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/api/workflows/</loc>
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
@@ -13,19 +57,63 @@
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
-         <loc>https://naaico-tech.github.io/tbd-agents/contributing/</loc>
+         <loc>https://naaico-tech.github.io/tbd-agents/architecture/data-model/</loc>
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
-         <loc>https://naaico-tech.github.io/tbd-agents/features/</loc>
+         <loc>https://naaico-tech.github.io/tbd-agents/architecture/scaling/</loc>
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
-         <loc>https://naaico-tech.github.io/tbd-agents/local-setup/</loc>
+         <loc>https://naaico-tech.github.io/tbd-agents/architecture/system-overview/</loc>
          <lastmod>2026-04-14</lastmod>
     </url>
     <url>
-         <loc>https://naaico-tech.github.io/tbd-agents/quickstart/</loc>
+         <loc>https://naaico-tech.github.io/tbd-agents/getting-started/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/getting-started/configuration/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/getting-started/local-setup/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/getting-started/quickstart/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/agents/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/guardrails/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/knowledge/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/mcp-tools/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/skills/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/streaming/</loc>
+         <lastmod>2026-04-14</lastmod>
+    </url>
+    <url>
+         <loc>https://naaico-tech.github.io/tbd-agents/guide/workflows/</loc>
          <lastmod>2026-04-14</lastmod>
     </url>
 </urlset>

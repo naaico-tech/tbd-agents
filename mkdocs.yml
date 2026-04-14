@@ -26,10 +26,13 @@ theme:
     repo: fontawesome/brands/github
   features:
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
+    - navigation.expand
     - navigation.top
     - navigation.instant
     - navigation.instant.progress
+    - navigation.indexes
     - content.code.copy
     - content.code.annotate
     - search.suggest
@@ -70,6 +73,7 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - attr_list
   - md_in_html
+  - def_list
   - tables
   - toc:
       permalink: true
@@ -77,10 +81,34 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
-      - Local Setup: local-setup.md
-      - Quick Start: quickstart.md
+      - getting-started/index.md
+      - Quick Start: getting-started/quickstart.md
+      - Local Setup: getting-started/local-setup.md
+      - Configuration: getting-started/configuration.md
   - Guide:
-      - Architecture: architecture.md
-      - Features: features.md
-      - API Reference: api-reference.md
+      - guide/index.md
+      - Agents: guide/agents.md
+      - MCP Tools: guide/mcp-tools.md
+      - Skills: guide/skills.md
+      - Workflows: guide/workflows.md
+      - Streaming: guide/streaming.md
+      - Knowledge Bases: guide/knowledge.md
+      - Guardrails: guide/guardrails.md
+  - Architecture:
+      - architecture/index.md
+      - System Overview: architecture/system-overview.md
+      - Data Model: architecture/data-model.md
+      - Scaling: architecture/scaling.md
+  - API Reference:
+      - api/index.md
+      - Agents: api/agents.md
+      - Skills: api/skills.md
+      - MCP Servers: api/mcp-servers.md
+      - Workflows: api/workflows.md
+      - Knowledge: api/knowledge.md
+      - Providers: api/providers.md
+      - Tokens: api/tokens.md
+      - Guardrails: api/guardrails.md
+      - Tasks: api/tasks.md
+      - Models: api/models.md
   - Contributing: contributing.md
