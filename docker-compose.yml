@@ -90,6 +90,18 @@ services:
       - mongo_data:/data/db
     restart: unless-stopped
 
+  # ── Optional: Vector Database ────────────────────────────────────────────────
+  # Uncomment to run a local Qdrant instance for knowledge base vector search.
+
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   ports:
+  #     - "6333:6333"  # REST API
+  #     - "6334:6334"  # gRPC
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+  #   restart: unless-stopped
+
   # ── Observability Stack ─────────────────────────────────────────────────────
 
   otel-collector:
@@ -173,6 +185,7 @@ volumes:
   mongo_data:
   redis_data:
   repos_data:
+  # qdrant_data:
   prometheus_data:
   tempo_data:
   loki_data:

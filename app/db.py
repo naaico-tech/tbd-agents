@@ -4,6 +4,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 from app.models.agent import Agent
 from app.models.guardrail import Guardrail
+from app.models.knowledge_item import KnowledgeItem
+from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
 from app.models.provider import Provider
 from app.models.skill import Skill
@@ -17,6 +19,7 @@ async def init_db() -> None:
     await init_beanie(
         database=client[settings.mongo_db_name],
         document_models=[
-            Agent, Guardrail, McpServer, Provider, Skill, TaskExecution, Token, Workflow
+            Agent, Guardrail, KnowledgeItem, KnowledgeSource, McpServer,
+            Provider, Skill, TaskExecution, Token, Workflow,
         ],
     )

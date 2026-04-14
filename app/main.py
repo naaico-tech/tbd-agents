@@ -11,6 +11,8 @@ from app.api.routes import (
     agents,
     guardrails,
     health,
+    knowledge_items,
+    knowledge_sources,
     mcps,
     models,
     providers,
@@ -52,6 +54,8 @@ app.include_router(agents.router)
 app.include_router(guardrails.router)
 app.include_router(providers.router)
 app.include_router(skills.router)
+app.include_router(knowledge_sources.router)
+app.include_router(knowledge_items.router)
 app.include_router(mcps.router)
 app.include_router(models.router)
 app.include_router(tokens.router)
