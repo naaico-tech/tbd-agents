@@ -241,6 +241,7 @@
     <a data-page="agents"><span class="icon">🤖</span> Agents</a>
     <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
+    <a data-page="knowledge"><span class="icon">📚</span> Knowledge</a>
     <a data-page="guardrails"><span class="icon">🛡️</span> Guardrails</a>
     <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="providers"><span class="icon">🏢</span> Providers</a>
@@ -267,6 +268,7 @@
         <div class="stat-card"><div class="label">Skills</div><div class="value purple" id="stat-skills">-</div></div>
         <div class="stat-card"><div class="label">Tokens</div><div class="value green" id="stat-tokens">-</div></div>
         <div class="stat-card"><div class="label">Providers</div><div class="value yellow" id="stat-providers">-</div></div>
+        <div class="stat-card"><div class="label">Knowledge Sources</div><div class="value blue" id="stat-knowledge">-</div></div>
         <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
         <div class="stat-card"><div class="label">Task Executions</div><div class="value purple" id="stat-tasks">-</div></div>
       </div>
@@ -311,6 +313,33 @@
         <div class="card-body"><table><thead><tr>
           <th>Name</th><th>Tags</th><th>Created</th><th></th>
         </tr></thead><tbody id="skills-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Knowledge Page -->
+    <div id="page-knowledge" class="page">
+      <!-- Sources -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:16px;font-weight:600">Sources</h2>
+        <button class="btn btn-primary" onclick="openKnowledgeSourceModal()">+ New Source</button>
+      </div>
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Type</th><th>Status</th><th>Tags</th><th>Created</th><th></th>
+        </tr></thead><tbody id="knowledge-sources-body"></tbody></table></div>
+      </div>
+      <!-- Items -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="font-size:16px;font-weight:600">Items</h2>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="openKnowledgeItemModal()">+ Text Item</button>
+          <button class="btn" onclick="openKnowledgeUploadModal()">&#8679; Upload File</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Source</th><th>Type</th><th>Tags</th><th>Size</th><th>Created</th><th></th>
+        </tr></thead><tbody id="knowledge-items-body"></tbody></table></div>
       </div>
     </div>
 
@@ -468,6 +497,7 @@
 <script>
 const API = '';  // same origin
 let agents = [], mcps = [], skills = [], guardrails = [], workflows = [], tokens = [], providers = [];
+let knowledgeSources = [], knowledgeItems = [];
 let pollTimer = null;
 let sseSource = null;         // current EventSource
 let streamingMsgEl = null;    // element receiving message_delta tokens
@@ -517,7 +547,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -527,6 +557,7 @@ function loadPage(page) {
   else if (page === 'agents') loadAgents();
   else if (page === 'mcps') loadMcps();
   else if (page === 'skills') loadSkills();
+  else if (page === 'knowledge') loadKnowledge();
   else if (page === 'guardrails') loadGuardrails();
   else if (page === 'tokens') loadTokens();
   else if (page === 'providers') loadProviders();
@@ -541,11 +572,14 @@ async function loadDashboard() {
     [agents, mcps, skills, workflows, tokens, providers, taskExecs] = await Promise.all([
       api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/providers'), api('/api/tasks')
     ]);
+    let ksStat = '-';
+    try { const ks = await api('/api/knowledge-sources'); ksStat = ks.length; } catch {}
     document.getElementById('stat-agents').textContent = agents.length;
     document.getElementById('stat-mcps').textContent = mcps.length;
     document.getElementById('stat-skills').textContent = skills.length;
     document.getElementById('stat-tokens').textContent = tokens.length;
     document.getElementById('stat-providers').textContent = providers.length;
+    document.getElementById('stat-knowledge').textContent = ksStat;
     document.getElementById('stat-workflows').textContent = workflows.length;
     document.getElementById('stat-tasks').textContent = taskExecs.length;
 
@@ -565,7 +599,7 @@ async function loadDashboard() {
 // ── Agents ──
 async function loadAgents() {
   try {
-    [agents, providers] = await Promise.all([api('/api/agents'), api('/api/providers')]);
+    [agents, providers, knowledgeSources] = await Promise.all([api('/api/agents'), api('/api/providers'), api('/api/knowledge-sources').catch(()=>[])]);
     document.getElementById('agents-body').innerHTML = agents.length
       ? agents.map(a => {
           const prov = a.provider_id ? providers.find(p => p.id === a.provider_id) : null;
@@ -592,6 +626,10 @@ function openAgentModal(id) {
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" value="${m.id}" ${a?.mcp_server_ids?.includes(m.id)?'checked':''}> ${esc(m.name)}
     </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No MCP servers registered</span>';
+  const ksOpts = knowledgeSources.map(k =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${k.id}" ${a?.knowledge_source_ids?.includes(k.id)?'checked':''}> ${esc(k.name)} <span class="badge badge-blue" style="font-size:10px">${k.source_type}</span>
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No knowledge sources created</span>';
   const providerOpts = `<option value="">(Default — use GITHUB_TOKEN)</option>` +
     providers.map(p => `<option value="${p.id}" ${a?.provider_id===p.id?'selected':''}>${esc(p.name)} (${p.provider_type})</option>`).join('');
 
@@ -608,7 +646,11 @@ function openAgentModal(id) {
     <div class="form-group"><label>MCP Servers</label><div id="f-agent-mcps">${mcpOpts}</div></div>
     <div class="form-group"><label>MCP Server Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching MCP servers)</span></label>
       <input id="f-agent-mcp-tags" value="${esc(a?.mcp_server_tags?.join(', ')||'')}" placeholder="e.g. dev-tools, communication">
-      <div class="hint">Any MCP server that has at least one of these tags will be available to this agent.</div></div>`;
+      <div class="hint">Any MCP server that has at least one of these tags will be available to this agent.</div></div>
+    <div class="form-group"><label>Knowledge Sources</label><div id="f-agent-ks">${ksOpts}</div></div>
+    <div class="form-group"><label>Knowledge Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching knowledge sources)</span></label>
+      <input id="f-agent-knowledge-tags" value="${esc(a?.knowledge_tags?.join(', ')||'')}" placeholder="e.g. product, faq">
+      <div class="hint">Knowledge items from any source with at least one of these tags are injected into the agent's context.</div></div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
     <button class="btn btn-primary" onclick="saveAgent('${id||''}')">${a?'Update':'Create'}</button>`;
@@ -618,6 +660,8 @@ function openAgentModal(id) {
 async function saveAgent(id) {
   const mcpIds = [...document.querySelectorAll('#f-agent-mcps input:checked')].map(c => c.value);
   const mcpTags = document.getElementById('f-agent-mcp-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
+  const ksIds = [...document.querySelectorAll('#f-agent-ks input:checked')].map(c => c.value);
+  const kTags = document.getElementById('f-agent-knowledge-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
   const body = {
     name: document.getElementById('f-agent-name').value,
     description: document.getElementById('f-agent-desc').value,
@@ -626,6 +670,8 @@ async function saveAgent(id) {
     provider_id: document.getElementById('f-agent-provider').value || null,
     mcp_server_ids: mcpIds,
     mcp_server_tags: mcpTags,
+    knowledge_source_ids: ksIds,
+    knowledge_tags: kTags,
   };
   try {
     if (id) await api(`/api/agents/${id}`, { method:'PUT', body:JSON.stringify(body) });
@@ -1014,6 +1060,202 @@ async function saveSkill(id) {
 async function deleteSkill(id) {
   if (!confirm('Delete this skill?')) return;
   try { await api(`/api/skills/${id}`, { method:'DELETE' }); toast('Skill deleted'); loadSkills(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Knowledge ──
+async function loadKnowledge() {
+  try {
+    [knowledgeSources, knowledgeItems] = await Promise.all([
+      api('/api/knowledge-sources'), api('/api/knowledge-items')
+    ]);
+    function sourceName(id) { const s = knowledgeSources.find(s => s.id === id); return s ? esc(s.name) : id?.slice(0,8) || '-'; }
+    document.getElementById('knowledge-sources-body').innerHTML = knowledgeSources.length
+      ? knowledgeSources.map(s => `<tr>
+          <td><strong>${esc(s.name)}</strong>${s.description ? `<div style="font-size:12px;color:var(--muted)">${esc(s.description)}</div>` : ''}</td>
+          <td><span class="badge badge-blue">${esc(s.source_type)}</span></td>
+          <td>${statusBadge(s.status)}</td>
+          <td>${s.tags?.map(t=>`<span class="badge badge-purple">${esc(t)}</span> `).join('')||'-'}</td>
+          <td>${fmtDate(s.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openKnowledgeSourceModal('${s.id}')">Edit</button>
+            ${s.source_type==='vector_db'?`<button class="btn btn-sm" onclick="testKnowledgeSource('${s.id}')">Test</button>`:''}
+            <button class="btn btn-sm btn-danger" onclick="deleteKnowledgeSource('${s.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No knowledge sources. Create one to organise knowledge items.</td></tr>';
+
+    document.getElementById('knowledge-items-body').innerHTML = knowledgeItems.length
+      ? knowledgeItems.map(i => `<tr>
+          <td><strong>${esc(i.name)}</strong></td>
+          <td>${sourceName(i.source_id)}</td>
+          <td><span class="badge badge-blue">${esc(i.content_type)}</span></td>
+          <td>${i.tags?.map(t=>`<span class="badge badge-purple">${esc(t)}</span> `).join('')||'-'}</td>
+          <td>${i.file_size ? (i.file_size/1024).toFixed(1)+'KB' : (i.text_content?.length||0)+' chars'}</td>
+          <td>${fmtDate(i.created_at)}</td>
+          <td><div class="btn-group">
+            ${i.content_type==='text'?`<button class="btn btn-sm" onclick="openKnowledgeItemModal('${i.id}')">Edit</button>`:''}
+            ${i.file_id?`<button class="btn btn-sm" onclick="downloadKnowledgeFile('${i.id}','${esc(i.file_name||'file')}')">Download</button>`:''}
+            <button class="btn btn-sm btn-danger" onclick="deleteKnowledgeItem('${i.id}')">Delete</button>
+          </div></td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty-state">No knowledge items yet.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openKnowledgeSourceModal(id) {
+  const s = id ? knowledgeSources.find(x => x.id === id) : null;
+  const sourceType = s ? s.source_type : 'mongo_db';
+  const cc = s?.connection_config || {};
+  const isVdb = sourceType === 'vector_db';
+  document.getElementById('modal-title').textContent = s ? 'Edit Knowledge Source' : 'Create Knowledge Source';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-ks-name" value="${esc(s?.name||'')}" placeholder="e.g. product-docs"></div>
+    <div class="form-group"><label>Description</label><input id="f-ks-desc" value="${esc(s?.description||'')}"></div>
+    <div class="form-group"><label>Source Type</label>
+      <select id="f-ks-type">
+        <option value="mongo_db" ${sourceType==='mongo_db'?'selected':''}>mongo_db (GridFS)</option>
+        <option value="vector_db" ${sourceType==='vector_db'?'selected':''}>vector_db (Qdrant)</option>
+      </select></div>
+    <div id="ks-vdb-fields" style="display:${isVdb?'block':'none'}">
+      <div class="form-group"><label>Qdrant URL</label>
+        <input id="f-ks-url" value="${esc(cc.url||'')}" placeholder="http://localhost:6333"></div>
+      <div class="form-group"><label>Collection</label>
+        <input id="f-ks-collection" value="${esc(cc.collection||'')}" placeholder="my-collection"></div>
+      <div class="form-group"><label>API Key Token Name <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional)</span></label>
+        <input id="f-ks-apikey" value="${esc(cc.api_key_token_name||'')}" placeholder="qdrant-api-key">
+        <div class="hint">Reference a token from the Tokens store. Leave blank for no auth.</div></div>
+    </div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-ks-tags" value="${esc(s?.tags?.join(', ')||'')}" placeholder="e.g. product, docs">
+      <div class="hint">Agents match knowledge sources by tag.</div></div>`;
+  document.getElementById('f-ks-type').addEventListener('change', e => {
+    document.getElementById('ks-vdb-fields').style.display = e.target.value==='vector_db'?'block':'none';
+  });
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveKnowledgeSource('${id||''}')">${s?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveKnowledgeSource(id) {
+  const sourceType = document.getElementById('f-ks-type').value;
+  let config = {};
+  if (sourceType === 'vector_db') {
+    config.url = document.getElementById('f-ks-url').value;
+    config.collection = document.getElementById('f-ks-collection').value;
+    const ak = document.getElementById('f-ks-apikey').value.trim();
+    if (ak) config.api_key_token_name = ak;
+  }
+  const body = {
+    name: document.getElementById('f-ks-name').value,
+    description: document.getElementById('f-ks-desc').value,
+    source_type: sourceType,
+    connection_config: config,
+    tags: document.getElementById('f-ks-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+  };
+  try {
+    if (id) await api(`/api/knowledge-sources/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/knowledge-sources', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Source updated' : 'Source created'); closeModal(); loadKnowledge();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function testKnowledgeSource(id) {
+  try {
+    const res = await api(`/api/knowledge-sources/${id}/test`, { method:'POST' });
+    if (res.success) toast('Connection successful!');
+    else toast(res.error || 'Connection failed', 'error');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteKnowledgeSource(id) {
+  if (!confirm('Delete this knowledge source and ALL its items?')) return;
+  try { await api(`/api/knowledge-sources/${id}`, { method:'DELETE' }); toast('Source deleted'); loadKnowledge(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+function openKnowledgeItemModal(id) {
+  const i = id ? knowledgeItems.find(x => x.id === id) : null;
+  const srcOpts = knowledgeSources.map(s =>
+    `<option value="${s.id}" ${i?.source_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  document.getElementById('modal-title').textContent = i ? 'Edit Knowledge Item' : 'Create Text Item';
+  document.getElementById('modal-body').innerHTML = `
+    ${!i ? `<div class="form-group"><label>Source</label><select id="f-ki-source">${srcOpts||'<option disabled>No sources — create one first</option>'}</select></div>` : ''}
+    <div class="form-group"><label>Name</label><input id="f-ki-name" value="${esc(i?.name||'')}" placeholder="e.g. FAQ answers"></div>
+    <div class="form-group"><label>Text Content</label>
+      <textarea id="f-ki-text" rows="8">${esc(i?.text_content||'')}</textarea></div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-ki-tags" value="${esc(i?.tags?.join(', ')||'')}"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveKnowledgeItem('${id||''}')">${i?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveKnowledgeItem(id) {
+  const body = {
+    name: document.getElementById('f-ki-name').value,
+    text_content: document.getElementById('f-ki-text').value,
+    tags: document.getElementById('f-ki-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+  };
+  try {
+    if (id) {
+      await api(`/api/knowledge-items/${id}`, { method:'PUT', body:JSON.stringify(body) });
+    } else {
+      body.source_id = document.getElementById('f-ki-source').value;
+      body.content_type = 'text';
+      await api('/api/knowledge-items', { method:'POST', body:JSON.stringify(body) });
+    }
+    toast(id ? 'Item updated' : 'Item created'); closeModal(); loadKnowledge();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openKnowledgeUploadModal() {
+  const srcOpts = knowledgeSources.map(s =>
+    `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  document.getElementById('modal-title').textContent = 'Upload Knowledge File';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Source</label><select id="f-ku-source">${srcOpts||'<option disabled>No sources — create one first</option>'}</select></div>
+    <div class="form-group"><label>File</label><input type="file" id="f-ku-file"></div>
+    <div class="form-group"><label>Tags (comma-separated, optional)</label>
+      <input id="f-ku-tags" placeholder="e.g. manual, pdf"></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="uploadKnowledgeFile()">Upload</button>`;
+  showModal();
+}
+
+async function uploadKnowledgeFile() {
+  const fileEl = document.getElementById('f-ku-file');
+  if (!fileEl.files.length) { toast('Select a file', 'error'); return; }
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  fd.append('source_id', document.getElementById('f-ku-source').value);
+  const tagsVal = document.getElementById('f-ku-tags').value.trim();
+  if (tagsVal) fd.append('tags', JSON.stringify(tagsVal.split(',').map(t=>t.trim()).filter(Boolean)));
+  try {
+    await fetch(API + '/api/knowledge-items/upload', { method:'POST', body: fd });
+    toast('File uploaded'); closeModal(); loadKnowledge();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function downloadKnowledgeFile(id, fileName) {
+  try {
+    const res = await fetch(API + `/api/knowledge-items/${id}/content`);
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName || 'download';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteKnowledgeItem(id) {
+  if (!confirm('Delete this knowledge item?')) return;
+  try { await api(`/api/knowledge-items/${id}`, { method:'DELETE' }); toast('Item deleted'); loadKnowledge(); }
   catch(e) { toast(e.message, 'error'); }
 }
 

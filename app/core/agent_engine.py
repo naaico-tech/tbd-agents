@@ -26,6 +26,7 @@ from app.config import settings
 from app.core import event_bus
 from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
+from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
 from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderType
 from app.models.skill import Skill
@@ -60,6 +61,7 @@ from app.observability import (
 )
 from app.services import token_manager
 from app.services.copilot_client import build_client
+from app.services.knowledge_manager import knowledge_manager
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +165,9 @@ async def _build_system_prompt(
     agent: Agent,
     skill_ids: list[str],
     workflow: Workflow,
+    knowledge_context: str = "",
 ) -> str:
-    """Assemble the system prompt from agent config + skills."""
+    """Assemble the system prompt from agent config + skills + knowledge."""
     system_prompt = agent.system_prompt
 
     # Skills
@@ -178,6 +181,10 @@ async def _build_system_prompt(
                 )
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
+
+    # Knowledge
+    if knowledge_context:
+        system_prompt += "\n\n" + knowledge_context
 
     # Autonomous execution directive
     system_prompt += (
@@ -798,7 +805,40 @@ async def run_agent(
     )
 
     # Build system prompt with skills + output destination hints
-    system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow)
+    # Resolve knowledge sources — by explicit IDs and by tags (union, deduplicated)
+    from beanie import PydanticObjectId as _KsObjId
+
+    knowledge_sources_map: dict[str, KnowledgeSource] = {}
+    for ks_id in agent.knowledge_source_ids:
+        try:
+            ks = await KnowledgeSource.get(_KsObjId(ks_id))
+        except Exception:
+            logger.warning("Skipping invalid knowledge_source_id: %s", ks_id)
+            continue
+        if ks:
+            knowledge_sources_map[str(ks.id)] = ks
+    if agent.knowledge_tags:
+        tag_ks = await KnowledgeSource.find(
+            {"tags": {"$in": agent.knowledge_tags}},
+        ).to_list()
+        for ks in tag_ks:
+            knowledge_sources_map[str(ks.id)] = ks
+
+    knowledge_context = ""
+    knowledge_sources_list = list(knowledge_sources_map.values())
+    if knowledge_sources_list or agent.knowledge_tags:
+        knowledge_context = await knowledge_manager.build_knowledge_context(
+            knowledge_sources_list, agent.knowledge_tags
+        )
+        if knowledge_context:
+            await _log(
+                workflow,
+                "knowledge_loaded",
+                f"{len(knowledge_sources_list)} knowledge source(s) resolved",
+                task_exec,
+            )
+
+    system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow, knowledge_context)
 
     # Sync repository if configured
     repo_path = await _sync_repo(workflow)

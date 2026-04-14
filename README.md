@@ -56,6 +56,7 @@ Spin up purpose-built agents with distinct system prompts, wire them to any MCP 
 - 📊 **Usage & cost tracking** — per-workflow token counts, premium request quotas, and cost data from the Copilot SDK
 - 🧩 **Skills system** — modular instruction sets that can be installed per workflow to shape agent behaviour
 - 📤 **Output destinations** — agents autonomously decide when to push results to Notion pages or Slack channels
+- 📚 **Knowledge bases** — attach vector databases (Qdrant) or upload files/text tagged for retrieval; agents pull relevant knowledge into their context automatically
 
 ---
 
@@ -155,6 +156,30 @@ GET    /api/mcps/{id}/tools     ← List tools from MCP server
 DELETE /api/mcps/{id}           ← Remove MCP server
 ```
 
+### 📚 Knowledge Sources
+
+```
+POST   /api/knowledge-sources              ← Register knowledge source (vector_db or mongo_db)
+GET    /api/knowledge-sources              ← List sources (optional ?tags= filter)
+GET    /api/knowledge-sources/{id}         ← Get source
+PUT    /api/knowledge-sources/{id}         ← Update source
+DELETE /api/knowledge-sources/{id}         ← Delete source (cascade-deletes items)
+POST   /api/knowledge-sources/{id}/test    ← Test connection
+```
+
+### 📄 Knowledge Items
+
+```
+POST   /api/knowledge-items                ← Create text knowledge item
+POST   /api/knowledge-items/upload         ← Upload file/image (multipart)
+GET    /api/knowledge-items                ← List items (?source_id=, ?tags=, ?content_type=)
+GET    /api/knowledge-items/{id}           ← Get item metadata
+GET    /api/knowledge-items/{id}/content   ← Download file content
+PUT    /api/knowledge-items/{id}           ← Update item tags/metadata
+DELETE /api/knowledge-items/{id}           ← Delete item
+POST   /api/knowledge-items/query          ← Query items by tags
+```
+
 ### ⚙️ Workflows
 
 ```
@@ -233,6 +258,88 @@ curl -X POST "http://localhost:8000/api/workflows/$WORKFLOW_ID/prompt" \
 curl -N "http://localhost:8000/api/workflows/$WORKFLOW_ID/stream"
 ```
 
+### ► Stage 5 — Add a Knowledge Base
+
+```bash
+# Register a local MongoDB-backed knowledge source
+curl -X POST http://localhost:8000/api/knowledge-sources \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "product-docs",
+    "source_type": "mongo_db",
+    "tags": ["docs", "product"]
+  }'
+
+# Upload a text knowledge item tagged for retrieval
+curl -X POST http://localhost:8000/api/knowledge-items \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_id": "<SOURCE_ID>",
+    "name": "API rate limits",
+    "content_type": "text",
+    "text_content": "Rate limit is 1000 req/min per API key. Burst limit is 50 req/s.",
+    "tags": ["docs", "api"]
+  }'
+
+# Upload a file via multipart form
+curl -X POST http://localhost:8000/api/knowledge-items/upload \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -F "file=@architecture.pdf" \
+  -F "source_id=<SOURCE_ID>" \
+  -F 'tags=["docs", "architecture"]'
+
+# Attach knowledge to an agent by tags
+curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"knowledge_tags": ["docs"]}'
+```
+
+### ► Stage 6 — Connect a Qdrant Vector Database
+
+To use an external Qdrant instance as a knowledge source:
+
+```bash
+# 1. Store the Qdrant API key in the encrypted token store
+curl -X POST http://localhost:8000/api/tokens \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "qdrant-api-key",
+    "value": "your-qdrant-api-key-here",
+    "description": "Qdrant Cloud API key"
+  }'
+
+# 2. Register the Qdrant source
+curl -X POST http://localhost:8000/api/knowledge-sources \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "qdrant-docs",
+    "source_type": "vector_db",
+    "connection_config": {
+      "url": "https://your-cluster.qdrant.io:6333",
+      "collection": "documents",
+      "api_key_token_name": "qdrant-api-key"
+    },
+    "tags": ["vector", "docs"]
+  }'
+
+# 3. Test the connection
+curl -X POST http://localhost:8000/api/knowledge-sources/<SOURCE_ID>/test \
+  -H "Authorization: Bearer $GITHUB_TOKEN"
+
+# 4. Attach to an agent by ID or tags
+curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"knowledge_source_ids": ["<SOURCE_ID>"]}'
+```
+
+For local development, uncomment the `qdrant` service in `docker-compose.yml` and use `http://qdrant:6333` as the URL.
+
 ---
 
 ## 🧠 Supported Models
@@ -264,6 +371,7 @@ Any model available through GitHub Copilot is supported.
  │  Task queue    │  Celery + Redis                   │
  │  Event bus     │  Redis Pub/Sub                    │
  │  Database      │  MongoDB + Beanie ODM             │
+ │  Vector DB     │  Qdrant (optional, for knowledge)  │
  │  Frontend      │  Single-page dashboard (JS, SSE)  │
  │  Containers    │  Docker Compose                   │
  └────────────────┴───────────────────────────────────┘
