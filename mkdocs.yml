@@ -7,18 +7,9 @@ repo_name: naaico-tech/tbd-agents
 theme:
   name: material
   palette:
-    - scheme: slate
-      primary: custom
-      accent: cyan
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-    - scheme: default
-      primary: black
-      accent: cyan
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
+    scheme: default
+    primary: black
+    accent: cyan
   font:
     text: Inter
     code: JetBrains Mono
