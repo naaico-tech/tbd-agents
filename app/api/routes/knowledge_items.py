@@ -46,12 +46,12 @@ async def create_knowledge_item(body: KnowledgeItemCreate, _user=Depends(get_cur
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     if source.source_type != KnowledgeSourceType.MONGO_DB:
         raise HTTPException(status_code=400, detail="Items can only be added to mongo_db sources")
-    if body.content_type not in (KnowledgeContentType.TEXT,):
+    if body.content_type != KnowledgeContentType.TEXT:
         raise HTTPException(status_code=400, detail="Use /upload for file and image content types")
     item = KnowledgeItem(
         source_id=body.source_id,
         name=body.name,
-        content_type=KnowledgeContentType(body.content_type),
+        content_type=body.content_type,
         text_content=body.text_content,
         tags=body.tags,
         metadata=body.metadata,
@@ -78,11 +78,15 @@ async def upload_knowledge_file(
     try:
         tag_list = json.loads(tags)
     except (json.JSONDecodeError, TypeError):
-        tag_list = []
+        raise HTTPException(status_code=400, detail="Invalid tags: expected a JSON array of strings")
+    if not isinstance(tag_list, list) or any(not isinstance(tag, str) for tag in tag_list):
+        raise HTTPException(status_code=400, detail="Invalid tags: expected a JSON array of strings")
     try:
         meta_dict = json.loads(metadata)
     except (json.JSONDecodeError, TypeError):
-        meta_dict = {}
+        raise HTTPException(status_code=400, detail="metadata must be a valid JSON object")
+    if not isinstance(meta_dict, dict):
+        raise HTTPException(status_code=400, detail="metadata must be a valid JSON object")
 
     file_content = await file.read()
     mime = file.content_type or "application/octet-stream"
@@ -143,11 +147,13 @@ async def download_knowledge_file(item_id: str, _user=Depends(get_current_user))
     if not item.file_id:
         raise HTTPException(status_code=400, detail="Item has no associated file")
     content = await knowledge_manager.get_file_content(item)
+    # Sanitize filename to prevent header injection
+    safe_name = (item.file_name or "download").replace('"', '').replace('\r', '').replace('\n', '').replace('\\', '')
     return Response(
         content=content,
         media_type=item.mime_type or "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{item.file_name or "download"}"',
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
         },
     )
 

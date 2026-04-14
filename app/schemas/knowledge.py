@@ -3,6 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.models.knowledge_item import KnowledgeContentType
+from app.models.knowledge_source import KnowledgeSourceStatus, KnowledgeSourceType
+
 
 # ── KnowledgeSource schemas ──────────────────────────────────────────────────
 
@@ -10,7 +13,7 @@ from pydantic import BaseModel
 class KnowledgeSourceCreate(BaseModel):
     name: str
     description: str = ""
-    source_type: str  # vector_db | mongo_db
+    source_type: KnowledgeSourceType
     connection_config: dict[str, Any] = {}
     tags: list[str] = []
 
@@ -18,7 +21,7 @@ class KnowledgeSourceCreate(BaseModel):
 class KnowledgeSourceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    source_type: str | None = None
+    source_type: KnowledgeSourceType | None = None
     connection_config: dict[str, Any] | None = None
     tags: list[str] | None = None
 
@@ -27,10 +30,10 @@ class KnowledgeSourceResponse(BaseModel):
     id: str
     name: str
     description: str
-    source_type: str
+    source_type: KnowledgeSourceType
     connection_config: dict[str, Any]
     tags: list[str]
-    status: str
+    status: KnowledgeSourceStatus
     last_error: str | None
     created_at: datetime
     updated_at: datetime
@@ -47,7 +50,7 @@ class KnowledgeSourceTestResponse(BaseModel):
 class KnowledgeItemCreate(BaseModel):
     source_id: str
     name: str
-    content_type: str = "text"  # text | file | image
+    content_type: KnowledgeContentType = KnowledgeContentType.TEXT
     text_content: str | None = None
     tags: list[str] = []
     metadata: dict[str, Any] = {}
@@ -64,7 +67,7 @@ class KnowledgeItemResponse(BaseModel):
     id: str
     source_id: str
     name: str
-    content_type: str
+    content_type: KnowledgeContentType
     text_content: str | None
     file_id: str | None
     file_name: str | None

@@ -806,9 +806,15 @@ async def run_agent(
 
     # Build system prompt with skills + output destination hints
     # Resolve knowledge sources — by explicit IDs and by tags (union, deduplicated)
+    from beanie import PydanticObjectId as _KsObjId
+
     knowledge_sources_map: dict[str, KnowledgeSource] = {}
     for ks_id in agent.knowledge_source_ids:
-        ks = await KnowledgeSource.get(ks_id)
+        try:
+            ks = await KnowledgeSource.get(_KsObjId(ks_id))
+        except Exception:
+            logger.warning("Skipping invalid knowledge_source_id: %s", ks_id)
+            continue
         if ks:
             knowledge_sources_map[str(ks.id)] = ks
     if agent.knowledge_tags:

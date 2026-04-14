@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from xml.sax.saxutils import escape, quoteattr
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
@@ -63,9 +64,9 @@ class KnowledgeManager:
             return {"success": False, "error": str(exc)[:500]}
 
     async def query_vector_db(
-        self, source: KnowledgeSource, query: str, limit: int = 10
+        self, source: KnowledgeSource, limit: int = 10
     ) -> list[dict]:
-        """Query a Qdrant vector DB source by text (scroll, not semantic search).
+        """Retrieve documents from a Qdrant vector DB source via scroll.
 
         Phase 1 uses scroll to retrieve documents. Semantic search with
         embeddings is deferred to Phase 2.
@@ -117,47 +118,51 @@ class KnowledgeManager:
         metadata: dict,
     ) -> KnowledgeItem:
         """Store a file in GridFS and create a KnowledgeItem record."""
-        from app.db import init_db  # noqa: F401
         from motor.motor_asyncio import AsyncIOMotorClient
 
         from app.config import settings
 
         client = AsyncIOMotorClient(settings.mongo_uri)
-        db = client[settings.mongo_db_name]
-        fs = AsyncIOMotorGridFSBucket(db)
+        try:
+            db = client[settings.mongo_db_name]
+            fs = AsyncIOMotorGridFSBucket(db)
 
-        grid_in = fs.open_upload_stream(file_name, metadata={"mime_type": mime_type})
-        await grid_in.write(file_content)
-        await grid_in.close()
+            grid_in = fs.open_upload_stream(file_name, metadata={"mime_type": mime_type})
+            await grid_in.write(file_content)
+            await grid_in.close()
 
-        item = KnowledgeItem(
-            source_id=source_id,
-            name=file_name,
-            content_type=content_type,
-            file_id=str(grid_in._id),
-            file_name=file_name,
-            file_size=len(file_content),
-            mime_type=mime_type,
-            tags=tags,
-            metadata=metadata,
-        )
-        await item.insert()
-        return item
+            item = KnowledgeItem(
+                source_id=source_id,
+                name=file_name,
+                content_type=content_type,
+                file_id=str(grid_in._id),
+                file_name=file_name,
+                file_size=len(file_content),
+                mime_type=mime_type,
+                tags=tags,
+                metadata=metadata,
+            )
+            await item.insert()
+            return item
+        finally:
+            client.close()
 
     async def delete_item(self, item: KnowledgeItem) -> None:
         """Delete a knowledge item and its associated GridFS file (if any)."""
         if item.file_id:
+            from motor.motor_asyncio import AsyncIOMotorClient
+
+            from app.config import settings
+
+            client = AsyncIOMotorClient(settings.mongo_uri)
             try:
-                from motor.motor_asyncio import AsyncIOMotorClient
-
-                from app.config import settings
-
-                client = AsyncIOMotorClient(settings.mongo_uri)
                 db = client[settings.mongo_db_name]
                 fs = AsyncIOMotorGridFSBucket(db)
                 await fs.delete(ObjectId(item.file_id))
             except Exception as exc:
                 logger.warning("Failed to delete GridFS file %s: %s", item.file_id, exc)
+            finally:
+                client.close()
         await item.delete()
 
     async def get_file_content(self, item: KnowledgeItem) -> bytes:
@@ -167,11 +172,14 @@ class KnowledgeManager:
         from app.config import settings
 
         client = AsyncIOMotorClient(settings.mongo_uri)
-        db = client[settings.mongo_db_name]
-        fs = AsyncIOMotorGridFSBucket(db)
+        try:
+            db = client[settings.mongo_db_name]
+            fs = AsyncIOMotorGridFSBucket(db)
 
-        stream = await fs.open_download_stream(ObjectId(item.file_id))
-        return await stream.read()
+            stream = await fs.open_download_stream(ObjectId(item.file_id))
+            return await stream.read()
+        finally:
+            client.close()
 
     async def build_knowledge_context(
         self, sources: list[KnowledgeSource], tags: list[str]
@@ -191,8 +199,8 @@ class KnowledgeManager:
             for item in items:
                 if item.content_type == KnowledgeContentType.TEXT and item.text_content:
                     sections.append(
-                        f'<item name="{item.name}" tags="{",".join(item.tags)}">\n'
-                        f"{item.text_content}\n"
+                        f'<item name={quoteattr(item.name)} tags={quoteattr(",".join(item.tags))}>\n'
+                        f"{escape(item.text_content)}\n"
                         f"</item>"
                     )
 
@@ -200,12 +208,12 @@ class KnowledgeManager:
         for source in sources:
             if source.source_type == KnowledgeSourceType.VECTOR_DB:
                 try:
-                    results = await self.query_vector_db(source, query="", limit=20)
+                    results = await self.query_vector_db(source, limit=20)
                     for r in results:
                         text = r.get("text", "")
                         if text:
                             sections.append(
-                                f'<item source="{source.name}">\n{text}\n</item>'
+                                f'<item source={quoteattr(source.name)}>\n{escape(text)}\n</item>'
                             )
                 except Exception as exc:
                     logger.warning(

@@ -34,12 +34,10 @@ def _to_response(source: KnowledgeSource) -> KnowledgeSourceResponse:
 
 @router.post("", response_model=KnowledgeSourceResponse, status_code=201)
 async def create_knowledge_source(body: KnowledgeSourceCreate, _user=Depends(get_current_user)):
-    if body.source_type not in (KnowledgeSourceType.VECTOR_DB, KnowledgeSourceType.MONGO_DB):
-        raise HTTPException(status_code=400, detail="source_type must be 'vector_db' or 'mongo_db'")
     source = KnowledgeSource(
         name=body.name,
         description=body.description,
-        source_type=KnowledgeSourceType(body.source_type),
+        source_type=body.source_type,
         connection_config=body.connection_config,
         tags=body.tags,
     )
@@ -77,13 +75,15 @@ async def update_knowledge_source(
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     update_data = body.model_dump(exclude_none=True)
     if "source_type" in update_data:
-        if update_data["source_type"] not in (KnowledgeSourceType.VECTOR_DB, KnowledgeSourceType.MONGO_DB):
-            raise HTTPException(status_code=400, detail="source_type must be 'vector_db' or 'mongo_db'")
         update_data["source_type"] = KnowledgeSourceType(update_data["source_type"])
+    connection_fields_updated = any(field in update_data for field in ("source_type", "connection_config"))
     if update_data:
         update_data["updated_at"] = datetime.now(UTC)
-        source.status = KnowledgeSourceStatus.REGISTERED
-        update_data["status"] = KnowledgeSourceStatus.REGISTERED
+        if connection_fields_updated:
+            source.status = KnowledgeSourceStatus.REGISTERED
+            source.last_error = None
+            update_data["status"] = KnowledgeSourceStatus.REGISTERED
+            update_data["last_error"] = None
         await source.set(update_data)
     return _to_response(source)
 
