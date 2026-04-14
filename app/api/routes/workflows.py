@@ -35,7 +35,15 @@ def _usage_response(wf: Workflow) -> UsageStatsResponse | None:
     return UsageStatsResponse(**wf.usage.model_dump())
 
 
-def _to_response(wf: Workflow) -> WorkflowResponse:
+async def _to_response(wf: Workflow) -> WorkflowResponse:
+    # Count tasks and get last task info
+    tasks = await TaskExecution.find(
+        TaskExecution.workflow_id == str(wf.id)
+    ).sort("-created_at").limit(1).to_list()
+    task_count_val = await TaskExecution.find(
+        TaskExecution.workflow_id == str(wf.id)
+    ).count()
+    last_task = tasks[0] if tasks else None
     return WorkflowResponse(
         id=str(wf.id),
         title=wf.title,
@@ -58,6 +66,9 @@ def _to_response(wf: Workflow) -> WorkflowResponse:
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
+        task_count=task_count_val,
+        last_task_status=last_task.status if last_task else None,
+        last_task_at=last_task.created_at if last_task else None,
         created_at=wf.created_at,
         updated_at=wf.updated_at,
     )
@@ -92,7 +103,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_token_name=body.repo_token_name,
     )
     await wf.insert()
-    return _to_response(wf)
+    return await _to_response(wf)
 
 
 @router.post("/{workflow_id}/prompt", response_model=PromptResponse, status_code=201)
@@ -107,19 +118,17 @@ async def send_prompt(
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.HALTED, WorkflowStatus.MAX_TURNS_REACHED):
+    if wf.status != WorkflowStatus.ACTIVE:
         raise HTTPException(
             status_code=400,
             detail=f"Workflow is {wf.status}, cannot send prompt",
         )
 
-    # Reset for a new run if re-prompting a finished or stale workflow
-    if wf.status in (WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.HALTED, WorkflowStatus.MAX_TURNS_REACHED):
-        wf.status = WorkflowStatus.ACTIVE
-        wf.logs = []
-        wf.messages = []
-        wf.current_turn = 0
-        await wf.save()
+    # Reset logs/messages for a new run
+    wf.logs = []
+    wf.messages = []
+    wf.current_turn = 0
+    await wf.save()
 
     token = extract_token(authorization)
 
@@ -169,8 +178,15 @@ async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status != WorkflowStatus.RUNNING:
-        raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, not running")
+    if wf.status != WorkflowStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, not active")
+    # Check if there is actually a running task for this workflow
+    running_task = await TaskExecution.find_one(
+        TaskExecution.workflow_id == str(wf.id),
+        TaskExecution.status == "running",
+    )
+    if not running_task:
+        raise HTTPException(status_code=400, detail="No running task to halt")
     await event_bus.set_halt(str(wf.id))
     return {"detail": "Halt signal sent"}
 
@@ -212,7 +228,7 @@ async def get_workflow(workflow_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    return _to_response(wf)
+    return await _to_response(wf)
 
 
 @router.put("/{workflow_id}", response_model=WorkflowResponse)
@@ -235,12 +251,16 @@ async def update_workflow(
         raise HTTPException(status_code=400, detail="output_format must be 'json' or 'markdown'")
     if "output_format" in updates:
         updates["output_format"] = OutputFormat(updates["output_format"])
+    if "status" in updates:
+        if updates["status"] not in ("active", "inactive"):
+            raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+        updates["status"] = WorkflowStatus(updates["status"])
     for k, v in updates.items():
         setattr(wf, k, v)
     from datetime import UTC, datetime
     wf.updated_at = datetime.now(UTC)
     await wf.save()
-    return _to_response(wf)
+    return await _to_response(wf)
 
 
 @router.delete("/{workflow_id}", status_code=204)
@@ -257,7 +277,7 @@ async def delete_workflow(workflow_id: str, user=Depends(get_current_user)):
 @router.get("", response_model=list[WorkflowResponse])
 async def list_workflows(user=Depends(get_current_user)):
     workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
-    return [_to_response(wf) for wf in workflows]
+    return [await _to_response(wf) for wf in workflows]
 
 
 @router.post("/{workflow_id}/skills/{skill_id}", response_model=WorkflowResponse)
@@ -277,7 +297,7 @@ async def install_skill(
         raise HTTPException(status_code=409, detail="Skill already installed")
     wf.skill_ids.append(skill_id)
     await wf.save()
-    return _to_response(wf)
+    return await _to_response(wf)
 
 
 @router.delete("/{workflow_id}/skills/{skill_id}", response_model=WorkflowResponse)
@@ -294,4 +314,4 @@ async def remove_skill(
         raise HTTPException(status_code=404, detail="Skill not installed in this workflow")
     wf.skill_ids.remove(skill_id)
     await wf.save()
-    return _to_response(wf)
+    return await _to_response(wf)

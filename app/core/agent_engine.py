@@ -97,12 +97,12 @@ async def _log(
     )
 
 
-async def _publish_status(workflow: Workflow) -> None:
+async def _publish_status(workflow: Workflow, status: str | None = None) -> None:
     """Publish a status change to SSE subscribers."""
     await event_bus.publish(
         str(workflow.id),
         "status",
-        {"status": workflow.status, "current_turn": workflow.current_turn},
+        {"status": status or "running", "current_turn": workflow.current_turn},
     )
 
 
@@ -584,18 +584,17 @@ async def _run_with_custom_provider(
         if final_text and workflow.output_format == OutputFormat.JSON:
             final_text = json.dumps({"response": final_text})
 
-        workflow.status = WorkflowStatus.COMPLETED
         await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
         await _log(
             workflow, "completed",
-            f"Final status: {workflow.status} (tool_calls: {tool_call_count})",
+            f"Final status: completed (tool_calls: {tool_call_count})",
             task_exec,
         )
-        await _publish_status(workflow)
+        await _publish_status(workflow, "completed")
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
         agent_task_duration_seconds.labels(
-            model=model, status=WorkflowStatus.COMPLETED
+            model=model, status="completed"
         ).observe(task_duration)
 
         if task_exec:
@@ -607,30 +606,32 @@ async def _run_with_custom_provider(
             task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
             await task_exec.save()
 
+        await workflow.save()
+
     except httpx.HTTPStatusError as exc:
-        workflow.status = WorkflowStatus.FAILED
         await _log(
             workflow,
             "error",
             f"Provider HTTP error {exc.response.status_code}: {exc.response.text[:500]}",
             task_exec,
         )
-        await _publish_status(workflow)
+        await _publish_status(workflow, "failed")
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
             await task_exec.save()
         final_text = None
+        await workflow.save()
     except Exception as exc:
-        workflow.status = WorkflowStatus.FAILED
         await _log(workflow, "error", str(exc), task_exec)
-        await _publish_status(workflow)
+        await _publish_status(workflow, "failed")
         logger.exception("Custom provider run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
             await task_exec.save()
         final_text = None
+        await workflow.save()
     finally:
         # Close MCP server connections
         try:
@@ -639,7 +640,7 @@ async def _run_with_custom_provider(
             pass
         agent_tasks_active.dec()
         agent_tasks_total.labels(
-            status=workflow.status,
+            status=task_exec.status if task_exec else "completed",
             model=model,
             reasoning_effort="default",
         ).inc()
@@ -680,7 +681,7 @@ async def run_agent(
             task_exec.model = workflow.model
             await task_exec.save()
 
-    if workflow.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.RUNNING):
+    if workflow.status != WorkflowStatus.ACTIVE:
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -689,9 +690,8 @@ async def run_agent(
 
     agent = await Agent.get(workflow.agent_id)
     if not agent:
-        workflow.status = WorkflowStatus.FAILED
         await _log(workflow, "error", "Agent not found", task_exec)
-        await _publish_status(workflow)
+        await _publish_status(workflow, "failed")
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -750,10 +750,9 @@ async def run_agent(
                 task_exec,
             )
 
-    # Mark running
-    workflow.status = WorkflowStatus.RUNNING
+    # Log prompt and publish running status for SSE
     await _log(workflow, "prompt_received", user_prompt[:200], task_exec)
-    await _publish_status(workflow)
+    await _publish_status(workflow, "running")
 
     # Append user message
     workflow.messages.append(Message(role="user", content=user_prompt))
@@ -1170,21 +1169,20 @@ async def run_agent(
                             if await event_bus.check_halt(str(workflow.id)):
                                 await event_bus.clear_halt(str(workflow.id))
                                 await session.abort()
-                                workflow.status = WorkflowStatus.HALTED
                                 workflow.current_turn = tool_call_count
                                 await _log(workflow, "halted", "Execution halted by user", task_exec)
-                                await _publish_status(workflow)
+                                await _publish_status(workflow, "halted")
                                 if task_exec:
                                     task_exec.status = TaskStatus.HALTED
                                     task_exec.finished_at = datetime.now(UTC)
                                     task_exec.tool_calls = tool_call_count
                                     await task_exec.save()
+                                await workflow.save()
                                 return None
                             # Not halted yet and not timed out — keep waiting
                             if remaining <= 2.0:
                                 raise
                 except asyncio.TimeoutError:
-                    workflow.status = WorkflowStatus.FAILED
                     workflow.current_turn = tool_call_count
                     await _log(
                         workflow,
@@ -1192,12 +1190,13 @@ async def run_agent(
                         f"Session timed out after {settings.session_timeout}s",
                         task_exec,
                     )
-                    await _publish_status(workflow)
+                    await _publish_status(workflow, "failed")
                     if task_exec:
                         task_exec.status = TaskStatus.FAILED
                         task_exec.finished_at = datetime.now(UTC)
                         task_exec.tool_calls = tool_call_count
                         await task_exec.save()
+                    await workflow.save()
                     return None
 
                 # Retrieve conversation history from the SDK session
@@ -1230,37 +1229,31 @@ async def run_agent(
 
                 # ── Record task-level Prometheus metrics ──
                 task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
-                final_status = workflow.status if workflow.status != WorkflowStatus.RUNNING else WorkflowStatus.COMPLETED
+
+                # Determine task terminal status
+                if tool_call_count > max_turns:
+                    task_final_status = TaskStatus.MAX_TURNS_REACHED
+                    await _log(workflow, "max_turns_reached", f"{tool_call_count} tool calls", task_exec)
+                else:
+                    task_final_status = TaskStatus.COMPLETED
+
                 agent_task_duration_seconds.labels(
-                    model=workflow.model, status=final_status,
+                    model=workflow.model, status=task_final_status,
                 ).observe(task_duration)
                 tool_calls_per_task.labels(model=workflow.model).observe(tool_call_count)
                 if usage.total_cost > 0:
                     cost_per_task_dollars.labels(model=workflow.model).observe(usage.total_cost)
 
-                # Check if max turns was hit
-                if tool_call_count > max_turns:
-                    workflow.status = WorkflowStatus.MAX_TURNS_REACHED
-                    await _log(workflow, "max_turns_reached", f"{tool_call_count} tool calls", task_exec)
-                elif workflow.status == WorkflowStatus.RUNNING:
-                    workflow.status = WorkflowStatus.COMPLETED
-
                 # Format output
                 if final_text and workflow.output_format == OutputFormat.JSON:
                     final_text = json.dumps({"response": final_text})
 
-                await _log(workflow, "completed", f"Final status: {workflow.status}", task_exec)
-                await _publish_status(workflow)
+                await _log(workflow, "completed", f"Final status: {task_final_status}", task_exec)
+                await _publish_status(workflow, task_final_status)
 
                 # Finalize task execution
                 if task_exec:
-                    status_map = {
-                        WorkflowStatus.COMPLETED: TaskStatus.COMPLETED,
-                        WorkflowStatus.FAILED: TaskStatus.FAILED,
-                        WorkflowStatus.HALTED: TaskStatus.HALTED,
-                        WorkflowStatus.MAX_TURNS_REACHED: TaskStatus.MAX_TURNS_REACHED,
-                    }
-                    task_exec.status = status_map.get(workflow.status, TaskStatus.COMPLETED)
+                    task_exec.status = task_final_status
                     task_exec.finished_at = datetime.now(UTC)
                     task_exec.tool_calls = tool_call_count
                     task_exec.response = final_text
@@ -1272,20 +1265,22 @@ async def run_agent(
                     ][-20:]  # Keep last 20 messages for this execution
                     await task_exec.save()
 
+                await workflow.save()
+
     except Exception as e:
-        workflow.status = WorkflowStatus.FAILED
         await _log(workflow, "error", str(e), task_exec)
-        await _publish_status(workflow)
+        await _publish_status(workflow, "failed")
         logger.exception("Agent run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
             await task_exec.save()
         final_text = None
+        await workflow.save()
     finally:
         agent_tasks_active.dec()
         agent_tasks_total.labels(
-            status=workflow.status,
+            status=task_exec.status if task_exec else "completed",
             model=workflow.model,
             reasoning_effort=reasoning_effort or "default",
         ).inc()

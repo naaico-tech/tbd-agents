@@ -184,11 +184,7 @@ class TestWorkflowModel:
 
     def test_workflow_status_enum(self):
         assert WorkflowStatus.ACTIVE == "active"
-        assert WorkflowStatus.RUNNING == "running"
-        assert WorkflowStatus.COMPLETED == "completed"
-        assert WorkflowStatus.FAILED == "failed"
-        assert WorkflowStatus.HALTED == "halted"
-        assert WorkflowStatus.MAX_TURNS_REACHED == "max_turns_reached"
+        assert WorkflowStatus.INACTIVE == "inactive"
 
 
 # ── UsageStats ───────────────────────────────────────────────────────────────

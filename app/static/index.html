@@ -35,6 +35,7 @@
   .sidebar nav a.active { color: var(--accent); background: var(--accent-bg); border-left: 2px solid var(--accent);
     border-right: none; text-shadow: 0 0 10px rgba(169,118,249,.4); }
   .sidebar nav a .icon { font-size: 18px; width: 22px; text-align: center; }
+  .sidebar nav a.sub-link { padding-left: 44px; font-size: 12px; color: var(--muted); }
   .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted);
     font-family: 'VT323', monospace; font-size: 14px; letter-spacing: .5px; }
 
@@ -132,6 +133,12 @@
   /* Sections */
   .page { display: none; }
   .page.active { display: block; }
+
+  /* Split panel for task logs page */
+  .split-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; height: calc(100vh - 200px); }
+  .split-panel .panel { display: flex; flex-direction: column; min-height: 0; }
+  .split-panel .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+  @media (max-width: 900px) { .split-panel { grid-template-columns: 1fr; } }
 
   /* Prompt area */
   .prompt-area { display: flex; gap: 12px; }
@@ -246,7 +253,6 @@
     <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="providers"><span class="icon">🏢</span> Providers</a>
     <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
-    <a data-page="tasks"><span class="icon">📋</span> Task Executions</a>
     <a data-page="task"><span class="icon">💬</span> Run Task</a>
   </nav>
   <div class="sidebar-footer">v0.1.0 · Copilot SDK · NAAICO</div>
@@ -275,7 +281,7 @@
       <div class="card">
         <div class="card-header"><h2>Recent Workflows</h2></div>
         <div class="card-body"><table><thead><tr>
-          <th>ID</th><th>Agent</th><th>Status</th><th>Model</th><th>Created</th>
+          <th>ID</th><th>Agent</th><th>Tasks</th><th>Last Task</th><th>Model</th><th>Created</th>
         </tr></thead><tbody id="dash-workflows-body"></tbody></table></div>
       </div>
     </div>
@@ -386,12 +392,101 @@
       </div>
       <div class="card">
         <div class="card-body"><table><thead><tr>
-          <th>Title</th><th>Agent</th><th>Status</th><th>Model</th><th>Turns</th><th>Created</th><th></th>
+          <th>Title</th><th>Agent</th><th>Model</th><th>Status</th><th>Tasks</th><th>Last Task</th><th>Created</th><th></th>
         </tr></thead><tbody id="workflows-body"></tbody></table></div>
       </div>
     </div>
 
-    <!-- Task Executions Page -->
+    <!-- Workflow Detail Page (hidden from nav) -->
+    <div id="page-workflow-detail" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <button class="btn btn-sm" onclick="navigateTo('workflows')">&larr; Back to Workflows</button>
+        <h2 id="wf-detail-title" style="font-size:18px;font-weight:600"></h2>
+      </div>
+      <div class="stats" style="margin-bottom:16px">
+        <div class="stat-card"><div class="label">Status</div><div id="wf-detail-status"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="wf-detail-active-toggle" onchange="toggleWorkflowActive(this.checked)" style="width:18px;height:18px;accent-color:var(--green)"><span id="wf-detail-status-label">Active</span></label></div></div>
+        <div class="stat-card"><div class="label">Agent</div><div class="value blue" id="wf-detail-agent" style="font-size:16px">-</div></div>
+        <div class="stat-card"><div class="label">Model</div><div class="value" id="wf-detail-model" style="font-size:16px">-</div></div>
+        <div class="stat-card"><div class="label">Total Tasks</div><div class="value purple" id="wf-detail-task-count">0</div></div>
+      </div>
+      <!-- Run task inline -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h2>Run New Task</h2></div>
+        <div class="card-body">
+          <div class="form-group" id="wf-detail-prompt-group">
+            <label>Prompt</label>
+            <textarea id="wf-detail-prompt" rows="3" placeholder="Describe the task..."></textarea>
+          </div>
+          <div class="form-group" id="wf-detail-request-group" style="display:none">
+            <label>Request Object (JSON) <span class="badge badge-purple" style="vertical-align:middle;margin-left:4px">request guardrail</span></label>
+            <textarea id="wf-detail-request" rows="4" placeholder='{"key": "value"}'></textarea>
+          </div>
+          <div class="form-group" id="wf-detail-reasoning-group" style="display:none">
+            <label>Thinking Level</label>
+            <select id="wf-detail-reasoning"><option value="">Use workflow default</option></select>
+          </div>
+          <button class="btn btn-primary" id="wf-detail-send" onclick="sendTaskFromDetail()">▶ Send Task</button>
+          <button class="btn btn-danger" id="wf-detail-halt" onclick="haltTaskFromDetail()" style="display:none">⏹ Stop</button>
+        </div>
+      </div>
+      <!-- Task history for this workflow -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Task History</h2>
+          <button class="btn btn-sm" onclick="loadWorkflowDetail(currentWorkflowId)">↻ Refresh</button>
+        </div>
+        <div class="card-body"><table><thead><tr>
+          <th>Prompt</th><th>Status</th><th>Model</th><th>Tool Calls</th><th>Elapsed</th><th>Created</th><th></th>
+        </tr></thead><tbody id="wf-detail-tasks-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Task Logs Page (separate full page) -->
+    <div id="page-task-logs" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <button class="btn btn-sm" id="task-logs-back" onclick="navigateBackFromTaskLogs()">&larr; Back</button>
+        <h2 id="task-logs-title" style="font-size:18px;font-weight:600">Task Execution</h2>
+        <span id="task-logs-status-badge" class="badge" style="margin-left:8px"></span>
+        <button class="btn btn-sm btn-danger" id="task-logs-halt" onclick="haltFromTaskLogs()" style="display:none">⏹ Stop</button>
+      </div>
+      <!-- Task info bar -->
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:16px">
+        <span>Model: <strong id="task-logs-model" style="color:var(--text)">-</strong></span>
+        <span>Tool Calls: <strong id="task-logs-tool-calls" style="color:var(--text)">-</strong></span>
+        <span>Elapsed: <strong id="task-logs-elapsed" style="color:var(--text)">-</strong></span>
+        <span id="task-logs-reasoning-span" style="display:none">Thinking: <strong id="task-logs-reasoning" style="color:var(--purple)">-</strong></span>
+      </div>
+      <div id="task-logs-usage" style="display:none;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:16px;padding:8px 12px;background:var(--surface);border-radius:4px;border:1px solid var(--border)">
+        <span>Requests: <strong id="task-logs-usage-req" style="color:var(--purple)">-</strong></span>
+        <span>In: <strong id="task-logs-usage-in" style="color:var(--accent)">-</strong></span>
+        <span>Out: <strong id="task-logs-usage-out" style="color:var(--green)">-</strong></span>
+        <span>Cost: <strong id="task-logs-usage-cost" style="color:var(--yellow)">-</strong></span>
+      </div>
+      <!-- Progress panel -->
+      <div id="task-logs-progress-panel" class="card progress-panel" style="display:none;margin-bottom:16px">
+        <div class="card-header">
+          <h2>Progress</h2>
+          <span id="task-logs-progress-percent" class="progress-percent">0%</span>
+        </div>
+        <div class="card-body">
+          <div class="progress-bar-track"><div id="task-logs-progress-bar" class="progress-bar-fill" style="width:0%"></div></div>
+          <ul id="task-logs-progress-todos" class="todo-list"></ul>
+        </div>
+      </div>
+      <!-- Split panel: Conversations | Logs -->
+      <div class="split-panel">
+        <div class="card panel">
+          <div class="card-header"><h2>Conversation</h2></div>
+          <div class="panel-body" id="task-logs-messages"></div>
+        </div>
+        <div class="card panel">
+          <div class="card-header"><h2>Logs</h2></div>
+          <div class="panel-body log-list" id="task-logs-log-entries"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Task Executions Page (all tasks across workflows) -->
     <div id="page-tasks" class="page">
       <div class="card">
         <div class="card-header">
@@ -399,7 +494,7 @@
           <button class="btn btn-sm" onclick="loadTaskExecutions()">↻ Refresh</button>
         </div>
         <div class="card-body"><table><thead><tr>
-          <th>Prompt</th><th>Workflow</th><th>Agent</th><th>Status</th><th>Worker</th><th>Tool Calls</th><th>Elapsed</th><th>Created</th><th></th>
+          <th>Prompt</th><th>Workflow</th><th>Agent</th><th>Status</th><th>Tool Calls</th><th>Elapsed</th><th>Created</th><th></th>
         </tr></thead><tbody id="task-execs-body"></tbody></table></div>
       </div>
     </div>
@@ -552,6 +647,17 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
   });
 });
 
+function navigateTo(page, title) {
+  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+  const nav = document.querySelector(`[data-page="${page}"]`);
+  if (nav) nav.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.getElementById('page-title').textContent = title ||
+    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs' }[page] || page;
+  loadPage(page);
+}
+
 function loadPage(page) {
   if (page === 'dashboard') loadDashboard();
   else if (page === 'agents') loadAgents();
@@ -564,6 +670,7 @@ function loadPage(page) {
   else if (page === 'workflows') loadWorkflows();
   else if (page === 'tasks') loadTaskExecutions();
   else if (page === 'task') loadTaskPage();
+  // workflow-detail and task-logs are loaded by their navigation functions
 }
 
 // ── Dashboard ──
@@ -586,13 +693,14 @@ async function loadDashboard() {
     const recent = workflows.slice(-5).reverse();
     document.getElementById('dash-workflows-body').innerHTML = recent.length
       ? recent.map(w => `<tr>
-          <td><strong>${esc(w.title || w.id.slice(0,8))}</strong></td>
+          <td><a href="#" onclick="event.preventDefault();viewWorkflowDetail('${w.id}')" style="color:var(--accent);text-decoration:none"><strong>${esc(w.title || w.id.slice(0,8))}</strong></a></td>
           <td>${agentName(w.agent_id)}</td>
-          <td>${statusBadge(w.status)}</td>
+          <td>${w.task_count || 0}</td>
+          <td>${w.last_task_status ? statusBadge(w.last_task_status) : '<span style="color:var(--muted)">—</span>'}</td>
           <td>${w.model}</td>
           <td>${fmtDate(w.created_at)}</td>
         </tr>`).join('')
-      : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No workflows yet</td></tr>';
+      : '<tr><td colspan="6" style="text-align:center;color:var(--muted)">No workflows yet</td></tr>';
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -1394,17 +1502,18 @@ async function loadWorkflows() {
       ? workflows.map(w => `<tr>
           <td><strong>${esc(w.title || w.id.slice(0,8))}</strong>${(w.guardrail_ids?.length||w.guardrail_tags?.length) ? ' <span title="Has guardrails" style="color:var(--muted);font-size:11px">🛡️</span>' : ''}</td>
           <td>${agentName(w.agent_id)}</td>
-          <td>${statusBadge(w.status)}</td>
           <td>${w.model}</td>
-          <td>${w.current_turn}/${w.max_turns}${w.infinite_session?' ∞':''}</td>
+          <td>${w.status === 'active' ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-muted">Inactive</span>'}</td>
+          <td><span class="badge badge-purple">${w.task_count || 0}</span></td>
+          <td>${w.last_task_status ? statusBadge(w.last_task_status) : '<span style="color:var(--muted)">—</span>'}</td>
           <td>${fmtDate(w.created_at)}</td>
           <td><div class="btn-group">
-            <button class="btn btn-sm" onclick="viewWorkflow('${w.id}')">View</button>
+            <button class="btn btn-sm" onclick="viewWorkflowDetail('${w.id}')">View</button>
             <button class="btn btn-sm" onclick="openEditWorkflowModal('${w.id}')">Edit</button>
             <button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${w.id}')">Delete</button>
           </div></td>
         </tr>`).join('')
-      : '<tr><td colspan="7" class="empty-state">No workflows yet.</td></tr>';
+      : '<tr><td colspan="8" class="empty-state">No workflows yet.</td></tr>';
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -1717,17 +1826,362 @@ async function deleteWorkflow(id) {
   catch(e) { toast(e.message, 'error'); }
 }
 
-function viewWorkflow(id) {
-  // Switch to task page and load this workflow's details
-  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
-  document.querySelector('[data-page="task"]').classList.add('active');
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-task').classList.add('active');
-  document.getElementById('page-title').textContent = 'Run Task';
-  loadTaskPage().then(() => {
-    document.getElementById('task-workflow').value = id;
-    fetchAndRenderWorkflow(id);
-  });
+let currentWorkflowId = null;
+let taskLogsBackTarget = 'workflows'; // where to go back from task-logs page
+
+function viewWorkflowDetail(id) {
+  currentWorkflowId = id;
+  navigateTo('workflow-detail', 'Workflow Detail');
+  loadWorkflowDetail(id);
+}
+
+async function loadWorkflowDetail(id) {
+  try {
+    const [w, wfTasks] = await Promise.all([
+      api(`/api/workflows/${id}`),
+      api(`/api/tasks/workflow/${id}`),
+    ]);
+    if (!agents.length) agents = await api('/api/agents');
+    document.getElementById('wf-detail-title').textContent = w.title || w.id.slice(0,8);
+    const isActive = w.status === 'active';
+    document.getElementById('wf-detail-active-toggle').checked = isActive;
+    document.getElementById('wf-detail-status-label').textContent = isActive ? 'Active' : 'Inactive';
+    document.getElementById('wf-detail-status-label').style.color = isActive ? 'var(--green)' : 'var(--muted)';
+    document.getElementById('wf-detail-agent').textContent = agentName(w.agent_id);
+    document.getElementById('wf-detail-model').textContent = w.model;
+    document.getElementById('wf-detail-task-count').textContent = w.task_count || wfTasks.length;
+
+    // Guardrail UI
+    const hasGuardrails = (w.guardrail_ids?.length || w.guardrail_tags?.length);
+    document.getElementById('wf-detail-request-group').style.display = hasGuardrails ? '' : 'none';
+
+    // Reasoning dropdown
+    try {
+      if (!_cachedModels) _cachedModels = await api('/api/models');
+      const m = _cachedModels.find(x => x.id === w.model);
+      const rGroup = document.getElementById('wf-detail-reasoning-group');
+      const rSel = document.getElementById('wf-detail-reasoning');
+      if (m?.supportedReasoningEfforts?.length) {
+        rSel.innerHTML = '<option value="">Use workflow default' + (w.reasoning_effort ? ` (${w.reasoning_effort})` : '') + '</option>' +
+          m.supportedReasoningEfforts.map(e => `<option value="${esc(e)}">${esc(e.charAt(0).toUpperCase()+e.slice(1))}</option>`).join('');
+        rGroup.style.display = '';
+      } else { rGroup.style.display = 'none'; }
+    } catch { document.getElementById('wf-detail-reasoning-group').style.display = 'none'; }
+
+    // Tasks table
+    document.getElementById('wf-detail-tasks-body').innerHTML = wfTasks.length
+      ? wfTasks.map(t => `<tr>
+          <td><strong title="${esc(t.prompt)}">${esc(t.prompt.length > 60 ? t.prompt.slice(0,60)+'…' : t.prompt)}</strong></td>
+          <td>${statusBadge(t.status)}</td>
+          <td>${esc(t.model || '-')}</td>
+          <td>${t.tool_calls}</td>
+          <td>${fmtElapsed(t.elapsed_seconds)}</td>
+          <td>${fmtDate(t.created_at)}</td>
+          <td><button class="btn btn-sm" onclick="openTaskLogsPage('${t.id}','workflow-detail')">View Logs</button></td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty-state">No tasks yet. Run one above.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleWorkflowActive(checked) {
+  if (!currentWorkflowId) return;
+  const newStatus = checked ? 'active' : 'inactive';
+  try {
+    await api(`/api/workflows/${currentWorkflowId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: newStatus }),
+    });
+    document.getElementById('wf-detail-status-label').textContent = checked ? 'Active' : 'Inactive';
+    document.getElementById('wf-detail-status-label').style.color = checked ? 'var(--green)' : 'var(--muted)';
+    toast(`Workflow ${newStatus}`);
+  } catch(e) {
+    // Revert toggle
+    document.getElementById('wf-detail-active-toggle').checked = !checked;
+    toast(e.message, 'error');
+  }
+}
+
+async function sendTaskFromDetail() {
+  if (!currentWorkflowId) return;
+  const prompt = document.getElementById('wf-detail-prompt').value.trim();
+  const requestRaw = document.getElementById('wf-detail-request')?.value?.trim();
+  if (!prompt && !requestRaw) return toast('Enter a prompt or request object', 'error');
+
+  let requestObj = undefined;
+  if (requestRaw) {
+    try { requestObj = JSON.parse(requestRaw); }
+    catch { return toast('Request Object must be valid JSON', 'error'); }
+  }
+
+  const btn = document.getElementById('wf-detail-send');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('wf-detail-halt').style.display = 'inline-block';
+
+  const payload = { reasoning_effort: document.getElementById('wf-detail-reasoning')?.value || null };
+  if (prompt) payload.prompt = prompt;
+  if (requestObj !== undefined) payload.request = requestObj;
+
+  try {
+    const resp = await api(`/api/workflows/${currentWorkflowId}/prompt`, { method:'POST', body:JSON.stringify(payload) });
+    toast('Task submitted');
+
+    // Find the new task execution and open it on the task-logs page with live SSE
+    const tasks = await api(`/api/tasks/workflow/${currentWorkflowId}`);
+    const latestTask = tasks.length ? tasks[0] : null;
+    if (latestTask) {
+      taskLogsBackTarget = 'workflow-detail';
+      navigateTo('task-logs', 'Task Logs');
+      renderTaskLogsPage(latestTask);
+      connectTaskLogsSSE(currentWorkflowId, latestTask.id);
+    }
+  } catch(e) { toast(e.message, 'error'); }
+  btn.disabled = false;
+  btn.textContent = '▶ Send Task';
+  document.getElementById('wf-detail-halt').style.display = 'none';
+}
+
+async function haltTaskFromDetail() {
+  if (!currentWorkflowId) return;
+  try {
+    await api(`/api/workflows/${currentWorkflowId}/halt`, { method:'POST' });
+    toast('Halt signal sent');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Task Logs Page ──
+function navigateBackFromTaskLogs() {
+  disconnectTaskLogsSSE();
+  if (taskLogsBackTarget === 'workflow-detail' && currentWorkflowId) {
+    viewWorkflowDetail(currentWorkflowId);
+  } else {
+    navigateTo('tasks', 'Task Executions');
+  }
+}
+
+async function openTaskLogsPage(taskId, backTarget) {
+  taskLogsBackTarget = backTarget || 'tasks';
+  disconnectTaskLogsSSE();
+  navigateTo('task-logs', 'Task Logs');
+  try {
+    const t = await api(`/api/tasks/${taskId}`);
+    renderTaskLogsPage(t);
+
+    // If task is still running, connect SSE for live streaming
+    if (t.status === 'running' || t.status === 'pending') {
+      connectTaskLogsSSE(t.workflow_id, taskId);
+    }
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function renderTaskLogsPage(t) {
+    document.getElementById('task-logs-title').textContent = t.prompt.length > 80 ? t.prompt.slice(0,80) + '…' : t.prompt;
+    const badge = document.getElementById('task-logs-status-badge');
+    const badgeMap = {pending:'muted',running:'yellow',completed:'green',failed:'red',halted:'purple',max_turns_reached:'purple'};
+    badge.className = 'badge badge-' + (badgeMap[t.status] || 'muted');
+    badge.textContent = t.status;
+
+    document.getElementById('task-logs-model').textContent = t.model || '-';
+    document.getElementById('task-logs-tool-calls').textContent = t.tool_calls;
+    document.getElementById('task-logs-elapsed').textContent = fmtElapsed(t.elapsed_seconds);
+    if (t.reasoning_effort) {
+      document.getElementById('task-logs-reasoning').textContent = t.reasoning_effort;
+      document.getElementById('task-logs-reasoning-span').style.display = '';
+    } else {
+      document.getElementById('task-logs-reasoning-span').style.display = 'none';
+    }
+
+    // Usage
+    if (t.usage) {
+      updateTaskLogsUsage(t.usage);
+    } else {
+      document.getElementById('task-logs-usage').style.display = 'none';
+    }
+
+    // Progress
+    if (t.progress && t.progress.todos.length) {
+      renderTaskLogsProgress(t.progress);
+    } else {
+      document.getElementById('task-logs-progress-panel').style.display = 'none';
+    }
+
+    // Conversations (left panel)
+    const msgEl = document.getElementById('task-logs-messages');
+    if (t.messages.length) {
+      msgEl.innerHTML = t.messages.map(m => `
+        <div class="msg msg-${m.role}" style="margin-bottom:8px">
+          ${renderMsgHtml(m)}
+        </div>`).join('');
+    } else {
+      msgEl.innerHTML = '<div class="empty-state" style="padding:40px 20px"><div class="icon">💬</div><div>No conversation messages</div></div>';
+    }
+
+    // Logs (right panel)
+    const logEl = document.getElementById('task-logs-log-entries');
+    if (t.logs.length) {
+      logEl.innerHTML = '';
+      t.logs.forEach(l => appendTaskLogsLogEntry(l));
+    } else {
+      logEl.innerHTML = '<div class="empty-state" style="padding:40px 20px"><div class="icon">📋</div><div>No logs</div></div>';
+    }
+}
+
+// ── Task Logs SSE streaming ──
+let taskLogsSse = null;
+let taskLogsSseTaskId = null;
+let taskLogsWorkflowId = null;
+let taskLogsStreamingEl = null;
+
+function connectTaskLogsSSE(workflowId, taskId) {
+  disconnectTaskLogsSSE();
+  taskLogsSseTaskId = taskId;
+  taskLogsWorkflowId = workflowId;
+  taskLogsSse = new EventSource(`/api/workflows/${workflowId}/stream`);
+  document.getElementById('task-logs-halt').style.display = 'inline-block';
+
+  taskLogsSse.onmessage = (ev) => {
+    let parsed;
+    try { parsed = JSON.parse(ev.data); } catch { return; }
+    const { type, data } = parsed;
+
+    if (type === 'log') {
+      appendTaskLogsLogEntry(data);
+    } else if (type === 'message') {
+      finishTaskLogsStreaming();
+      appendTaskLogsMessage(data);
+    } else if (type === 'message_delta') {
+      appendTaskLogsDelta(data.content || '');
+    } else if (type === 'progress') {
+      renderTaskLogsProgress(data);
+    } else if (type === 'usage') {
+      updateTaskLogsUsage(data);
+    } else if (type === 'status') {
+      // Update status badge
+      const badge = document.getElementById('task-logs-status-badge');
+      const badgeMap = {pending:'muted',running:'yellow',completed:'green',failed:'red',halted:'purple',max_turns_reached:'purple'};
+      badge.className = 'badge badge-' + (badgeMap[data.status] || 'muted');
+      badge.textContent = data.status;
+
+      if (data.tool_calls !== undefined) {
+        document.getElementById('task-logs-tool-calls').textContent = data.tool_calls;
+      }
+
+      // Terminal state — close SSE and do final fetch for complete data
+      if (['completed','failed','halted','max_turns_reached'].includes(data.status)) {
+        disconnectTaskLogsSSE();
+        // Re-fetch complete task data for final state
+        api(`/api/tasks/${taskLogsSseTaskId || taskId}`).then(t => renderTaskLogsPage(t)).catch(() => {});
+      }
+    }
+  };
+
+  taskLogsSse.onerror = () => {
+    disconnectTaskLogsSSE();
+    // Poll for final state
+    if (taskLogsSseTaskId) {
+      api(`/api/tasks/${taskLogsSseTaskId}`).then(t => renderTaskLogsPage(t)).catch(() => {});
+    }
+  };
+}
+
+function disconnectTaskLogsSSE() {
+  if (taskLogsSse) { taskLogsSse.close(); taskLogsSse = null; }
+  finishTaskLogsStreaming();
+  document.getElementById('task-logs-halt').style.display = 'none';
+}
+
+function finishTaskLogsStreaming() {
+  if (taskLogsStreamingEl) {
+    const spinner = taskLogsStreamingEl.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    taskLogsStreamingEl = null;
+  }
+}
+
+function appendTaskLogsMessage(m) {
+  const msgEl = document.getElementById('task-logs-messages');
+  const empty = msgEl.querySelector('.empty-state');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = `msg msg-${m.role}`;
+  div.style.marginBottom = '8px';
+  div.innerHTML = renderMsgHtml(m);
+  msgEl.appendChild(div);
+  msgEl.scrollTop = msgEl.scrollHeight;
+}
+
+function appendTaskLogsDelta(text) {
+  if (!text) return;
+  const msgEl = document.getElementById('task-logs-messages');
+  if (!taskLogsStreamingEl) {
+    const empty = msgEl.querySelector('.empty-state');
+    if (empty) empty.remove();
+    taskLogsStreamingEl = document.createElement('div');
+    taskLogsStreamingEl.className = 'msg msg-assistant';
+    taskLogsStreamingEl.style.marginBottom = '8px';
+    taskLogsStreamingEl.innerHTML = '<div class="role-label">🤖 assistant <span class="spinner" style="margin-left:6px"></span></div>';
+    const contentSpan = document.createElement('div');
+    contentSpan.className = 'msg-content streaming-content';
+    contentSpan.style.whiteSpace = 'pre-wrap';
+    taskLogsStreamingEl.appendChild(contentSpan);
+    msgEl.appendChild(taskLogsStreamingEl);
+  }
+  const contentEl = taskLogsStreamingEl.querySelector('.streaming-content');
+  contentEl.textContent += text;
+  msgEl.scrollTop = msgEl.scrollHeight;
+}
+
+function appendTaskLogsLogEntry(l) {
+  const logEl = document.getElementById('task-logs-log-entries');
+  const empty = logEl.querySelector('.empty-state');
+  if (empty) empty.remove();
+  const isToolEvent = l.event === 'tool_call' || l.event === 'tool_result';
+  const isFailed = l.event === 'tool_result' && l.detail && l.detail.includes('FAILED');
+  const div = document.createElement('div');
+  div.className = 'log-entry' + (isToolEvent ? ' log-tool' : '') + (isFailed ? ' log-tool-fail' : '');
+  div.innerHTML = `<span class="ts">${fmtDate(l.timestamp || new Date().toISOString())}</span>` +
+    `<span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}` +
+    (isToolEvent ? '<span class="tool-hint">click for details</span>' : '');
+  if (isToolEvent) {
+    div.dataset.toolInput = l.tool_input || '';
+    div.dataset.toolOutput = l.tool_output || '';
+    div.dataset.toolEvent = l.event;
+    div.dataset.toolDetail = l.detail || '';
+    div.addEventListener('click', () => showToolDetailModal(div.dataset));
+  }
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateTaskLogsUsage(u) {
+  const el = document.getElementById('task-logs-usage');
+  el.style.display = 'flex';
+  document.getElementById('task-logs-usage-req').textContent = u.total_premium_requests ?? '-';
+  document.getElementById('task-logs-usage-in').textContent = (u.total_input_tokens ?? 0).toLocaleString();
+  document.getElementById('task-logs-usage-out').textContent = (u.total_output_tokens ?? 0).toLocaleString();
+  document.getElementById('task-logs-usage-cost').textContent = '$' + (u.total_cost ?? 0).toFixed(4);
+}
+
+function renderTaskLogsProgress(data) {
+  const panel = document.getElementById('task-logs-progress-panel');
+  if (!data || !data.todos || !data.todos.length) return;
+  panel.style.display = '';
+  const pct = Math.round((data.percent_complete || 0) * 100);
+  document.getElementById('task-logs-progress-percent').textContent = pct + '%';
+  document.getElementById('task-logs-progress-bar').style.width = pct + '%';
+  const STATUS_ICON = {'not-started':'○','in-progress':'◉','completed':'✓'};
+  document.getElementById('task-logs-progress-todos').innerHTML = data.todos.map(td => {
+    const s = td.status || 'not-started';
+    return `<li class="todo-item ${s}"><span class="todo-icon">${STATUS_ICON[s]||'○'}</span><span class="todo-title">${esc(td.title)}</span></li>`;
+  }).join('');
+}
+
+async function haltFromTaskLogs() {
+  if (!taskLogsWorkflowId) return;
+  try {
+    await api(`/api/workflows/${taskLogsWorkflowId}/halt`, { method:'POST' });
+    toast('Halt signal sent');
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── Task Runner ──
@@ -1735,9 +2189,9 @@ async function loadTaskPage() {
   try {
     [workflows, agents] = await Promise.all([api('/api/workflows'), api('/api/agents')]);
     const sel = document.getElementById('task-workflow');
-    sel.innerHTML = workflows.map(w =>
-      `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)} (${w.status})</option>`
-    ).join('') || '<option value="">No workflows — create one first</option>';
+    sel.innerHTML = workflows.filter(w => w.status === 'active').map(w =>
+      `<option value="${w.id}">${esc(w.title || w.id.slice(0,8))} — ${agentName(w.agent_id)}</option>`
+    ).join('') || '<option value="">No active workflows — create one first</option>';
     sel.addEventListener('change', () => { updateTaskReasoningDropdown(); updateTaskGuardrailUI(); });
     updateTaskReasoningDropdown();
     updateTaskGuardrailUI();
@@ -2032,11 +2486,14 @@ async function pollWorkflowResult(wfId) {
   if (pollTimer) clearInterval(pollTimer);
   const update = async () => {
     try {
-      const w = await api(`/api/workflows/${wfId}`);
-      renderTaskResult(w);
-      if (w.status !== 'running') {
-        clearInterval(pollTimer); pollTimer = null;
-        resetSendButton();
+      const tasks = await api(`/api/tasks/workflow/${wfId}`);
+      if (tasks.length) {
+        const latest = await api(`/api/tasks/${tasks[0].id}`);
+        updateStatusBadge(latest.status);
+        if (latest.status !== 'running' && latest.status !== 'pending') {
+          clearInterval(pollTimer); pollTimer = null;
+          resetSendButton();
+        }
       }
     } catch(e) { clearInterval(pollTimer); toast(e.message, 'error'); }
   };
@@ -2058,6 +2515,7 @@ async function fetchAndRenderWorkflow(wfId) {
     if (tasks.length) {
       const latestTask = await api(`/api/tasks/${tasks[0].id}`);
       if (latestTask.progress) renderProgress(latestTask.progress);
+      updateStatusBadge(latestTask.status);
     }
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -2170,81 +2628,17 @@ async function loadTaskExecutions() {
           <td>${esc(t.workflow_title || t.workflow_id.slice(0,8))}</td>
           <td>${esc(t.agent_name || '-')}</td>
           <td>${statusBadge(t.status)}</td>
-          <td><span class="mono">${esc(t.worker || '-')}</span></td>
           <td>${t.tool_calls}</td>
           <td>${fmtElapsed(t.elapsed_seconds)}</td>
           <td>${fmtDate(t.created_at)}</td>
-          <td><button class="btn btn-sm" onclick="viewTaskExecution('${t.id}')">View Logs</button></td>
+          <td><button class="btn btn-sm" onclick="openTaskLogsPage('${t.id}','tasks')">View Logs</button></td>
         </tr>`).join('')
-      : '<tr><td colspan="9" class="empty-state">No task executions yet. Run a task to see results here.</td></tr>';
+      : '<tr><td colspan="8" class="empty-state">No task executions yet. Run a task to see results here.</td></tr>';
   } catch(e) { toast(e.message, 'error'); }
 }
 
-async function viewTaskExecution(id) {
-  try {
-    const t = await api(`/api/tasks/${id}`);
-    document.querySelector('.modal').classList.add('modal-wide');
-    document.getElementById('modal-title').textContent = `Task Execution — ${t.status}`;
-    document.getElementById('modal-body').innerHTML = `
-      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:16px">
-        <span>Status: ${statusBadge(t.status)}</span>
-        <span>Model: <strong style="color:var(--text)">${esc(t.model || '-')}</strong></span>
-        ${t.reasoning_effort ? `<span>Thinking: <strong style="color:var(--purple)">${esc(t.reasoning_effort)}</strong></span>` : ''}
-        <span>Worker: <strong style="color:var(--text)">${esc(t.worker || '-')}</strong></span>
-        <span>Tool Calls: <strong style="color:var(--text)">${t.tool_calls}</strong></span>
-        <span>Elapsed: <strong style="color:var(--text)">${fmtElapsed(t.elapsed_seconds)}</strong></span>
-      </div>
-      ${t.usage ? `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:16px;padding:8px 12px;background:var(--bg);border-radius:6px">
-        <span>Requests: <strong style="color:var(--purple)">${t.usage.total_premium_requests}</strong></span>
-        <span>In: <strong style="color:var(--accent)">${t.usage.total_input_tokens.toLocaleString()}</strong></span>
-        <span>Out: <strong style="color:var(--green)">${t.usage.total_output_tokens.toLocaleString()}</strong></span>
-        <span>Cost: <strong style="color:var(--yellow)">$${t.usage.total_cost.toFixed(4)}</strong></span>
-      </div>` : ''}
-      ${t.progress && t.progress.todos.length ? `<div style="margin-bottom:16px">
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Progress (${Math.round((t.progress.percent_complete||0)*100)}%)</div>
-        <div style="height:4px;background:var(--surface2);border-radius:2px;margin-bottom:8px;overflow:hidden">
-          <div style="height:100%;background:var(--accent);width:${Math.round((t.progress.percent_complete||0)*100)}%;border-radius:2px"></div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${t.progress.todos.map(td => {
-            const icon = td.status==='completed'?'✓':td.status==='in-progress'?'◉':'○';
-            const color = td.status==='completed'?'var(--muted)':td.status==='in-progress'?'var(--accent)':'var(--text)';
-            const strike = td.status==='completed'?'text-decoration:line-through;':'';
-            return `<div style="display:flex;align-items:center;gap:6px;font-size:13px"><span style="color:${color}">${icon}</span><span style="color:${color};${strike}">${esc(td.title)}</span></div>`;
-          }).join('')}
-        </div>
-      </div>` : ''}
-      <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Prompt</div>
-        <div class="msg msg-user" style="margin:0">${renderMsgHtml({role:'user',content:t.prompt})}</div>
-      </div>
-      ${t.response ? `<div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Response</div>
-        <div class="msg msg-assistant" style="margin:0">${renderMsgHtml({role:'assistant',content:t.response})}</div>
-      </div>` : ''}
-      <div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Conversation (${t.messages.length})</div>
-        <div style="max-height:400px;overflow-y:auto">
-          ${t.messages.length ? t.messages.map(m => `
-            <div class="msg msg-${m.role}" style="margin-bottom:6px">
-              ${renderMsgHtml(m)}
-            </div>`).join('') : '<div style="color:var(--muted);font-size:13px">No messages</div>'}
-        </div>
-      </div>
-      <div>
-        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Logs (${t.logs.length})</div>
-        <div class="log-list" style="max-height:300px">
-          ${t.logs.length ? t.logs.map(l => `
-            <div class="log-entry">
-              <span class="ts">${fmtDate(l.timestamp)}</span>
-              <span class="ev">[${esc(l.event)}]</span> ${esc(l.detail)}
-            </div>`).join('') : '<div style="color:var(--muted);font-size:13px;text-align:center;padding:16px">No logs</div>'}
-        </div>
-      </div>`;
-    document.getElementById('modal-footer').innerHTML =
-      '<button class="btn" onclick="closeModal()">Close</button>';
-    showModal();
-  } catch(e) { toast(e.message, 'error'); }
+function viewTaskExecution(id) {
+  openTaskLogsPage(id, 'tasks');
 }
 
 // ── Init ──
