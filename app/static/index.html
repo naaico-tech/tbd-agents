@@ -712,8 +712,9 @@ async function loadAgents() {
       ? agents.map(a => {
           const prov = a.provider_id ? providers.find(p => p.id === a.provider_id) : null;
           const provLabel = prov ? `<span class="badge badge-blue">${esc(prov.name)}</span>` : '<span style="color:var(--muted)">Default</span>';
+          const builtinBadges = a.builtin_tools?.length ? a.builtin_tools.map(t => `<span class="badge badge-purple" style="font-size:10px">${t}</span>`).join(' ') : '';
           return `<tr>
-          <td><strong>${esc(a.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(a.description||'')}</span></td>
+          <td><strong>${esc(a.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(a.description||'')}</span>${builtinBadges ? '<br>'+builtinBadges : ''}</td>
           <td>${a.model || 'default'}</td>
           <td>${provLabel}</td>
           <td>${a.mcp_server_ids.length}</td>
@@ -741,6 +742,25 @@ function openAgentModal(id) {
   const providerOpts = `<option value="">(Default — use GITHUB_TOKEN)</option>` +
     providers.map(p => `<option value="${p.id}" ${a?.provider_id===p.id?'selected':''}>${esc(p.name)} (${p.provider_type})</option>`).join('');
 
+  // Determine if current provider is Anthropic (for showing builtin tools)
+  const selectedProvider = a?.provider_id ? providers.find(p => p.id === a.provider_id) : null;
+  const isAnthropic = selectedProvider?.provider_type === 'anthropic';
+  const builtinToolNames = ['bash','read','write','edit','glob','grep','web_fetch','web_search'];
+  const builtinToolDescs = {
+    bash: 'Execute bash commands',
+    read: 'Read files',
+    write: 'Write files',
+    edit: 'Edit files (string replace)',
+    glob: 'File pattern matching',
+    grep: 'Text search (regex)',
+    web_fetch: 'Fetch URL content',
+    web_search: 'Web search',
+  };
+  const builtinToolsHtml = builtinToolNames.map(t =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${t}" ${a?.builtin_tools?.includes(t)?'checked':''}> <strong>${t}</strong> <span style="color:var(--muted);font-size:11px">— ${builtinToolDescs[t]}</span>
+    </label>`).join('');
+
   document.getElementById('modal-title').textContent = a ? 'Edit Agent' : 'Create Agent';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group"><label>Name</label><input id="f-agent-name" value="${esc(a?.name||'')}"></div>
@@ -749,8 +769,12 @@ function openAgentModal(id) {
       <textarea id="f-agent-prompt" rows="4">${esc(a?.system_prompt||'You are a helpful assistant.')}</textarea></div>
     <div class="form-group"><label>Model</label><input id="f-agent-model" value="${esc(a?.model||'')}" placeholder="gpt-4.1"></div>
     <div class="form-group"><label>Provider <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional — BYOK)</span></label>
-      <select id="f-agent-provider">${providerOpts}</select>
+      <select id="f-agent-provider" onchange="toggleBuiltinTools()">${providerOpts}</select>
       <div class="hint">Leave as default to use the server GITHUB_TOKEN. Select a provider to route execution through its API key.</div></div>
+    <div class="form-group" id="f-agent-builtin-tools-group" style="display:${isAnthropic?'block':'none'}">
+      <label>Built-in Agent Tools <span style="font-weight:400;font-size:11px;color:var(--muted)">(Claude Agent SDK)</span></label>
+      <div id="f-agent-builtin-tools">${builtinToolsHtml}</div>
+      <div class="hint">Select which built-in tools the agent can use. If none are selected, no agent toolset is added.</div></div>
     <div class="form-group"><label>MCP Servers</label><div id="f-agent-mcps">${mcpOpts}</div></div>
     <div class="form-group"><label>MCP Server Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching MCP servers)</span></label>
       <input id="f-agent-mcp-tags" value="${esc(a?.mcp_server_tags?.join(', ')||'')}" placeholder="e.g. dev-tools, communication">
@@ -765,11 +789,19 @@ function openAgentModal(id) {
   showModal();
 }
 
+function toggleBuiltinTools() {
+  const provId = document.getElementById('f-agent-provider').value;
+  const prov = providers.find(p => p.id === provId);
+  const group = document.getElementById('f-agent-builtin-tools-group');
+  if (group) group.style.display = prov?.provider_type === 'anthropic' ? 'block' : 'none';
+}
+
 async function saveAgent(id) {
   const mcpIds = [...document.querySelectorAll('#f-agent-mcps input:checked')].map(c => c.value);
   const mcpTags = document.getElementById('f-agent-mcp-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
   const ksIds = [...document.querySelectorAll('#f-agent-ks input:checked')].map(c => c.value);
   const kTags = document.getElementById('f-agent-knowledge-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
+  const builtinTools = [...document.querySelectorAll('#f-agent-builtin-tools input:checked')].map(c => c.value);
   const body = {
     name: document.getElementById('f-agent-name').value,
     description: document.getElementById('f-agent-desc').value,
@@ -780,6 +812,7 @@ async function saveAgent(id) {
     mcp_server_tags: mcpTags,
     knowledge_source_ids: ksIds,
     knowledge_tags: kTags,
+    builtin_tools: builtinTools,
   };
   try {
     if (id) await api(`/api/agents/${id}`, { method:'PUT', body:JSON.stringify(body) });

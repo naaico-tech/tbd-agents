@@ -523,17 +523,40 @@ def _build_claude_agent_mcp_servers(mcp_config: dict) -> list[dict]:
     return servers
 
 
+# All tools available in the Claude Agent SDK agent_toolset_20260401
+CLAUDE_AGENT_TOOLSET_TOOLS = [
+    "bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search",
+]
+
+
 def _build_claude_agent_tools(
     native_mcp_servers: list[dict],
     custom_tools: list[dict],
+    builtin_tools: list[str] | None = None,
 ) -> list[dict]:
     """Assemble the full tools list for a Claude Agent SDK agent.
 
     Includes:
+    - ``agent_toolset_20260401`` entry with per-tool enable/disable config
     - ``mcp_toolset`` entries for each native (URL-based) MCP server
     - ``custom`` tool entries for stdio-based MCP server tools
     """
     tools: list[dict] = []
+
+    # ── Agent toolset (built-in tools) ────────────────────────────────────
+    if builtin_tools:
+        # Enable only the requested built-in tools
+        toolset: dict = {
+            "type": "agent_toolset_20260401",
+            "default_config": {"enabled": False},
+            "configs": [
+                {"name": name, "enabled": True}
+                for name in builtin_tools
+                if name in CLAUDE_AGENT_TOOLSET_TOOLS
+            ],
+        }
+        tools.append(toolset)
+
     for srv in native_mcp_servers:
         tools.append({"type": "mcp_toolset", "mcp_server_name": srv["name"]})
     tools.extend(custom_tools)
@@ -550,6 +573,7 @@ async def _run_with_claude_sdk(
     *,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
+    builtin_tools: list[str] | None = None,
 ) -> str | None:
     """Execute a prompt using the Claude Agent SDK (beta.agents/sessions).
 
@@ -617,7 +641,9 @@ async def _run_with_claude_sdk(
             )
 
         # ── Build agent tools list ───────────────────────────────────────────
-        agent_tools = _build_claude_agent_tools(native_mcp_servers, custom_tools)
+        agent_tools = _build_claude_agent_tools(
+            native_mcp_servers, custom_tools, builtin_tools=builtin_tools,
+        )
 
         await _log(
             workflow, "model_call",
@@ -1370,6 +1396,7 @@ async def run_agent(
                 task_exec,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
+                builtin_tools=agent.builtin_tools or None,
             )
         return await _run_with_custom_provider(
             workflow,

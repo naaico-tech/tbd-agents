@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.agent_engine import (
+    CLAUDE_AGENT_TOOLSET_TOOLS,
     _build_claude_agent_mcp_servers,
     _build_claude_agent_tools,
     _mcp_tool_to_claude_custom,
@@ -215,6 +216,46 @@ class TestBuildClaudeAgentTools:
         assert len(result) == 2
         assert result[0]["type"] == "mcp_toolset"
         assert result[1]["type"] == "custom"
+
+    def test_builtin_tools_adds_agent_toolset(self):
+        """When builtin_tools are specified, agent_toolset_20260401 is added."""
+        result = _build_claude_agent_tools([], [], builtin_tools=["bash", "web_search"])
+        assert len(result) == 1
+        toolset = result[0]
+        assert toolset["type"] == "agent_toolset_20260401"
+        assert toolset["default_config"] == {"enabled": False}
+        names = [c["name"] for c in toolset["configs"]]
+        assert names == ["bash", "web_search"]
+        assert all(c["enabled"] for c in toolset["configs"])
+
+    def test_builtin_tools_filters_invalid_names(self):
+        """Invalid tool names are silently ignored."""
+        result = _build_claude_agent_tools([], [], builtin_tools=["bash", "invalid_tool"])
+        toolset = result[0]
+        assert len(toolset["configs"]) == 1
+        assert toolset["configs"][0]["name"] == "bash"
+
+    def test_no_builtin_tools_omits_agent_toolset(self):
+        """When builtin_tools is None or empty, no agent_toolset is added."""
+        result = _build_claude_agent_tools([], [], builtin_tools=None)
+        assert result == []
+        result2 = _build_claude_agent_tools([], [], builtin_tools=[])
+        assert result2 == []
+
+    def test_builtin_tools_combined_with_mcp_and_custom(self):
+        """Agent toolset, MCP, and custom tools are all included together."""
+        native = [{"type": "url", "name": "mcp1", "url": "https://x.com"}]
+        custom = [{"type": "custom", "name": "tool1", "description": "", "input_schema": {}}]
+        result = _build_claude_agent_tools(native, custom, builtin_tools=["read", "write"])
+        assert len(result) == 3
+        assert result[0]["type"] == "agent_toolset_20260401"
+        assert result[1]["type"] == "mcp_toolset"
+        assert result[2]["type"] == "custom"
+
+    def test_claude_agent_toolset_tools_constant(self):
+        """Verify the constant contains all expected tool names."""
+        expected = {"bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search"}
+        assert set(CLAUDE_AGENT_TOOLSET_TOOLS) == expected
 
 
 # ── Execution path branching test ────────────────────────────────────────────
