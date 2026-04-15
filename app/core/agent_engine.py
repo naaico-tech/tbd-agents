@@ -403,75 +403,59 @@ async def _execute_mcp_tool(
         return json.dumps({"error": f"Tool execution failed: {exc}"})
 
 
-# ── Claude SDK helpers ────────────────────────────────────────────────────────
+# ── Claude Agent SDK helpers ──────────────────────────────────────────────────
 
 
-def _mcp_tool_to_claude(tool) -> dict:
-    """Convert an MCP Tool object to Claude tool format.
+def _mcp_tool_to_claude_custom(tool) -> dict:
+    """Convert a local MCP Tool to a Claude Agent SDK custom tool definition.
 
-    Claude expects ``input_schema`` (JSON Schema) whereas OpenAI uses
-    ``parameters`` nested under ``function``.
+    Used for stdio-based MCP servers whose tools must be handled locally
+    via ``agent.custom_tool_use`` events.
     """
     schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
     return {
+        "type": "custom",
         "name": tool.name,
         "description": tool.description or "",
         "input_schema": schema,
     }
 
 
-async def _connect_mcp_and_list_tools_claude(
+async def _connect_local_mcp_and_list_tools(
     mcp_config: dict,
     allowed_tools_set: set[str] | None,
     exit_stack,
 ) -> tuple[list[dict], dict]:
-    """Connect to MCP servers and list tools in Claude format.
+    """Connect to *local* (stdio) MCP servers and return Claude custom tool defs.
 
-    Returns ``(claude_tools, tool_server_map)`` where ``tool_server_map``
-    maps tool names to ``(session, server_name)`` tuples.
+    Returns ``(custom_tools, tool_server_map)`` where:
+    - ``custom_tools`` is a list of Claude Agent SDK custom tool params
+    - ``tool_server_map`` maps tool names to ``(session, server_name)``
     """
     from mcp import ClientSession, StdioServerParameters
-    from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
 
-    claude_tools: list[dict] = []
+    custom_tools: list[dict] = []
     tool_server_map: dict[str, tuple[ClientSession, str]] = {}
 
     for server_name, server_cfg in mcp_config.items():
-        transport_type = server_cfg.get("type", "")
+        if server_cfg.get("type") != "stdio":
+            continue
 
         try:
-            if transport_type == "stdio":
-                server_params = StdioServerParameters(
-                    command=server_cfg["command"],
-                    args=server_cfg.get("args", []),
-                    env=server_cfg.get("env"),
-                )
-                devnull = open(os.devnull, "w")  # noqa: SIM115
-                exit_stack.callback(devnull.close)
-                streams = await exit_stack.enter_async_context(
-                    stdio_client(server_params, errlog=devnull)
-                )
-                read_stream, write_stream = streams
-            elif transport_type == "sse":
-                url = server_cfg["url"]
-                headers = server_cfg.get("headers", {})
-                streams = await exit_stack.enter_async_context(
-                    sse_client(url, headers=headers)
-                )
-                read_stream, write_stream = streams
-            elif transport_type == "http":
-                url = server_cfg["url"]
-                headers = server_cfg.get("headers", {})
-                streams = await exit_stack.enter_async_context(
-                    streamablehttp_client(url, headers=headers)
-                )
-                read_stream, write_stream = streams[0], streams[1]
-            else:
-                continue
+            server_params = StdioServerParameters(
+                command=server_cfg["command"],
+                args=server_cfg.get("args", []),
+                env=server_cfg.get("env"),
+            )
+            devnull = open(os.devnull, "w")  # noqa: SIM115
+            exit_stack.callback(devnull.close)
+            streams = await exit_stack.enter_async_context(
+                stdio_client(server_params, errlog=devnull)
+            )
+            read_stream, write_stream = streams
 
             session = await exit_stack.enter_async_context(
                 ClientSession(read_stream, write_stream)
@@ -482,12 +466,49 @@ async def _connect_mcp_and_list_tools_claude(
             for tool in result.tools:
                 if allowed_tools_set is not None and tool.name not in allowed_tools_set:
                     continue
-                claude_tools.append(_mcp_tool_to_claude(tool))
+                custom_tools.append(_mcp_tool_to_claude_custom(tool))
                 tool_server_map[tool.name] = (session, server_name)
         except Exception as exc:
-            logger.warning("Failed to connect MCP server '%s' for Claude tools: %s", server_name, exc)
+            logger.warning(
+                "Failed to connect stdio MCP server '%s' for Claude Agent SDK: %s",
+                server_name, exc,
+            )
 
-    return claude_tools, tool_server_map
+    return custom_tools, tool_server_map
+
+
+def _build_claude_agent_mcp_servers(mcp_config: dict) -> list[dict]:
+    """Build native Claude Agent SDK MCP server params for URL-based servers.
+
+    Returns a list of ``{"type": "url", "name": ..., "url": ...}`` dicts
+    for SSE and HTTP MCP servers that the Claude Agent SDK can connect to
+    directly on Anthropic's infrastructure.
+    """
+    servers: list[dict] = []
+    for server_name, server_cfg in mcp_config.items():
+        transport = server_cfg.get("type", "")
+        if transport in ("sse", "http"):
+            url = server_cfg.get("url")
+            if url:
+                servers.append({"type": "url", "name": server_name, "url": url})
+    return servers
+
+
+def _build_claude_agent_tools(
+    native_mcp_servers: list[dict],
+    custom_tools: list[dict],
+) -> list[dict]:
+    """Assemble the full tools list for a Claude Agent SDK agent.
+
+    Includes:
+    - ``mcp_toolset`` entries for each native (URL-based) MCP server
+    - ``custom`` tool entries for stdio-based MCP server tools
+    """
+    tools: list[dict] = []
+    for srv in native_mcp_servers:
+        tools.append({"type": "mcp_toolset", "mcp_server_name": srv["name"]})
+    tools.extend(custom_tools)
+    return tools
 
 
 async def _run_with_claude_sdk(
@@ -501,160 +522,267 @@ async def _run_with_claude_sdk(
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
 ) -> str | None:
-    """Execute a prompt using the native Anthropic Claude SDK.
+    """Execute a prompt using the Claude Agent SDK (beta.agents/sessions).
 
-    Uses the AsyncAnthropic client with streaming for real-time event
-    publishing. Supports an agentic tool-call loop: discovers MCP tools,
-    maps them to Claude format, and handles tool_use content blocks.
+    Creates an environment, agent, and session on Anthropic's infrastructure,
+    then streams events. The Agent SDK handles the full agentic loop
+    (planning, tool invocation, response generation) server-side — analogous
+    to how the Copilot SDK path works.
+
+    MCP server handling:
+    - URL-based (SSE/HTTP) servers are passed as native MCP servers to the
+      Claude Agent, which connects to them directly.
+    - stdio-based servers are connected locally; their tools are registered
+      as custom tools, and ``agent.custom_tool_use`` events are handled by
+      calling the local MCP session.
     """
     from contextlib import AsyncExitStack
 
     from app.services.claude_client import build_claude_client
 
     model = workflow.model
-    max_turns = workflow.max_turns
     task_start_time = datetime.now(UTC)
     agent_tasks_active.inc()
     final_text: str | None = None
     tool_call_count = 0
     total_input_tokens = 0
     total_output_tokens = 0
+    total_cache_read_tokens = 0
+    total_cache_write_tokens = 0
 
     mcp_exit_stack = AsyncExitStack()
     await mcp_exit_stack.__aenter__()
 
+    # Track created Agent SDK resources for cleanup
+    claude_environment_id: str | None = None
+    claude_agent_id: str | None = None
+    claude_session_id: str | None = None
+
     try:
         client = build_claude_client(api_key)
 
-        # ── Discover MCP tools ───────────────────────────────────────────────
-        claude_tools: list[dict] = []
+        # ── Discover local (stdio) MCP tools ─────────────────────────────────
+        custom_tools: list[dict] = []
         tool_server_map: dict = {}
 
         if mcp_config:
-            claude_tools, tool_server_map = await _connect_mcp_and_list_tools_claude(
+            custom_tools, tool_server_map = await _connect_local_mcp_and_list_tools(
                 mcp_config, allowed_tools_set, mcp_exit_stack
             )
-            if claude_tools:
+            if custom_tools:
                 await _log(
-                    workflow,
-                    "tools_discovered",
-                    f"{len(claude_tools)} tool(s) available: {[t['name'] for t in claude_tools]}"[:200],
+                    workflow, "tools_discovered",
+                    f"{len(custom_tools)} local tool(s): "
+                    f"{[t['name'] for t in custom_tools]}"[:200],
                     task_exec,
                 )
 
+        # ── Build native MCP servers for URL-based transports ────────────────
+        native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
+        if native_mcp_servers:
+            await _log(
+                workflow, "mcp_native",
+                f"{len(native_mcp_servers)} native MCP server(s): "
+                f"{[s['name'] for s in native_mcp_servers]}",
+                task_exec,
+            )
+
+        # ── Build agent tools list ───────────────────────────────────────────
+        agent_tools = _build_claude_agent_tools(native_mcp_servers, custom_tools)
+
         await _log(
-            workflow,
-            "model_call",
-            f"Sending prompt to {model} via Claude SDK (provider: '{provider.name}', "
-            f"tools: {len(claude_tools)})",
+            workflow, "model_call",
+            f"Creating Claude Agent SDK session for {model} "
+            f"(provider: '{provider.name}', tools: {len(agent_tools)}, "
+            f"native_mcp: {len(native_mcp_servers)})",
             task_exec,
         )
 
-        # Build conversation messages
-        messages: list[dict] = [{"role": "user", "content": user_prompt}]
+        # ── Create environment ───────────────────────────────────────────────
+        environment = await client.beta.environments.create(
+            name=f"tbd-agents-wf-{workflow.id}",
+        )
+        claude_environment_id = environment.id
+        await _log(workflow, "claude_env_created", environment.id, task_exec)
 
-        # ── Agentic loop ────────────────────────────────────────────────────
-        while True:
-            # Build request kwargs
-            create_kwargs: dict = {
-                "model": model,
-                "max_tokens": 8192,
-                "system": system_prompt,
-                "messages": messages,
-            }
-            if claude_tools:
-                create_kwargs["tools"] = claude_tools
+        # ── Create agent ─────────────────────────────────────────────────────
+        agent_kwargs: dict = {
+            "model": model,
+            "name": f"tbd-agent-{workflow.agent_id}",
+            "system": system_prompt,
+        }
+        if native_mcp_servers:
+            agent_kwargs["mcp_servers"] = native_mcp_servers
+        if agent_tools:
+            agent_kwargs["tools"] = agent_tools
 
-            # Stream the response
-            collected_text = ""
-            tool_use_blocks: list[dict] = []
+        claude_agent = await client.beta.agents.create(**agent_kwargs)
+        claude_agent_id = claude_agent.id
+        await _log(workflow, "claude_agent_created", claude_agent.id, task_exec)
 
-            async with client.messages.stream(**create_kwargs) as stream:
-                async for event in stream:
-                    event_type = event.type
+        # ── Create session ───────────────────────────────────────────────────
+        session = await client.beta.sessions.create(
+            environment_id=environment.id,
+            agent={
+                "type": "agent",
+                "id": claude_agent.id,
+                "version": claude_agent.version,
+            },
+        )
+        claude_session_id = session.id
+        workflow.session_id = session.id
+        await workflow.save()
+        await _log(workflow, "claude_session_created", session.id, task_exec)
 
-                    if event_type == "content_block_delta":
-                        delta = event.delta
-                        if hasattr(delta, "text"):
-                            # Text delta — publish for SSE streaming
-                            collected_text += delta.text
-                            await event_bus.publish(
-                                str(workflow.id), "message_delta",
-                                {"delta": delta.text},
-                            )
-                        elif hasattr(delta, "partial_json"):
-                            # Tool input delta — accumulating, no action needed
-                            pass
+        # ── Send user message ────────────────────────────────────────────────
+        await client.beta.sessions.events.send(
+            session.id,
+            events=[{
+                "type": "user.message",
+                "content": [{"type": "text", "text": user_prompt}],
+            }],
+        )
 
-                response = await stream.get_final_message()
+        # ── Stream events ────────────────────────────────────────────────────
+        assistant_messages: list[str] = []
+        done = False
 
-            # Track token usage
-            if response.usage:
-                total_input_tokens += response.usage.input_tokens
-                total_output_tokens += response.usage.output_tokens
-                tokens_total.labels(direction="input", model=model).inc(response.usage.input_tokens)
-                tokens_total.labels(direction="output", model=model).inc(response.usage.output_tokens)
-                # Publish usage to SSE
-                await event_bus.publish(
-                    str(workflow.id), "usage",
-                    {
-                        "total_input_tokens": total_input_tokens,
-                        "total_output_tokens": total_output_tokens,
-                    },
-                )
+        while not done:
+            stream = await client.beta.sessions.events.stream(session.id)
+            async for event in stream:
+                ev_type = event.type
 
-            # Process content blocks
-            for block in response.content:
-                if block.type == "text":
-                    collected_text = block.text
-                elif block.type == "tool_use":
-                    tool_use_blocks.append({
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                    })
+                if ev_type == "agent.message":
+                    # Collect text from content blocks
+                    text_parts = []
+                    for block in event.content:
+                        if hasattr(block, "text"):
+                            text_parts.append(block.text)
+                    content = "".join(text_parts)
+                    assistant_messages.append(content)
+                    await event_bus.publish(
+                        str(workflow.id), "message",
+                        {"role": "assistant", "content": content},
+                    )
+                    await _log(workflow, "model_response", content[:200], task_exec)
 
-            # If no tool calls, we have the final response
-            if not tool_use_blocks:
-                final_text = collected_text
-                break
+                elif ev_type == "agent.thinking":
+                    await _log(workflow, "thinking", "Agent is thinking...", task_exec)
 
-            # ── Handle tool calls ────────────────────────────────────────────
-            # Append assistant message with content blocks
-            messages.append({"role": "assistant", "content": response.content})
+                elif ev_type == "agent.custom_tool_use":
+                    # Local MCP tool invocation — execute and send result back
+                    tool_call_count += 1
+                    tool_name = event.name
+                    tool_args = dict(event.input) if event.input else {}
+                    tool_use_id = event.id
 
-            tool_results: list[dict] = []
-            for tool_block in tool_use_blocks:
-                tool_call_count += 1
-                tool_name = tool_block["name"]
-                tool_args = tool_block["input"]
+                    await _log(
+                        workflow, "tool_call", tool_name, task_exec,
+                        tool_input=json.dumps(tool_args, default=str)[:500],
+                    )
+                    tool_calls_total.labels(tool_name=tool_name).inc()
 
-                await _log(
-                    workflow, "tool_call", tool_name, task_exec,
-                    tool_input=json.dumps(tool_args, default=str)[:500],
-                )
-                tool_calls_total.labels(tool_name=tool_name).inc()
+                    # Execute via local MCP session
+                    tool_result = await _execute_mcp_tool(
+                        tool_name, tool_args, tool_server_map,
+                    )
+                    await _log(
+                        workflow, "tool_result", f"{tool_name} completed", task_exec,
+                        tool_output=tool_result[:500],
+                    )
 
-                # Execute the tool via MCP
-                tool_result = await _execute_mcp_tool(
-                    tool_name, tool_args, tool_server_map
-                )
+                    # Send result back to the Claude Agent SDK session
+                    await client.beta.sessions.events.send(
+                        session.id,
+                        events=[{
+                            "type": "user.custom_tool_result",
+                            "custom_tool_use_id": tool_use_id,
+                            "content": [{"type": "text", "text": tool_result}],
+                        }],
+                    )
 
-                await _log(
-                    workflow, "tool_result", f"{tool_name} completed", task_exec,
-                    tool_output=tool_result[:500],
-                )
+                elif ev_type == "agent.mcp_tool_use":
+                    # Native MCP tool (handled server-side) — just log
+                    tool_call_count += 1
+                    tool_name = event.name
+                    mcp_server = event.mcp_server_name
+                    tool_args = dict(event.input) if event.input else {}
+                    await _log(
+                        workflow, "tool_call",
+                        f"{tool_name} (mcp:{mcp_server})", task_exec,
+                        tool_input=json.dumps(tool_args, default=str)[:500],
+                    )
+                    tool_calls_total.labels(tool_name=tool_name).inc()
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_block["id"],
-                    "content": tool_result,
-                })
+                elif ev_type == "agent.mcp_tool_result":
+                    await _log(workflow, "tool_result", "MCP tool completed", task_exec)
 
-            messages.append({"role": "user", "content": tool_results})
+                elif ev_type == "agent.tool_use":
+                    tool_call_count += 1
+                    tool_name = getattr(event, "name", "built-in")
+                    await _log(workflow, "tool_call", f"{tool_name} (built-in)", task_exec)
+                    tool_calls_total.labels(tool_name=str(tool_name)).inc()
 
-            # Check halt signal
-            if await event_bus.check_halt(str(workflow.id)):
+                elif ev_type == "agent.tool_result":
+                    await _log(workflow, "tool_result", "Built-in tool completed", task_exec)
+
+                elif ev_type == "span.model_request_end":
+                    # Track token usage
+                    mu = event.model_usage
+                    total_input_tokens += mu.input_tokens
+                    total_output_tokens += mu.output_tokens
+                    total_cache_read_tokens += mu.cache_read_input_tokens
+                    total_cache_write_tokens += mu.cache_creation_input_tokens
+                    tokens_total.labels(direction="input", model=model).inc(mu.input_tokens)
+                    tokens_total.labels(direction="output", model=model).inc(mu.output_tokens)
+                    if mu.cache_read_input_tokens:
+                        tokens_total.labels(direction="cache_read", model=model).inc(
+                            mu.cache_read_input_tokens
+                        )
+                    if mu.cache_creation_input_tokens:
+                        tokens_total.labels(direction="cache_write", model=model).inc(
+                            mu.cache_creation_input_tokens
+                        )
+                    await event_bus.publish(
+                        str(workflow.id), "usage",
+                        {
+                            "total_input_tokens": total_input_tokens,
+                            "total_output_tokens": total_output_tokens,
+                            "total_cache_read_tokens": total_cache_read_tokens,
+                            "total_cache_write_tokens": total_cache_write_tokens,
+                        },
+                    )
+
+                elif ev_type == "agent.thread_context_compacted":
+                    await _log(workflow, "compaction_complete", "Context compacted", task_exec)
+
+                elif ev_type == "session.error":
+                    error_obj = event.error
+                    error_msg = getattr(error_obj, "message", str(error_obj))
+                    await _log(workflow, "error", error_msg, task_exec)
+                    done = True
+                    break
+
+                elif ev_type == "session.status_idle":
+                    stop_reason = event.stop_reason
+                    reason_type = getattr(stop_reason, "type", "unknown")
+                    await _log(
+                        workflow, "session_idle",
+                        f"Stop reason: {reason_type}",
+                        task_exec,
+                    )
+                    if reason_type == "end_turn":
+                        done = True
+                        break
+                    elif reason_type == "requires_action":
+                        # Session needs user input — continue streaming
+                        pass
+                    else:
+                        done = True
+                        break
+
+            # Check halt signal between stream iterations
+            if not done and await event_bus.check_halt(str(workflow.id)):
                 await event_bus.clear_halt(str(workflow.id))
                 await _log(workflow, "halted", "Execution halted by user", task_exec)
                 await _publish_status(workflow, "halted")
@@ -666,33 +794,9 @@ async def _run_with_claude_sdk(
                 await workflow.save()
                 return None
 
-            # Check max turns
-            if tool_call_count >= max_turns:
-                await _log(
-                    workflow, "max_turns",
-                    f"Reached max tool turns ({max_turns}), requesting final answer",
-                    task_exec,
-                )
-                messages.append({
-                    "role": "user",
-                    "content": "You have reached the maximum number of tool calls. "
-                    "Please provide your final answer based on the information gathered so far.",
-                })
-                # Final call without tools
-                final_response = await client.messages.create(
-                    model=model,
-                    max_tokens=8192,
-                    system=system_prompt,
-                    messages=messages,
-                )
-                if final_response.usage:
-                    total_input_tokens += final_response.usage.input_tokens
-                    total_output_tokens += final_response.usage.output_tokens
-                for block in final_response.content:
-                    if block.type == "text":
-                        final_text = block.text
-                        break
-                break
+        # ── Extract final response ───────────────────────────────────────────
+        if assistant_messages:
+            final_text = assistant_messages[-1]
 
         # ── Publish final message ────────────────────────────────────────────
         if final_text:
@@ -705,30 +809,24 @@ async def _run_with_claude_sdk(
         usage = UsageStats(
             total_input_tokens=total_input_tokens,
             total_output_tokens=total_output_tokens,
+            total_cache_read_tokens=total_cache_read_tokens,
+            total_cache_write_tokens=total_cache_write_tokens,
         )
         workflow.usage = usage
         workflow.messages.append(Message(role="assistant", content=final_text or ""))
         workflow.current_turn = tool_call_count
 
-        # Format output
         if final_text and workflow.output_format == OutputFormat.JSON:
             final_text = json.dumps({"response": final_text})
 
         if tool_call_count:
             tool_calls_per_task.labels(model=model).observe(tool_call_count)
 
-        await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
-        await _log(
-            workflow, "completed",
-            f"Final status: completed (tool_calls: {tool_call_count})",
-            task_exec,
-        )
+        await _log(workflow, "completed", f"Final status: completed (tool_calls: {tool_call_count})", task_exec)
         await _publish_status(workflow, "completed")
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
-        agent_task_duration_seconds.labels(
-            model=model, status="completed"
-        ).observe(task_duration)
+        agent_task_duration_seconds.labels(model=model, status="completed").observe(task_duration)
 
         if task_exec:
             task_exec.status = TaskStatus.COMPLETED
@@ -744,7 +842,7 @@ async def _run_with_claude_sdk(
     except Exception as exc:
         await _log(workflow, "error", str(exc), task_exec)
         await _publish_status(workflow, "failed")
-        logger.exception("Claude SDK run failed for workflow %s", workflow.id)
+        logger.exception("Claude Agent SDK run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -752,10 +850,21 @@ async def _run_with_claude_sdk(
         final_text = None
         await workflow.save()
     finally:
+        # Clean up local MCP connections
         try:
             await mcp_exit_stack.__aexit__(None, None, None)
         except Exception:
             pass
+        # Clean up Claude Agent SDK resources (best-effort)
+        try:
+            if claude_session_id:
+                await client.beta.sessions.delete(claude_session_id)
+            if claude_agent_id:
+                await client.beta.agents.archive(claude_agent_id)
+            if claude_environment_id:
+                await client.beta.environments.delete(claude_environment_id)
+        except Exception:
+            logger.debug("Claude Agent SDK cleanup failed (non-critical)")
         agent_tasks_active.dec()
         agent_tasks_total.labels(
             status=task_exec.status if task_exec else "completed",

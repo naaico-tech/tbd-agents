@@ -1,4 +1,4 @@
-"""Tests for the Claude SDK client builder and agent_engine Claude path."""
+"""Tests for the Claude Agent SDK client builder and agent_engine Claude path."""
 
 import json
 from types import SimpleNamespace
@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.agent_engine import _mcp_tool_to_claude
+from app.core.agent_engine import (
+    _build_claude_agent_mcp_servers,
+    _build_claude_agent_tools,
+    _mcp_tool_to_claude_custom,
+)
 from app.services.claude_client import build_claude_client
 
 
@@ -28,10 +32,10 @@ class TestBuildClaudeClient:
         assert result is mock_client
 
 
-# ── Tool format mapping tests ────────────────────────────────────────────────
+# ── Custom tool format mapping tests ─────────────────────────────────────────
 
 
-class TestMcpToolToClaude:
+class TestMcpToolToClaudeCustom:
     def test_basic_tool_conversion(self):
         tool = SimpleNamespace(
             name="read_file",
@@ -44,7 +48,8 @@ class TestMcpToolToClaude:
                 "required": ["path"],
             },
         )
-        result = _mcp_tool_to_claude(tool)
+        result = _mcp_tool_to_claude_custom(tool)
+        assert result["type"] == "custom"
         assert result["name"] == "read_file"
         assert result["description"] == "Read a file from disk"
         assert result["input_schema"]["type"] == "object"
@@ -57,7 +62,8 @@ class TestMcpToolToClaude:
             description="A tool with no params",
             inputSchema=None,
         )
-        result = _mcp_tool_to_claude(tool)
+        result = _mcp_tool_to_claude_custom(tool)
+        assert result["type"] == "custom"
         assert result["name"] == "no_params"
         assert result["input_schema"]["type"] == "object"
         assert result["input_schema"]["properties"] == {}
@@ -68,7 +74,7 @@ class TestMcpToolToClaude:
             description=None,
             inputSchema={"type": "object", "properties": {"x": {"type": "integer"}}},
         )
-        result = _mcp_tool_to_claude(tool)
+        result = _mcp_tool_to_claude_custom(tool)
         assert result["description"] == ""
 
     def test_schema_without_type_gets_default(self):
@@ -77,20 +83,90 @@ class TestMcpToolToClaude:
             description="Partial schema",
             inputSchema={"properties": {"a": {"type": "string"}}},
         )
-        result = _mcp_tool_to_claude(tool)
+        result = _mcp_tool_to_claude_custom(tool)
         assert result["input_schema"]["type"] == "object"
 
-    def test_does_not_use_openai_function_wrapper(self):
-        """Claude tools should NOT be wrapped in {type: function, function: {...}}."""
+    def test_produces_custom_type_not_function_wrapper(self):
+        """Claude custom tools should have type='custom', not function wrapper."""
         tool = SimpleNamespace(
             name="my_tool",
             description="desc",
             inputSchema={"type": "object", "properties": {}},
         )
-        result = _mcp_tool_to_claude(tool)
-        assert "type" not in result or result.get("type") != "function"
+        result = _mcp_tool_to_claude_custom(tool)
+        assert result["type"] == "custom"
         assert "function" not in result
         assert "input_schema" in result
+
+
+# ── MCP server classification tests ──────────────────────────────────────────
+
+
+class TestBuildClaudeAgentMcpServers:
+    def test_extracts_url_servers_from_sse(self):
+        config = {
+            "github": {"type": "sse", "url": "https://mcp.github.com/sse"},
+            "local": {"type": "stdio", "command": "node", "args": ["server.js"]},
+        }
+        result = _build_claude_agent_mcp_servers(config)
+        assert len(result) == 1
+        assert result[0] == {"type": "url", "name": "github", "url": "https://mcp.github.com/sse"}
+
+    def test_extracts_url_servers_from_http(self):
+        config = {
+            "api": {"type": "http", "url": "https://api.example.com/mcp"},
+        }
+        result = _build_claude_agent_mcp_servers(config)
+        assert len(result) == 1
+        assert result[0]["name"] == "api"
+
+    def test_skips_stdio_servers(self):
+        config = {
+            "local": {"type": "stdio", "command": "python", "args": ["-m", "my_server"]},
+        }
+        result = _build_claude_agent_mcp_servers(config)
+        assert result == []
+
+    def test_empty_config(self):
+        assert _build_claude_agent_mcp_servers({}) == []
+
+    def test_mixed_transports(self):
+        config = {
+            "s1": {"type": "sse", "url": "https://a.com"},
+            "s2": {"type": "stdio", "command": "node"},
+            "s3": {"type": "http", "url": "https://b.com"},
+        }
+        result = _build_claude_agent_mcp_servers(config)
+        assert len(result) == 2
+        names = [s["name"] for s in result]
+        assert "s1" in names
+        assert "s3" in names
+
+
+# ── Agent tools assembly tests ───────────────────────────────────────────────
+
+
+class TestBuildClaudeAgentTools:
+    def test_mcp_toolset_entries(self):
+        native = [{"type": "url", "name": "github", "url": "https://mcp.github.com"}]
+        result = _build_claude_agent_tools(native, [])
+        assert len(result) == 1
+        assert result[0] == {"type": "mcp_toolset", "mcp_server_name": "github"}
+
+    def test_custom_tools_passthrough(self):
+        custom = [{"type": "custom", "name": "read_file", "description": "...", "input_schema": {}}]
+        result = _build_claude_agent_tools([], custom)
+        assert len(result) == 1
+        assert result[0]["type"] == "custom"
+        assert result[0]["name"] == "read_file"
+
+    def test_combined_tools(self):
+        native = [{"type": "url", "name": "mcp1", "url": "https://x.com"}]
+        custom = [{"type": "custom", "name": "tool1", "description": "", "input_schema": {}}]
+        result = _build_claude_agent_tools(native, custom)
+        assert len(result) == 2
+        assert result[0]["type"] == "mcp_toolset"
+        assert result[1]["type"] == "custom"
 
 
 # ── Execution path branching test ────────────────────────────────────────────

@@ -26,18 +26,18 @@ POST /api/providers
 | `base_url` | string | No | Override base URL (required for `azure_openai` and `custom`) |
 | `description` | string | No | Human-readable description |
 
-=== "Anthropic (Claude)"
+=== "Anthropic (Claude Agent SDK)"
 
     ```json
     {
       "name": "claude-provider",
       "provider_type": "anthropic",
       "api_key_token_name": "anthropic-key",
-      "description": "Native Claude SDK provider"
+      "description": "Claude Agent SDK provider"
     }
     ```
 
-    Uses the native Anthropic SDK with streaming, tool mapping, and `tool_use` support. No `base_url` needed.
+    Uses the Claude Agent SDK (`beta.agents/sessions`) for a full server-side agentic runtime with native MCP support, custom tools, and streaming events. No `base_url` needed.
 
 === "OpenAI"
 
