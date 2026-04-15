@@ -406,6 +406,29 @@ async def _execute_mcp_tool(
 # ── Claude Agent SDK helpers ──────────────────────────────────────────────────
 
 
+def _resolve_refs(obj, defs: dict):
+    """Recursively resolve ``$ref`` pointers using *defs* and return a new object."""
+    if isinstance(obj, dict):
+        if "$ref" in obj:
+            ref_path = obj["$ref"]  # e.g. "#/$defs/Foo"
+            parts = ref_path.lstrip("#/").split("/")
+            # Walk into defs: skip the leading "$defs" segment
+            resolved = defs
+            for part in parts:
+                if part == "$defs":
+                    continue
+                resolved = resolved.get(part, {}) if isinstance(resolved, dict) else {}
+            # Recursively resolve in case the definition itself has $ref
+            return _resolve_refs(resolved, defs)
+        return {k: _resolve_refs(v, defs) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_refs(item, defs) for item in obj]
+    return obj
+
+
+_ALLOWED_SCHEMA_KEYS = {"type", "properties", "required", "description", "additionalProperties"}
+
+
 def _mcp_tool_to_claude_custom(tool) -> dict:
     """Convert a local MCP Tool to a Claude Agent SDK custom tool definition.
 
@@ -415,9 +438,11 @@ def _mcp_tool_to_claude_custom(tool) -> dict:
     schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
-    # Claude API rejects extra top-level JSON Schema keys like $defs.
+    # Claude API rejects $ref; resolve them against $defs before stripping.
+    defs = schema.get("$defs", {})
+    if defs:
+        schema = _resolve_refs(schema, defs)
     # Keep only the keys the API accepts.
-    _ALLOWED_SCHEMA_KEYS = {"type", "properties", "required", "description", "additionalProperties"}
     schema = {k: v for k, v in schema.items() if k in _ALLOWED_SCHEMA_KEYS}
     return {
         "type": "custom",

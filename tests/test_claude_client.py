@@ -10,6 +10,7 @@ from app.core.agent_engine import (
     _build_claude_agent_mcp_servers,
     _build_claude_agent_tools,
     _mcp_tool_to_claude_custom,
+    _resolve_refs,
 )
 from app.services.claude_client import build_claude_client
 
@@ -98,8 +99,8 @@ class TestMcpToolToClaudeCustom:
         assert "function" not in result
         assert "input_schema" in result
 
-    def test_strips_defs_and_extra_schema_keys(self):
-        """Claude API rejects $defs and other extra top-level schema keys."""
+    def test_resolves_refs_and_strips_defs(self):
+        """Claude API rejects $ref and $defs; refs must be inlined."""
         tool = SimpleNamespace(
             name="complex_tool",
             description="Has $defs",
@@ -115,8 +116,35 @@ class TestMcpToolToClaudeCustom:
         assert "$defs" not in result["input_schema"]
         assert "title" not in result["input_schema"]
         assert result["input_schema"]["type"] == "object"
-        assert result["input_schema"]["properties"] == {"a": {"$ref": "#/$defs/Foo"}}
+        # $ref should be resolved to the actual definition
+        assert result["input_schema"]["properties"] == {"a": {"type": "string"}}
         assert result["input_schema"]["required"] == ["a"]
+
+    def test_resolves_nested_refs(self):
+        """$ref pointing to a $def that itself has $ref should be fully resolved."""
+        tool = SimpleNamespace(
+            name="nested",
+            description="Nested refs",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {"$ref": "#/$defs/Outer"},
+                },
+                "$defs": {
+                    "Inner": {"type": "integer"},
+                    "Outer": {
+                        "type": "object",
+                        "properties": {"val": {"$ref": "#/$defs/Inner"}},
+                    },
+                },
+            },
+        )
+        result = _mcp_tool_to_claude_custom(tool)
+        assert result["input_schema"]["properties"]["x"] == {
+            "type": "object",
+            "properties": {"val": {"type": "integer"}},
+        }
+        assert "$defs" not in result["input_schema"]
 
 
 # ── MCP server classification tests ──────────────────────────────────────────
