@@ -403,6 +403,369 @@ async def _execute_mcp_tool(
         return json.dumps({"error": f"Tool execution failed: {exc}"})
 
 
+# ── Claude SDK helpers ────────────────────────────────────────────────────────
+
+
+def _mcp_tool_to_claude(tool) -> dict:
+    """Convert an MCP Tool object to Claude tool format.
+
+    Claude expects ``input_schema`` (JSON Schema) whereas OpenAI uses
+    ``parameters`` nested under ``function``.
+    """
+    schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
+    return {
+        "name": tool.name,
+        "description": tool.description or "",
+        "input_schema": schema,
+    }
+
+
+async def _connect_mcp_and_list_tools_claude(
+    mcp_config: dict,
+    allowed_tools_set: set[str] | None,
+    exit_stack,
+) -> tuple[list[dict], dict]:
+    """Connect to MCP servers and list tools in Claude format.
+
+    Returns ``(claude_tools, tool_server_map)`` where ``tool_server_map``
+    maps tool names to ``(session, server_name)`` tuples.
+    """
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
+    from mcp.client.stdio import stdio_client
+    from mcp.client.streamable_http import streamablehttp_client
+
+    claude_tools: list[dict] = []
+    tool_server_map: dict[str, tuple[ClientSession, str]] = {}
+
+    for server_name, server_cfg in mcp_config.items():
+        transport_type = server_cfg.get("type", "")
+
+        try:
+            if transport_type == "stdio":
+                server_params = StdioServerParameters(
+                    command=server_cfg["command"],
+                    args=server_cfg.get("args", []),
+                    env=server_cfg.get("env"),
+                )
+                devnull = open(os.devnull, "w")  # noqa: SIM115
+                exit_stack.callback(devnull.close)
+                streams = await exit_stack.enter_async_context(
+                    stdio_client(server_params, errlog=devnull)
+                )
+                read_stream, write_stream = streams
+            elif transport_type == "sse":
+                url = server_cfg["url"]
+                headers = server_cfg.get("headers", {})
+                streams = await exit_stack.enter_async_context(
+                    sse_client(url, headers=headers)
+                )
+                read_stream, write_stream = streams
+            elif transport_type == "http":
+                url = server_cfg["url"]
+                headers = server_cfg.get("headers", {})
+                streams = await exit_stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers)
+                )
+                read_stream, write_stream = streams[0], streams[1]
+            else:
+                continue
+
+            session = await exit_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+            await session.initialize()
+            result = await session.list_tools()
+
+            for tool in result.tools:
+                if allowed_tools_set is not None and tool.name not in allowed_tools_set:
+                    continue
+                claude_tools.append(_mcp_tool_to_claude(tool))
+                tool_server_map[tool.name] = (session, server_name)
+        except Exception as exc:
+            logger.warning("Failed to connect MCP server '%s' for Claude tools: %s", server_name, exc)
+
+    return claude_tools, tool_server_map
+
+
+async def _run_with_claude_sdk(
+    workflow: Workflow,
+    user_prompt: str,
+    system_prompt: str,
+    provider: Provider,
+    api_key: str,
+    task_exec: TaskExecution | None,
+    *,
+    mcp_config: dict | None = None,
+    allowed_tools_set: set[str] | None = None,
+) -> str | None:
+    """Execute a prompt using the native Anthropic Claude SDK.
+
+    Uses the AsyncAnthropic client with streaming for real-time event
+    publishing. Supports an agentic tool-call loop: discovers MCP tools,
+    maps them to Claude format, and handles tool_use content blocks.
+    """
+    from contextlib import AsyncExitStack
+
+    from app.services.claude_client import build_claude_client
+
+    model = workflow.model
+    max_turns = workflow.max_turns
+    task_start_time = datetime.now(UTC)
+    agent_tasks_active.inc()
+    final_text: str | None = None
+    tool_call_count = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    mcp_exit_stack = AsyncExitStack()
+    await mcp_exit_stack.__aenter__()
+
+    try:
+        client = build_claude_client(api_key)
+
+        # ── Discover MCP tools ───────────────────────────────────────────────
+        claude_tools: list[dict] = []
+        tool_server_map: dict = {}
+
+        if mcp_config:
+            claude_tools, tool_server_map = await _connect_mcp_and_list_tools_claude(
+                mcp_config, allowed_tools_set, mcp_exit_stack
+            )
+            if claude_tools:
+                await _log(
+                    workflow,
+                    "tools_discovered",
+                    f"{len(claude_tools)} tool(s) available: {[t['name'] for t in claude_tools]}"[:200],
+                    task_exec,
+                )
+
+        await _log(
+            workflow,
+            "model_call",
+            f"Sending prompt to {model} via Claude SDK (provider: '{provider.name}', "
+            f"tools: {len(claude_tools)})",
+            task_exec,
+        )
+
+        # Build conversation messages
+        messages: list[dict] = [{"role": "user", "content": user_prompt}]
+
+        # ── Agentic loop ────────────────────────────────────────────────────
+        while True:
+            # Build request kwargs
+            create_kwargs: dict = {
+                "model": model,
+                "max_tokens": 8192,
+                "system": system_prompt,
+                "messages": messages,
+            }
+            if claude_tools:
+                create_kwargs["tools"] = claude_tools
+
+            # Stream the response
+            collected_text = ""
+            tool_use_blocks: list[dict] = []
+
+            async with client.messages.stream(**create_kwargs) as stream:
+                async for event in stream:
+                    event_type = event.type
+
+                    if event_type == "content_block_delta":
+                        delta = event.delta
+                        if hasattr(delta, "text"):
+                            # Text delta — publish for SSE streaming
+                            collected_text += delta.text
+                            await event_bus.publish(
+                                str(workflow.id), "message_delta",
+                                {"delta": delta.text},
+                            )
+                        elif hasattr(delta, "partial_json"):
+                            # Tool input delta — accumulating, no action needed
+                            pass
+
+                response = await stream.get_final_message()
+
+            # Track token usage
+            if response.usage:
+                total_input_tokens += response.usage.input_tokens
+                total_output_tokens += response.usage.output_tokens
+                tokens_total.labels(direction="input", model=model).inc(response.usage.input_tokens)
+                tokens_total.labels(direction="output", model=model).inc(response.usage.output_tokens)
+                # Publish usage to SSE
+                await event_bus.publish(
+                    str(workflow.id), "usage",
+                    {
+                        "total_input_tokens": total_input_tokens,
+                        "total_output_tokens": total_output_tokens,
+                    },
+                )
+
+            # Process content blocks
+            for block in response.content:
+                if block.type == "text":
+                    collected_text = block.text
+                elif block.type == "tool_use":
+                    tool_use_blocks.append({
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
+
+            # If no tool calls, we have the final response
+            if not tool_use_blocks:
+                final_text = collected_text
+                break
+
+            # ── Handle tool calls ────────────────────────────────────────────
+            # Append assistant message with content blocks
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_results: list[dict] = []
+            for tool_block in tool_use_blocks:
+                tool_call_count += 1
+                tool_name = tool_block["name"]
+                tool_args = tool_block["input"]
+
+                await _log(
+                    workflow, "tool_call", tool_name, task_exec,
+                    tool_input=json.dumps(tool_args, default=str)[:500],
+                )
+                tool_calls_total.labels(tool_name=tool_name).inc()
+
+                # Execute the tool via MCP
+                tool_result = await _execute_mcp_tool(
+                    tool_name, tool_args, tool_server_map
+                )
+
+                await _log(
+                    workflow, "tool_result", f"{tool_name} completed", task_exec,
+                    tool_output=tool_result[:500],
+                )
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_block["id"],
+                    "content": tool_result,
+                })
+
+            messages.append({"role": "user", "content": tool_results})
+
+            # Check halt signal
+            if await event_bus.check_halt(str(workflow.id)):
+                await event_bus.clear_halt(str(workflow.id))
+                await _log(workflow, "halted", "Execution halted by user", task_exec)
+                await _publish_status(workflow, "halted")
+                if task_exec:
+                    task_exec.status = TaskStatus.HALTED
+                    task_exec.finished_at = datetime.now(UTC)
+                    task_exec.tool_calls = tool_call_count
+                    await task_exec.save()
+                await workflow.save()
+                return None
+
+            # Check max turns
+            if tool_call_count >= max_turns:
+                await _log(
+                    workflow, "max_turns",
+                    f"Reached max tool turns ({max_turns}), requesting final answer",
+                    task_exec,
+                )
+                messages.append({
+                    "role": "user",
+                    "content": "You have reached the maximum number of tool calls. "
+                    "Please provide your final answer based on the information gathered so far.",
+                })
+                # Final call without tools
+                final_response = await client.messages.create(
+                    model=model,
+                    max_tokens=8192,
+                    system=system_prompt,
+                    messages=messages,
+                )
+                if final_response.usage:
+                    total_input_tokens += final_response.usage.input_tokens
+                    total_output_tokens += final_response.usage.output_tokens
+                for block in final_response.content:
+                    if block.type == "text":
+                        final_text = block.text
+                        break
+                break
+
+        # ── Publish final message ────────────────────────────────────────────
+        if final_text:
+            await event_bus.publish(
+                str(workflow.id), "message",
+                {"role": "assistant", "content": final_text},
+            )
+
+        # ── Record usage & finalize ──────────────────────────────────────────
+        usage = UsageStats(
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+        )
+        workflow.usage = usage
+        workflow.messages.append(Message(role="assistant", content=final_text or ""))
+        workflow.current_turn = tool_call_count
+
+        # Format output
+        if final_text and workflow.output_format == OutputFormat.JSON:
+            final_text = json.dumps({"response": final_text})
+
+        if tool_call_count:
+            tool_calls_per_task.labels(model=model).observe(tool_call_count)
+
+        await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
+        await _log(
+            workflow, "completed",
+            f"Final status: completed (tool_calls: {tool_call_count})",
+            task_exec,
+        )
+        await _publish_status(workflow, "completed")
+
+        task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
+        agent_task_duration_seconds.labels(
+            model=model, status="completed"
+        ).observe(task_duration)
+
+        if task_exec:
+            task_exec.status = TaskStatus.COMPLETED
+            task_exec.finished_at = datetime.now(UTC)
+            task_exec.tool_calls = tool_call_count
+            task_exec.response = final_text
+            task_exec.usage = usage
+            task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
+            await task_exec.save()
+
+        await workflow.save()
+
+    except Exception as exc:
+        await _log(workflow, "error", str(exc), task_exec)
+        await _publish_status(workflow, "failed")
+        logger.exception("Claude SDK run failed for workflow %s", workflow.id)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
+        final_text = None
+        await workflow.save()
+    finally:
+        try:
+            await mcp_exit_stack.__aexit__(None, None, None)
+        except Exception:
+            pass
+        agent_tasks_active.dec()
+        agent_tasks_total.labels(
+            status=task_exec.status if task_exec else "completed",
+            model=model,
+            reasoning_effort="default",
+        ).inc()
+
+    return final_text
+
+
 async def _run_with_custom_provider(
     workflow: Workflow,
     user_prompt: str,
@@ -858,6 +1221,18 @@ async def run_agent(
 
     # ── Route to custom provider if set ──────────────────────────────────────
     if custom_provider and custom_provider_key:
+        # Use native Claude SDK for Anthropic providers
+        if custom_provider.provider_type == ProviderType.ANTHROPIC:
+            return await _run_with_claude_sdk(
+                workflow,
+                user_prompt,
+                system_prompt,
+                custom_provider,
+                custom_provider_key,
+                task_exec,
+                mcp_config=mcp_config,
+                allowed_tools_set=allowed_tools_set,
+            )
         return await _run_with_custom_provider(
             workflow,
             user_prompt,
