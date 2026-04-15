@@ -99,3 +99,69 @@ graph LR
       "mcp_server_tags": ["documentation", "messaging"]
     }
     ```
+
+---
+
+## Using Claude with a Provider
+
+To use Anthropic Claude models natively (via the Claude SDK rather than generic HTTP), create a **Provider** of type `anthropic` and attach it to your agent.
+
+### Step 1: Store your API key
+
+```bash
+curl -X POST http://localhost:8000/api/tokens \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "anthropic-key",
+    "value": "sk-ant-api03-...",
+    "description": "Anthropic API key for Claude"
+  }'
+```
+
+### Step 2: Create the provider
+
+```bash
+curl -X POST http://localhost:8000/api/providers \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "claude-provider",
+    "provider_type": "anthropic",
+    "api_key_token_name": "anthropic-key",
+    "description": "Native Claude SDK provider"
+  }'
+```
+
+!!! note
+    No `base_url` is needed for Anthropic — the SDK uses the official API endpoint automatically. You only need `base_url` for custom or Azure OpenAI providers.
+
+### Step 3: Attach the provider to an agent
+
+```bash
+curl -X POST http://localhost:8000/api/agents \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "claude-agent",
+    "system_prompt": "You are a helpful assistant powered by Claude.",
+    "model": "claude-sonnet-4-20250514",
+    "provider_id": "<PROVIDER_ID>"
+  }'
+```
+
+When a workflow runs with this agent, TBD Agents will:
+
+1. Resolve the API key from the encrypted token store
+2. Build a native `AsyncAnthropic` client
+3. Map any MCP tools to Claude's `input_schema` format
+4. Stream responses with real-time SSE events
+5. Handle Claude's `tool_use` content blocks for agentic tool loops
+
+### Supported Claude models
+
+Any model supported by the Anthropic API can be used, for example:
+
+- `claude-sonnet-4-20250514`
+- `claude-opus-4-20250514`
+- `claude-haiku-35-20241022`
