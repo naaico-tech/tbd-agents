@@ -415,6 +415,10 @@ def _mcp_tool_to_claude_custom(tool) -> dict:
     schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
+    # Claude API rejects extra top-level JSON Schema keys like $defs.
+    # Keep only the keys the API accepts.
+    _ALLOWED_SCHEMA_KEYS = {"type", "properties", "required", "description", "additionalProperties"}
+    schema = {k: v for k, v in schema.items() if k in _ALLOWED_SCHEMA_KEYS}
     return {
         "type": "custom",
         "name": tool.name,

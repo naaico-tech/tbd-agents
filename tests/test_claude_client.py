@@ -98,6 +98,26 @@ class TestMcpToolToClaudeCustom:
         assert "function" not in result
         assert "input_schema" in result
 
+    def test_strips_defs_and_extra_schema_keys(self):
+        """Claude API rejects $defs and other extra top-level schema keys."""
+        tool = SimpleNamespace(
+            name="complex_tool",
+            description="Has $defs",
+            inputSchema={
+                "type": "object",
+                "properties": {"a": {"$ref": "#/$defs/Foo"}},
+                "required": ["a"],
+                "$defs": {"Foo": {"type": "string"}},
+                "title": "SomeTitle",
+            },
+        )
+        result = _mcp_tool_to_claude_custom(tool)
+        assert "$defs" not in result["input_schema"]
+        assert "title" not in result["input_schema"]
+        assert result["input_schema"]["type"] == "object"
+        assert result["input_schema"]["properties"] == {"a": {"$ref": "#/$defs/Foo"}}
+        assert result["input_schema"]["required"] == ["a"]
+
 
 # ── MCP server classification tests ──────────────────────────────────────────
 
