@@ -84,6 +84,7 @@ nav:
       - Workflows: guide/workflows.md
       - Streaming: guide/streaming.md
       - Knowledge Bases: guide/knowledge.md
+      - Agent Memory: guide/memory.md
       - Guardrails: guide/guardrails.md
   - Architecture:
       - architecture/index.md
@@ -97,6 +98,7 @@ nav:
       - MCP Servers: api/mcp-servers.md
       - Workflows: api/workflows.md
       - Knowledge: api/knowledge.md
+      - Memory: api/memory.md
       - Providers: api/providers.md
       - Tokens: api/tokens.md
       - Guardrails: api/guardrails.md
