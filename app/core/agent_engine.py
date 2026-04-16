@@ -447,6 +447,7 @@ STORE_MEMORY_TOOL_OPENAI = {
 
 # Claude-format tool definition for store_memory
 STORE_MEMORY_TOOL_CLAUDE = {
+    "type": "custom",
     "name": "store_memory",
     "description": (
         "Save a key-value memory for future reference across conversations. "
