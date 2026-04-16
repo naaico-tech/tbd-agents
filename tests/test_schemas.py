@@ -173,6 +173,7 @@ class TestWorkflowSchemas:
         assert w.output_format == "json"
         assert w.infinite_session is True
         assert w.bypass_memory is False
+        assert w.auto_memory is False
 
     def test_create_full(self):
         w = WorkflowCreate(
@@ -188,15 +189,18 @@ class TestWorkflowSchemas:
             repo_url="https://github.com/test/repo",
             repo_branch="develop",
             bypass_memory=True,
+            auto_memory=True,
         )
         assert w.model == "gpt-4.1"
         assert w.bypass_memory is True
+        assert w.auto_memory is True
 
     def test_update(self):
-        u = WorkflowUpdate(max_turns=20, reasoning_effort="low", bypass_memory=True)
+        u = WorkflowUpdate(max_turns=20, reasoning_effort="low", bypass_memory=True, auto_memory=True)
         assert u.max_turns == 20
         assert u.model is None
         assert u.bypass_memory is True
+        assert u.auto_memory is True
 
     def test_prompt_request_prompt_only(self):
         p = PromptRequest(prompt="Hello")

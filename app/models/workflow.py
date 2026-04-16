@@ -71,6 +71,7 @@ class Workflow(Document):
     usage: UsageStats | None = None
     infinite_session: bool = True
     bypass_memory: bool = False  # Skip memory injection during task runs
+    auto_memory: bool = False  # Auto-extract memories after task completion
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)
     guardrail_ids: list[str] = Field(default_factory=list)  # Explicitly selected guardrail IDs
     guardrail_tags: list[str] = Field(default_factory=list)  # Tag-based guardrail selection (union)

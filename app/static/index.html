@@ -1627,6 +1627,12 @@ function openWorkflowModal() {
       </label>
       <div class="hint">Skip memory (STM/LTM) injection during task runs for this workflow.</div>
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-auto-memory"> Auto Memory
+      </label>
+      <div class="hint">Automatically extract and store key learnings after each task completion.</div>
+    </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Repository <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — cloned fresh each run)</span></label>
       <div class="form-group"><label>Repo URL</label>
@@ -1767,6 +1773,7 @@ async function saveWorkflow() {
     guardrail_tags: guardrailTags,
     infinite_session: document.getElementById('f-wf-infinite').checked,
     bypass_memory: document.getElementById('f-wf-bypass-memory').checked,
+    auto_memory: document.getElementById('f-wf-auto-memory').checked,
     reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
     repo_url: document.getElementById('f-wf-repo-url').value || null,
     repo_branch: document.getElementById('f-wf-repo-branch').value || null,
@@ -1823,6 +1830,12 @@ function openEditWorkflowModal(id) {
       </label>
       <div class="hint">Skip memory (STM/LTM) injection during task runs for this workflow.</div>
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-edit-auto-memory" ${w.auto_memory?'checked':''}> Auto Memory
+      </label>
+      <div class="hint">Automatically extract and store key learnings after each task completion.</div>
+    </div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Guardrails</label>
       <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-guardrails">${guardrailEditOpts}</div></div>
@@ -1875,6 +1888,7 @@ async function updateWorkflow(id) {
     output_format: document.getElementById('f-wf-edit-format').value,
     infinite_session: document.getElementById('f-wf-edit-infinite').checked,
     bypass_memory: document.getElementById('f-wf-edit-bypass-memory').checked,
+    auto_memory: document.getElementById('f-wf-edit-auto-memory').checked,
     reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
     guardrail_ids: guardrailIds,
     guardrail_tags: guardrailTags,

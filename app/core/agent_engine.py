@@ -62,6 +62,7 @@ from app.observability import (
 from app.services import token_manager
 from app.services.copilot_client import build_client
 from app.services.knowledge_manager import knowledge_manager
+from app.services import memory_stm
 from app.services.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
@@ -406,6 +407,165 @@ async def _handle_store_memory(agent_id: str, arguments: dict) -> str:
         metadata=metadata,
     )
     return json.dumps({"status": "stored", "key": mem.key, "scope": mem.scope})
+
+
+# ── Auto-memory extraction ───────────────────────────────────────────────────
+
+async def _llm_call_openai_compat(
+    prompt: str, url: str, headers: dict, model: str,
+) -> str:
+    """Make a lightweight OpenAI-compatible chat completion call."""
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1000,
+    }
+    async with httpx.AsyncClient(timeout=30) as http:
+        resp = await http.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def _llm_call_anthropic(
+    prompt: str, url: str, api_key: str, model: str,
+) -> str:
+    """Make a lightweight Anthropic Messages API call."""
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": model,
+        "max_tokens": 1000,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+    }
+    async with httpx.AsyncClient(timeout=30) as http:
+        resp = await http.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["content"][0]["text"]
+
+
+async def _extract_auto_memories(
+    agent_id: str,
+    messages: list[Message],
+    workflow: "Workflow",
+    github_token: str,
+    provider: "Provider | None" = None,
+    api_key: str | None = None,
+) -> int:
+    """Extract key learnings from a completed conversation and store as memories.
+
+    Called after task completion when ``workflow.auto_memory`` is enabled.
+    Uses the same provider/model for a lightweight extraction call, deduplicates
+    against existing STM entries, and stores new memories.
+
+    Returns the number of new memories stored.
+    """
+    from app.models.memory import MemoryScope
+
+    # Build conversation text from recent messages
+    recent = [m for m in messages if m.content][-20:]
+    if not recent:
+        return 0
+    conversation_text = "\n".join(
+        f"[{m.role}]: {m.content[:500]}" for m in recent
+    )
+
+    # Get existing STM for deduplication
+    existing = await memory_stm.get_recent_memories(agent_id)
+    existing_keys = {m.get("key", "") for m in existing}
+    existing_summary = (
+        "\n".join(f"- {m['key']}: {m['value']}" for m in existing)
+        if existing else "None"
+    )
+
+    extraction_prompt = (
+        "Analyze this conversation and extract key learnings, decisions, "
+        "user preferences, or issues to avoid for future reference.\n\n"
+        "Return a JSON array of objects with:\n"
+        '- "key": short snake_case identifier (max 50 chars)\n'
+        '- "value": concise description of the learning (max 200 chars)\n\n'
+        "Rules:\n"
+        "- Only extract genuinely useful, persistent learnings\n"
+        "- Do NOT extract trivial or obvious information\n"
+        "- Do NOT duplicate these existing memories:\n"
+        f"{existing_summary}\n"
+        "- Return [] if no new learnings found\n"
+        "- Maximum 5 memories per extraction\n\n"
+        f"Conversation:\n{conversation_text}\n\n"
+        "Return ONLY a valid JSON array, no other text:"
+    )
+
+    # Route LLM call based on provider
+    model = workflow.model
+    try:
+        if provider and api_key and provider.provider_type == ProviderType.ANTHROPIC:
+            base_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(
+                ProviderType.ANTHROPIC, "https://api.anthropic.com/v1"
+            )
+            url = f"{base_url.rstrip('/')}/messages"
+            raw = await _llm_call_anthropic(extraction_prompt, url, api_key, model)
+        elif provider and api_key:
+            base_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(
+                provider.provider_type, ""
+            )
+            url = f"{base_url.rstrip('/')}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            raw = await _llm_call_openai_compat(extraction_prompt, url, headers, model)
+        else:
+            # Copilot SDK path — use GitHub Copilot API
+            url = "https://api.githubcopilot.com/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {github_token}",
+                "Content-Type": "application/json",
+                "Copilot-Integration-Id": "tbd-agents",
+            }
+            raw = await _llm_call_openai_compat(extraction_prompt, url, headers, model)
+    except Exception as exc:
+        logger.warning("Auto-memory LLM call failed for agent %s: %s", agent_id, exc)
+        return 0
+
+    # Parse response — extract JSON array
+    try:
+        # Handle markdown code fences
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        memories = json.loads(cleaned)
+        if not isinstance(memories, list):
+            return 0
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Auto-memory: failed to parse LLM response for agent %s", agent_id)
+        return 0
+
+    # Store new memories (deduplicated)
+    stored = 0
+    for mem in memories[:5]:
+        key = str(mem.get("key", "")).strip()[:50]
+        value = str(mem.get("value", "")).strip()[:200]
+        if not key or not value:
+            continue
+        if key in existing_keys:
+            continue
+
+        await memory_manager.store(
+            agent_id=agent_id,
+            scope=MemoryScope.AGENT,
+            key=key,
+            value=value,
+            metadata={"source": "auto_memory", "workflow_id": str(workflow.id)},
+        )
+        stored += 1
+
+    return stored
 
 
 # OpenAI-format tool definition for store_memory
@@ -1534,7 +1694,7 @@ async def run_agent(
     if custom_provider and custom_provider_key:
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
-            return await _run_with_claude_sdk(
+            result = await _run_with_claude_sdk(
                 workflow,
                 user_prompt,
                 system_prompt,
@@ -1545,16 +1705,35 @@ async def run_agent(
                 allowed_tools_set=allowed_tools_set,
                 builtin_tools=agent.builtin_tools or None,
             )
-        return await _run_with_custom_provider(
-            workflow,
-            user_prompt,
-            system_prompt,
-            custom_provider,
-            custom_provider_key,
-            task_exec,
-            mcp_config=mcp_config,
-            allowed_tools_set=allowed_tools_set,
-        )
+        else:
+            result = await _run_with_custom_provider(
+                workflow,
+                user_prompt,
+                system_prompt,
+                custom_provider,
+                custom_provider_key,
+                task_exec,
+                mcp_config=mcp_config,
+                allowed_tools_set=allowed_tools_set,
+            )
+
+        # Auto-memory extraction for BYOK providers
+        if workflow.auto_memory and result:
+            try:
+                count = await _extract_auto_memories(
+                    agent_id=str(agent.id),
+                    messages=workflow.messages,
+                    workflow=workflow,
+                    github_token=github_token,
+                    provider=custom_provider,
+                    api_key=custom_provider_key,
+                )
+                if count:
+                    await _log(workflow, "auto_memory", f"Extracted {count} new memories", task_exec)
+            except Exception:
+                logger.warning("Auto-memory extraction failed for workflow %s", workflow.id)
+
+        return result
 
     # ── Usage tracking state ──
     usage = UsageStats()
@@ -1953,6 +2132,20 @@ async def run_agent(
                     await task_exec.save()
 
                 await workflow.save()
+
+                # Auto-memory extraction for Copilot SDK path
+                if workflow.auto_memory and final_text and task_final_status == TaskStatus.COMPLETED:
+                    try:
+                        count = await _extract_auto_memories(
+                            agent_id=str(agent.id),
+                            messages=workflow.messages,
+                            workflow=workflow,
+                            github_token=github_token,
+                        )
+                        if count:
+                            await _log(workflow, "auto_memory", f"Extracted {count} new memories", task_exec)
+                    except Exception:
+                        logger.warning("Auto-memory extraction failed for workflow %s", workflow.id)
 
     except Exception as e:
         await _log(workflow, "error", str(e), task_exec)

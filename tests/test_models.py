@@ -182,6 +182,7 @@ class TestWorkflowModel:
         assert Workflow.model_fields["output_format"].default == OutputFormat.JSON
         assert Workflow.model_fields["infinite_session"].default is True
         assert Workflow.model_fields["bypass_memory"].default is False
+        assert Workflow.model_fields["auto_memory"].default is False
 
     def test_workflow_status_enum(self):
         assert WorkflowStatus.ACTIVE == "active"
