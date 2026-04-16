@@ -82,174 +82,61 @@ class TestParseTodoList:
         assert result is None
 
 
-# ── Auto-memory extraction tests ─────────────────────────────────────────────
+# ── Auto-memory system prompt injection tests ────────────────────────────────
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.agent_engine import _extract_auto_memories
-from app.models.workflow import Message, Workflow
+from app.core.agent_engine import _build_system_prompt
+from app.models.agent import Agent
+from app.models.workflow import Workflow
 
 
-class TestExtractAutoMemories:
-    """Test the _extract_auto_memories helper function."""
+class TestAutoMemoryPromptInjection:
+    """Test that _build_system_prompt injects auto_memory instructions when enabled."""
 
     @pytest.fixture
-    def mock_workflow(self):
+    def mock_agent(self):
+        agent = MagicMock(spec=Agent)
+        agent.system_prompt = "You are a helpful assistant."
+        return agent
+
+    @pytest.fixture
+    def mock_workflow_auto_memory_on(self):
         wf = MagicMock(spec=Workflow)
-        wf.id = "wf-123"
-        wf.model = "gpt-4.1"
-        wf.messages = [
-            Message(role="user", content="What's the weather in Paris?"),
-            Message(role="assistant", content="The weather in Paris is 18°C and sunny. User prefers Celsius."),
-        ]
+        wf.auto_memory = True
+        return wf
+
+    @pytest.fixture
+    def mock_workflow_auto_memory_off(self):
+        wf = MagicMock(spec=Workflow)
+        wf.auto_memory = False
         return wf
 
     @pytest.mark.asyncio
-    async def test_extracts_new_memories(self, mock_workflow):
-        """Should extract and store new memories from conversation."""
-        llm_response = json.dumps([
-            {"key": "user_prefers_celsius", "value": "User prefers Celsius temperature units"},
-        ])
-
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine.memory_manager") as mock_mm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value=llm_response):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-            mock_mm.store = AsyncMock(return_value=MagicMock(key="user_prefers_celsius", scope="agent"))
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 1
-            mock_mm.store.assert_called_once()
-            call_kwargs = mock_mm.store.call_args.kwargs
-            assert call_kwargs["key"] == "user_prefers_celsius"
-            assert call_kwargs["metadata"]["source"] == "auto_memory"
+    async def test_auto_memory_enabled_injects_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Should include auto_memory_policy when workflow.auto_memory is True."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        assert "<auto_memory_policy>" in prompt
+        assert "store_memory" in prompt
+        assert "snake_case" in prompt
 
     @pytest.mark.asyncio
-    async def test_deduplicates_against_stm(self, mock_workflow):
-        """Should skip memories whose keys already exist in STM."""
-        llm_response = json.dumps([
-            {"key": "existing_memory", "value": "This already exists"},
-            {"key": "new_memory", "value": "This is new"},
-        ])
-
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine.memory_manager") as mock_mm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value=llm_response):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[
-                {"key": "existing_memory", "value": "Already stored"},
-            ])
-            mock_mm.store = AsyncMock(return_value=MagicMock(key="new_memory", scope="agent"))
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 1
-            mock_mm.store.assert_called_once()
-            assert mock_mm.store.call_args.kwargs["key"] == "new_memory"
+    async def test_auto_memory_disabled_no_policy(self, mock_agent, mock_workflow_auto_memory_off):
+        """Should NOT include auto_memory_policy when workflow.auto_memory is False."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_off)
+        assert "<auto_memory_policy>" not in prompt
 
     @pytest.mark.asyncio
-    async def test_returns_zero_on_empty_messages(self, mock_workflow):
-        """Should return 0 when there are no messages with content."""
-        mock_workflow.messages = []
-
-        count = await _extract_auto_memories(
-            agent_id="agent-1",
-            messages=mock_workflow.messages,
-            workflow=mock_workflow,
-            github_token="fake-token",
-        )
-        assert count == 0
+    async def test_auto_memory_preserves_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Auto-memory policy should appear alongside the execution policy."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        assert "<execution_policy>" in prompt
+        assert "<auto_memory_policy>" in prompt
 
     @pytest.mark.asyncio
-    async def test_handles_invalid_json_response(self, mock_workflow):
-        """Should return 0 when LLM returns invalid JSON."""
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value="not json"):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_handles_llm_failure(self, mock_workflow):
-        """Should return 0 when LLM call fails."""
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, side_effect=Exception("API error")):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 0
-
-    @pytest.mark.asyncio
-    async def test_limits_to_five_memories(self, mock_workflow):
-        """Should store at most 5 memories even if LLM returns more."""
-        llm_response = json.dumps([
-            {"key": f"mem_{i}", "value": f"Learning {i}"} for i in range(10)
-        ])
-
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine.memory_manager") as mock_mm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value=llm_response):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-            mock_mm.store = AsyncMock(return_value=MagicMock(key="test", scope="agent"))
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 5
-            assert mock_mm.store.call_count == 5
-
-    @pytest.mark.asyncio
-    async def test_handles_markdown_code_fence(self, mock_workflow):
-        """Should parse JSON even when wrapped in markdown code fences."""
-        llm_response = '```json\n[{"key": "fenced_mem", "value": "From fenced response"}]\n```'
-
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine.memory_manager") as mock_mm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value=llm_response):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-            mock_mm.store = AsyncMock(return_value=MagicMock(key="fenced_mem", scope="agent"))
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 1
-
-    @pytest.mark.asyncio
-    async def test_empty_array_response(self, mock_workflow):
-        """Should return 0 when LLM returns empty array."""
-        with patch("app.core.agent_engine.memory_stm") as mock_stm, \
-             patch("app.core.agent_engine._llm_call_openai_compat", new_callable=AsyncMock, return_value="[]"):
-            mock_stm.get_recent_memories = AsyncMock(return_value=[])
-
-            count = await _extract_auto_memories(
-                agent_id="agent-1",
-                messages=mock_workflow.messages,
-                workflow=mock_workflow,
-                github_token="fake-token",
-            )
-            assert count == 0
+    async def test_auto_memory_after_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Auto-memory policy should come after execution policy."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        exec_pos = prompt.index("<execution_policy>")
+        auto_pos = prompt.index("<auto_memory_policy>")
+        assert auto_pos > exec_pos
