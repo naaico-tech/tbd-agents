@@ -71,7 +71,7 @@ class McpManager:
         if headers:
             headers = await token_manager.resolve_config(headers)
         http_client = httpx.AsyncClient(headers=headers) if headers else None
-        async with streamable_http_client(url=url, http_client=http_client) as (read, write):
+        async with streamable_http_client(url=url, http_client=http_client) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
