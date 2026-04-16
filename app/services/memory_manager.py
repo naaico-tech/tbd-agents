@@ -2,13 +2,22 @@ import logging
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape, quoteattr
 
+from app.config import settings
 from app.models.memory import Memory, MemoryScope
+from app.services import memory_stm
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
-    """Manages agent memory storage, retrieval, and lifecycle."""
+    """Manages agent memory storage, retrieval, and lifecycle.
+
+    Two-tier architecture:
+    - **STM (Short-Term Memory)**: Last N memories per agent cached in Redis
+      for fast system-prompt injection.
+    - **LTM (Long-Term Memory)**: Up to M memories per agent persisted in
+      MongoDB for durable storage and search/query.
+    """
 
     async def store(
         self,
@@ -20,7 +29,11 @@ class MemoryManager:
         metadata: dict | None = None,
         ttl: datetime | None = None,
     ) -> Memory:
-        """Store a memory, upserting by (agent_id, scope, key)."""
+        """Store a memory, upserting by (agent_id, scope, key).
+
+        Writes to both MongoDB (LTM) and Redis (STM) and enforces the
+        per-agent LTM cap configured via ``ltm_max_entries``.
+        """
         existing = await Memory.find_one(
             {"agent_id": agent_id, "scope": scope, "key": key}
         )
@@ -36,19 +49,59 @@ class MemoryManager:
             if ttl is not None:
                 update_data["ttl"] = ttl
             await existing.set(update_data)
-            return existing
+            mem = existing
+        else:
+            mem = Memory(
+                agent_id=agent_id,
+                scope=scope,
+                key=key,
+                value=value,
+                embedding=embedding,
+                metadata=metadata or {},
+                ttl=ttl,
+            )
+            await mem.insert()
 
-        memory = Memory(
-            agent_id=agent_id,
-            scope=scope,
-            key=key,
-            value=value,
-            embedding=embedding,
-            metadata=metadata or {},
-            ttl=ttl,
+        # ── Enforce LTM cap ──────────────────────────────────────────────
+        await self._enforce_ltm_cap(agent_id)
+
+        # ── Push to Redis STM ────────────────────────────────────────────
+        try:
+            await memory_stm.push_memory(agent_id, {
+                "scope": mem.scope,
+                "key": mem.key,
+                "value": mem.value,
+                "agent_id": agent_id,
+                "updated_at": mem.updated_at.isoformat(),
+            })
+        except Exception as exc:
+            logger.warning("STM push failed for agent %s: %s", agent_id, exc)
+
+        return mem
+
+    async def _enforce_ltm_cap(self, agent_id: str) -> None:
+        """Remove oldest memories when the per-agent LTM cap is exceeded."""
+        cap = settings.ltm_max_entries
+        if cap <= 0:
+            return  # unlimited
+
+        total = await Memory.find({"agent_id": agent_id}).count()
+        if total <= cap:
+            return
+
+        excess = total - cap
+        oldest = (
+            await Memory.find({"agent_id": agent_id})
+            .sort("updated_at")
+            .limit(excess)
+            .to_list()
         )
-        await memory.insert()
-        return memory
+        for mem in oldest:
+            await mem.delete()
+
+        logger.info(
+            "LTM cap enforced for agent %s: removed %d oldest memories", agent_id, excess
+        )
 
     async def retrieve(
         self, agent_id: str, scope: MemoryScope, key: str
@@ -112,45 +165,58 @@ class MemoryManager:
     ) -> str:
         """Build a <memories> XML context block for system prompt injection.
 
-        Fetches agent-scope and global-scope memories. If a workflow_id is
-        provided, also fetches session-scope memories for that workflow.
+        Reads from Redis STM first for speed.  Falls back to MongoDB LTM
+        if the STM cache is empty or unavailable.
         """
-        # Prune expired entries first
         await self.prune()
 
-        memories: list[Memory] = []
+        memories_dicts: list[dict] = []
 
-        # Agent-scope memories
-        agent_mems = await Memory.find(
-            {"agent_id": agent_id, "scope": MemoryScope.AGENT}
-        ).sort("-updated_at").limit(limit).to_list()
-        memories.extend(agent_mems)
+        # ── Try Redis STM first ──────────────────────────────────────────
+        try:
+            stm_entries = await memory_stm.get_recent_memories(agent_id, limit=limit)
+            if stm_entries:
+                memories_dicts = stm_entries
+        except Exception as exc:
+            logger.warning("STM read failed for agent %s, falling back to LTM: %s", agent_id, exc)
 
-        # Global-scope memories
-        global_mems = await Memory.find(
-            {"scope": MemoryScope.GLOBAL}
-        ).sort("-updated_at").limit(limit).to_list()
-        memories.extend(global_mems)
+        # ── Fallback to MongoDB LTM ──────────────────────────────────────
+        if not memories_dicts:
+            memories: list[Memory] = []
 
-        # Session-scope memories (per-workflow)
-        if workflow_id:
-            session_mems = await Memory.find(
-                {
-                    "agent_id": agent_id,
-                    "scope": MemoryScope.SESSION,
-                    "metadata.workflow_id": workflow_id,
-                }
+            agent_mems = await Memory.find(
+                {"agent_id": agent_id, "scope": MemoryScope.AGENT}
             ).sort("-updated_at").limit(limit).to_list()
-            memories.extend(session_mems)
+            memories.extend(agent_mems)
 
-        if not memories:
+            global_mems = await Memory.find(
+                {"scope": MemoryScope.GLOBAL}
+            ).sort("-updated_at").limit(limit).to_list()
+            memories.extend(global_mems)
+
+            if workflow_id:
+                session_mems = await Memory.find(
+                    {
+                        "agent_id": agent_id,
+                        "scope": MemoryScope.SESSION,
+                        "metadata.workflow_id": workflow_id,
+                    }
+                ).sort("-updated_at").limit(limit).to_list()
+                memories.extend(session_mems)
+
+            memories_dicts = [
+                {"key": m.key, "scope": m.scope, "value": m.value}
+                for m in memories
+            ]
+
+        if not memories_dicts:
             return ""
 
         sections: list[str] = []
-        for mem in memories:
+        for mem in memories_dicts:
             sections.append(
-                f'<memory key={quoteattr(mem.key)} scope={quoteattr(mem.scope)}>\n'
-                f"{escape(mem.value)}\n"
+                f'<memory key={quoteattr(str(mem.get("key", "")))} scope={quoteattr(str(mem.get("scope", "")))}>\n'
+                f'{escape(str(mem.get("value", "")))}\n'
                 f"</memory>"
             )
 

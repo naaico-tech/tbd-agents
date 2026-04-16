@@ -1,6 +1,33 @@
 # Agent Memory
 
-TBD Agents provides a built-in persistent memory system that allows agents to remember information across workflow executions and sessions.
+TBD Agents provides a two-tier persistent memory system that allows agents to remember information across workflow executions and sessions.
+
+---
+
+## Architecture: STM & LTM
+
+Memory uses a two-tier architecture for optimal performance:
+
+| Tier | Store | Purpose | Access speed |
+|---|---|---|---|
+| **STM** (Short-Term Memory) | Redis | Last N memories per agent, used for system prompt injection | Sub-millisecond |
+| **LTM** (Long-Term Memory) | MongoDB | Up to M memories per agent, queryable via API | Standard DB |
+
+### How the tiers interact
+
+1. **Writes** go to both MongoDB (LTM) and Redis (STM) simultaneously
+2. **Reads for context injection** hit Redis STM first; fall back to MongoDB if STM is empty or unavailable
+3. **Search/query operations** always hit MongoDB LTM (full-text search)
+4. **On startup**, a warmup process loads recent memories for all agents from MongoDB into Redis
+
+### Configuration
+
+| Setting | Default | Description |
+|---|---|---|
+| `STM_MAX_ENTRIES` | `20` | Max recent memories per agent cached in Redis |
+| `LTM_MAX_ENTRIES` | `200` | Max memories per agent in MongoDB (0 = unlimited) |
+
+Set via environment variables or `.env` file.
 
 ---
 
@@ -22,11 +49,10 @@ Memories are organized into three scopes:
 
 Before each agent execution, the engine automatically:
 
-1. Fetches **agent-scope** memories for the current agent
-2. Fetches **global-scope** memories shared across all agents
-3. Fetches **session-scope** memories for the current workflow
-4. Prunes any expired memories (TTL-based)
-5. Injects all memories as a `<memories>` XML block in the system prompt
+1. Checks **Redis STM** for cached recent memories (fast path)
+2. Falls back to **MongoDB LTM** if STM is empty or unavailable
+3. Prunes any expired memories (TTL-based)
+4. Injects all memories as a `<memories>` XML block in the system prompt
 
 ```xml
 <memories>
@@ -124,6 +150,14 @@ curl -X POST http://localhost:8000/api/memories/search \
 curl -X DELETE http://localhost:8000/api/memories/MEMORY_ID \
   -H "Authorization: Bearer $GITHUB_TOKEN"
 ```
+
+---
+
+## LTM Cap & Cleanup
+
+When `LTM_MAX_ENTRIES` is set (default: 200), the system automatically removes the oldest memories for an agent when the cap is exceeded. This happens on every `store` operation. Set to `0` to disable the cap.
+
+STM entries are automatically trimmed to `STM_MAX_ENTRIES` (default: 20) per agent using a Redis sorted set scored by timestamp.
 
 ---
 

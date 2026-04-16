@@ -1,4 +1,4 @@
-"""Tests for the Memory system — models, schemas, service, routes, and engine integration."""
+"""Tests for the Memory system — models, schemas, service, routes, engine integration, and STM."""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -177,10 +177,17 @@ class TestMemoryManager:
             patch.object(Memory, "insert", new_callable=AsyncMock) as mock_insert,
         ):
             # Patch Memory constructor
-            with patch("app.services.memory_manager.Memory") as MockMemory:
+            with (
+                patch("app.services.memory_manager.Memory") as MockMemory,
+                patch("app.services.memory_manager.memory_stm.push_memory", new_callable=AsyncMock),
+                patch.object(manager, "_enforce_ltm_cap", new_callable=AsyncMock),
+            ):
                 instance = MagicMock()
                 instance.insert = AsyncMock()
                 instance.key = "test-key"
+                instance.scope = MemoryScope.AGENT
+                instance.value = "test-value"
+                instance.updated_at = datetime.now(UTC)
                 MockMemory.return_value = instance
                 MockMemory.find_one = AsyncMock(return_value=None)
 
@@ -198,8 +205,15 @@ class TestMemoryManager:
         existing = MagicMock()
         existing.set = AsyncMock()
         existing.key = "existing-key"
+        existing.scope = MemoryScope.AGENT
+        existing.value = "updated-value"
+        existing.updated_at = datetime.now(UTC)
 
-        with patch("app.services.memory_manager.Memory") as MockMemory:
+        with (
+            patch("app.services.memory_manager.Memory") as MockMemory,
+            patch("app.services.memory_manager.memory_stm.push_memory", new_callable=AsyncMock),
+            patch.object(manager, "_enforce_ltm_cap", new_callable=AsyncMock),
+        ):
             MockMemory.find_one = AsyncMock(return_value=existing)
 
             result = await manager.store(
@@ -316,6 +330,7 @@ class TestMemoryManager:
 
         with (
             patch.object(manager, "prune", new_callable=AsyncMock),
+            patch("app.services.memory_manager.memory_stm.get_recent_memories", new_callable=AsyncMock, return_value=[]),
             patch("app.services.memory_manager.Memory") as MockMemory,
         ):
             MockMemory.find.return_value = mock_chain
@@ -323,7 +338,24 @@ class TestMemoryManager:
             assert result == ""
 
     @pytest.mark.asyncio
-    async def test_build_memory_context_with_memories(self, manager):
+    async def test_build_memory_context_from_stm(self, manager):
+        """When STM has entries, they are used directly (no MongoDB fallback)."""
+        stm_entries = [
+            {"key": "pref", "scope": "agent", "value": "dark mode", "agent_id": "agent-1"},
+        ]
+
+        with (
+            patch.object(manager, "prune", new_callable=AsyncMock),
+            patch("app.services.memory_manager.memory_stm.get_recent_memories", new_callable=AsyncMock, return_value=stm_entries),
+        ):
+            result = await manager.build_memory_context("agent-1")
+            assert "<memories>" in result
+            assert "dark mode" in result
+            assert 'key="pref"' in result
+
+    @pytest.mark.asyncio
+    async def test_build_memory_context_fallback_to_ltm(self, manager):
+        """When STM is empty, fall back to MongoDB LTM."""
         mem1 = MagicMock()
         mem1.key = "pref"
         mem1.scope = "agent"
@@ -332,11 +364,11 @@ class TestMemoryManager:
         mock_chain = MagicMock()
         mock_chain.sort.return_value = mock_chain
         mock_chain.limit.return_value = mock_chain
-        # Agent-scope returns mem1, global and session return empty
         mock_chain.to_list = AsyncMock(side_effect=[[mem1], [], []])
 
         with (
             patch.object(manager, "prune", new_callable=AsyncMock),
+            patch("app.services.memory_manager.memory_stm.get_recent_memories", new_callable=AsyncMock, return_value=[]),
             patch("app.services.memory_manager.Memory") as MockMemory,
         ):
             MockMemory.find.return_value = mock_chain
@@ -344,6 +376,29 @@ class TestMemoryManager:
             assert "<memories>" in result
             assert "dark mode" in result
             assert 'key="pref"' in result
+
+    @pytest.mark.asyncio
+    async def test_build_memory_context_stm_failure_falls_back(self, manager):
+        """When STM raises an exception, gracefully fall back to LTM."""
+        mem1 = MagicMock()
+        mem1.key = "fact"
+        mem1.scope = "agent"
+        mem1.value = "important"
+
+        mock_chain = MagicMock()
+        mock_chain.sort.return_value = mock_chain
+        mock_chain.limit.return_value = mock_chain
+        mock_chain.to_list = AsyncMock(side_effect=[[mem1], []])
+
+        with (
+            patch.object(manager, "prune", new_callable=AsyncMock),
+            patch("app.services.memory_manager.memory_stm.get_recent_memories", new_callable=AsyncMock, side_effect=ConnectionError("Redis down")),
+            patch("app.services.memory_manager.Memory") as MockMemory,
+        ):
+            MockMemory.find.return_value = mock_chain
+            result = await manager.build_memory_context("agent-1")
+            assert "<memories>" in result
+            assert "important" in result
 
 
 # ── Memory Routes ────────────────────────────────────────────────────────────
@@ -546,3 +601,199 @@ class TestStoreMemoryHandler:
             # Default scope should be "agent"
             call_kwargs = mock_store.call_args
             assert call_kwargs[1]["scope"].value == "agent" or str(call_kwargs[1]["scope"]) == "agent"
+
+
+# ── STM (Short-Term Memory) ─────────────────────────────────────────────────
+
+
+class TestMemorySTM:
+    """Tests for the Redis-backed Short-Term Memory layer."""
+
+    @pytest.mark.asyncio
+    async def test_push_and_get_recent(self):
+        from app.services import memory_stm
+
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=[])
+        mock_redis.zadd = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=1)
+        mock_redis.zrevrange = AsyncMock(return_value=[
+            json.dumps({"scope": "agent", "key": "k1", "value": "v1", "agent_id": "a1"}),
+        ])
+
+        with patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+            await memory_stm.push_memory("a1", {
+                "scope": "agent", "key": "k1", "value": "v1",
+                "agent_id": "a1", "updated_at": datetime.now(UTC).isoformat(),
+            })
+            mock_redis.zadd.assert_awaited_once()
+
+            result = await memory_stm.get_recent_memories("a1")
+            assert len(result) == 1
+            assert result[0]["key"] == "k1"
+
+    @pytest.mark.asyncio
+    async def test_push_deduplicates_by_scope_key(self):
+        from app.services import memory_stm
+
+        existing_entry = json.dumps({"scope": "agent", "key": "k1", "value": "old"})
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=[existing_entry])
+        mock_redis.zrem = AsyncMock()
+        mock_redis.zadd = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=1)
+
+        with patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+            await memory_stm.push_memory("a1", {
+                "scope": "agent", "key": "k1", "value": "new",
+                "agent_id": "a1", "updated_at": datetime.now(UTC).isoformat(),
+            })
+            # Should have removed old entry
+            mock_redis.zrem.assert_awaited_once_with("stm:a1", existing_entry)
+            mock_redis.zadd.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_push_trims_to_max_entries(self):
+        from app.services import memory_stm
+
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=[])
+        mock_redis.zadd = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=25)
+        mock_redis.zremrangebyrank = AsyncMock()
+
+        with (
+            patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis),
+            patch("app.services.memory_stm.settings") as mock_settings,
+        ):
+            mock_settings.stm_max_entries = 20
+            await memory_stm.push_memory("a1", {
+                "scope": "agent", "key": "new", "value": "v",
+                "agent_id": "a1", "updated_at": datetime.now(UTC).isoformat(),
+            })
+            # Should trim oldest 5 entries (25 - 20)
+            mock_redis.zremrangebyrank.assert_awaited_once_with("stm:a1", 0, 4)
+
+    @pytest.mark.asyncio
+    async def test_remove_memory(self):
+        from app.services import memory_stm
+
+        entry = json.dumps({"scope": "agent", "key": "k1", "value": "v1"})
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=[entry])
+        mock_redis.zrem = AsyncMock()
+
+        with patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+            await memory_stm.remove_memory("a1", "agent", "k1")
+            mock_redis.zrem.assert_awaited_once_with("stm:a1", entry)
+
+    @pytest.mark.asyncio
+    async def test_clear_agent_stm(self):
+        from app.services import memory_stm
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        with patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+            await memory_stm.clear_agent_stm("a1")
+            mock_redis.delete.assert_awaited_once_with("stm:a1")
+
+    @pytest.mark.asyncio
+    async def test_warmup_all_agents(self):
+        from app.services import memory_stm
+
+        now = datetime.now(UTC)
+        mock_groups = [
+            {
+                "_id": "agent-1",
+                "memories": [
+                    {"scope": "agent", "key": "k1", "value": "v1", "updated_at": now},
+                    {"scope": "agent", "key": "k2", "value": "v2", "updated_at": now},
+                ],
+            },
+            {
+                "_id": "agent-2",
+                "memories": [
+                    {"scope": "global", "key": "g1", "value": "gv1", "updated_at": now},
+                ],
+            },
+        ]
+
+        async def _async_iter():
+            for g in mock_groups:
+                yield g
+
+        mock_collection = MagicMock()
+        mock_collection.aggregate.return_value = _async_iter()
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+        mock_redis.zadd = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=2)
+
+        with (
+            patch("app.models.memory.Memory.get_motor_collection", return_value=mock_collection),
+            patch("app.services.memory_stm._get_redis", new_callable=AsyncMock, return_value=mock_redis),
+            patch("app.services.memory_stm.settings") as mock_settings,
+        ):
+            mock_settings.stm_max_entries = 20
+            count = await memory_stm.warmup_all_agents()
+            assert count == 2
+            # Two agents should each have their STM cleared and populated
+            assert mock_redis.delete.await_count == 2
+            assert mock_redis.zadd.await_count == 2
+
+
+# ── LTM Cap Enforcement ─────────────────────────────────────────────────────
+
+
+class TestLTMCapEnforcement:
+    @pytest.fixture()
+    def manager(self):
+        from app.services.memory_manager import MemoryManager
+        return MemoryManager()
+
+    @pytest.mark.asyncio
+    async def test_enforce_ltm_cap_removes_oldest(self, manager):
+        mock_chain = MagicMock()
+        mock_chain.count = AsyncMock(return_value=210)
+        mock_chain.sort.return_value = mock_chain
+        mock_chain.limit.return_value = mock_chain
+        old_mem1 = MagicMock()
+        old_mem1.delete = AsyncMock()
+        old_mem2 = MagicMock()
+        old_mem2.delete = AsyncMock()
+        mock_chain.to_list = AsyncMock(return_value=[old_mem1, old_mem2])
+
+        with (
+            patch("app.services.memory_manager.Memory") as MockMemory,
+            patch("app.services.memory_manager.settings") as mock_settings,
+        ):
+            MockMemory.find.return_value = mock_chain
+            mock_settings.ltm_max_entries = 200
+            await manager._enforce_ltm_cap("agent-1")
+            old_mem1.delete.assert_awaited_once()
+            old_mem2.delete.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_enforce_ltm_cap_no_action_under_limit(self, manager):
+        mock_chain = MagicMock()
+        mock_chain.count = AsyncMock(return_value=50)
+
+        with (
+            patch("app.services.memory_manager.Memory") as MockMemory,
+            patch("app.services.memory_manager.settings") as mock_settings,
+        ):
+            MockMemory.find.return_value = mock_chain
+            mock_settings.ltm_max_entries = 200
+            await manager._enforce_ltm_cap("agent-1")
+            # No sort/limit/to_list should be called
+            mock_chain.sort.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enforce_ltm_cap_unlimited(self, manager):
+        """When ltm_max_entries=0, no capping is performed."""
+        with patch("app.services.memory_manager.settings") as mock_settings:
+            mock_settings.ltm_max_entries = 0
+            await manager._enforce_ltm_cap("agent-1")
+            # Should return immediately — no Memory.find call

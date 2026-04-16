@@ -12,6 +12,7 @@ from app.schemas.memory import (
     MemoryUpdate,
 )
 from app.services.memory_manager import memory_manager
+from app.services import memory_stm
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
@@ -95,6 +96,11 @@ async def delete_memory(memory_id: str, _user=Depends(get_current_user)):
     mem = await Memory.get(PydanticObjectId(memory_id))
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
+    # Remove from Redis STM as well
+    try:
+        await memory_stm.remove_memory(mem.agent_id, mem.scope, mem.key)
+    except Exception:
+        pass  # STM removal is best-effort
     await mem.delete()
 
 
