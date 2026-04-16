@@ -977,7 +977,7 @@ async function openToolsModal(id) {
         ${tools.map(t => {
           const checked = allChecked || allowed.includes(t.name);
           return `<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:6px 8px;border-radius:6px;background:var(--bg)">
-            <input type="checkbox" class="tool-cb" value="${esc(t.name)}" ${checked?'checked':''} style="margin-top:3px">
+            <input type="checkbox" class="tool-cb" value="${esc(t.name)}" ${checked?'checked':''} style="margin-top:3px" onchange="syncSelectAll()">
             <div>
               <div style="font-weight:600;font-size:13px">${esc(t.name)}</div>
               ${t.description ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(t.description)}</div>` : ''}
@@ -1000,12 +1000,18 @@ function toggleAllTools(checked) {
   document.querySelectorAll('.tool-cb').forEach(cb => cb.checked = checked);
 }
 
-async function saveTools(id) {
+function syncSelectAll() {
   const allCbs = document.querySelectorAll('.tool-cb');
   const selectAll = document.getElementById('tools-select-all');
+  if (selectAll) selectAll.checked = [...allCbs].every(cb => cb.checked);
+}
+
+async function saveTools(id) {
+  const allCbs = document.querySelectorAll('.tool-cb');
+  const allChecked = [...allCbs].every(cb => cb.checked);
   let allowed = [];
-  if (selectAll && selectAll.checked) {
-    // All selected → store empty list (= unrestricted)
+  if (allChecked) {
+    // Every tool selected → store empty list (= unrestricted)
     allowed = [];
   } else {
     allowed = [...allCbs].filter(cb => cb.checked).map(cb => cb.value);
