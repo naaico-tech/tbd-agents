@@ -1485,20 +1485,28 @@ async def run_agent(
 
     # ── Memory context ───────────────────────────────────────────────────────
     memory_context = ""
-    try:
-        memory_context = await memory_manager.build_memory_context(
-            agent_id=str(agent.id),
-            workflow_id=str(workflow.id),
+    if getattr(workflow, "bypass_memory", False):
+        await _log(
+            workflow,
+            "memories_skipped",
+            "Memory injection bypassed (workflow setting)",
+            task_exec,
         )
-        if memory_context:
-            await _log(
-                workflow,
-                "memories_loaded",
-                "Agent memories injected into context",
-                task_exec,
+    else:
+        try:
+            memory_context = await memory_manager.build_memory_context(
+                agent_id=str(agent.id),
+                workflow_id=str(workflow.id),
             )
-    except Exception as exc:
-        logger.warning("Failed to load memories for agent %s: %s", agent.id, exc)
+            if memory_context:
+                await _log(
+                    workflow,
+                    "memories_loaded",
+                    "Agent memories injected into context",
+                    task_exec,
+                )
+        except Exception as exc:
+            logger.warning("Failed to load memories for agent %s: %s", agent.id, exc)
 
     system_prompt = await _build_system_prompt(
         agent, workflow.skill_ids, workflow, knowledge_context, memory_context

@@ -70,6 +70,7 @@ class Workflow(Document):
         return v
     usage: UsageStats | None = None
     infinite_session: bool = True
+    bypass_memory: bool = False  # Skip memory injection during task runs
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)
     guardrail_ids: list[str] = Field(default_factory=list)  # Explicitly selected guardrail IDs
     guardrail_tags: list[str] = Field(default_factory=list)  # Tag-based guardrail selection (union)
