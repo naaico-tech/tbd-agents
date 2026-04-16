@@ -113,3 +113,13 @@ async def search_memories(body: MemorySearchRequest, _user=Depends(get_current_u
         limit=body.limit,
     )
     return [_to_response(m) for m in results]
+
+
+@router.get("/stm/{agent_id}")
+async def get_stm_memories(agent_id: str, _user=Depends(get_current_user)):
+    """Return Short-Term Memory entries from Redis for the given agent."""
+    try:
+        entries = await memory_stm.get_recent_memories(agent_id)
+    except Exception:
+        entries = []
+    return entries

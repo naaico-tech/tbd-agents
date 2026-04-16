@@ -499,6 +499,28 @@
       </div>
     </div>
 
+    <!-- Agent Memory Page (STM) -->
+    <div id="page-agent-memory" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <button class="btn btn-sm" onclick="navigateTo('agents')">&larr; Back to Agents</button>
+        <h2 id="agent-memory-title" style="font-size:18px;font-weight:600">Agent Memory</h2>
+      </div>
+      <div class="stats" style="margin-bottom:16px">
+        <div class="stat-card"><div class="label">Agent</div><div class="value blue" id="agent-memory-name" style="font-size:16px">-</div></div>
+        <div class="stat-card"><div class="label">STM Entries</div><div class="value purple" id="agent-memory-count">0</div></div>
+        <div class="stat-card"><div class="label">Source</div><div class="value green" style="font-size:16px">Redis (STM)</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h2>Short-Term Memory</h2>
+          <button class="btn btn-sm" onclick="loadAgentMemory(currentMemoryAgentId)">↻ Refresh</button>
+        </div>
+        <div class="card-body"><table><thead><tr>
+          <th>Key</th><th>Scope</th><th>Value</th><th>Updated</th>
+        </tr></thead><tbody id="agent-memory-body"></tbody></table></div>
+      </div>
+    </div>
+
     <!-- Run Task Page -->
     <div id="page-task" class="page">
       <div class="card" style="margin-bottom:16px">
@@ -654,7 +676,7 @@ function navigateTo(page, title) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('page-title').textContent = title ||
-    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs' }[page] || page;
+    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory' }[page] || page;
   loadPage(page);
 }
 
@@ -720,6 +742,7 @@ async function loadAgents() {
           <td>${a.mcp_server_ids.length}</td>
           <td>${fmtDate(a.created_at)}</td>
           <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="viewAgentMemory('${a.id}')">Memory</button>
             <button class="btn btn-sm" onclick="openAgentModal('${a.id}')">Edit</button>
             <button class="btn btn-sm btn-danger" onclick="deleteAgent('${a.id}')">Delete</button>
           </div></td>
@@ -2672,6 +2695,36 @@ async function loadTaskExecutions() {
 
 function viewTaskExecution(id) {
   openTaskLogsPage(id, 'tasks');
+}
+
+// ── Agent Memory (STM) ──
+let currentMemoryAgentId = null;
+
+function viewAgentMemory(agentId) {
+  currentMemoryAgentId = agentId;
+  navigateTo('agent-memory', 'Agent Memory');
+  loadAgentMemory(agentId);
+}
+
+async function loadAgentMemory(agentId) {
+  const agent = agents.find(a => a.id === agentId);
+  document.getElementById('agent-memory-name').textContent = agent ? agent.name : agentId.slice(0,8);
+  document.getElementById('agent-memory-title').textContent = (agent ? agent.name : 'Agent') + ' — Short-Term Memory';
+  try {
+    const entries = await api(`/api/memories/stm/${agentId}`);
+    document.getElementById('agent-memory-count').textContent = entries.length;
+    document.getElementById('agent-memory-body').innerHTML = entries.length
+      ? entries.map(m => `<tr>
+          <td><strong>${esc(m.key || '-')}</strong></td>
+          <td><span class="badge badge-${m.scope==='global'?'green':m.scope==='session'?'yellow':'blue'}">${esc(m.scope || '-')}</span></td>
+          <td style="max-width:400px;white-space:pre-wrap;word-break:break-word">${esc(m.value || '')}</td>
+          <td>${m.updated_at ? fmtDate(m.updated_at) : '-'}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" class="empty-state">No short-term memories cached for this agent.</td></tr>';
+  } catch(e) {
+    toast(e.message, 'error');
+    document.getElementById('agent-memory-body').innerHTML = '<tr><td colspan="4" class="empty-state">Failed to load STM data.</td></tr>';
+  }
 }
 
 // ── Init ──

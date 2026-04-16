@@ -525,6 +525,44 @@ class TestMemoryRoutes:
             assert len(data) == 1
             assert data[0]["key"] == "pref"
 
+    def test_get_stm_memories(self, client):
+        stm_entries = [
+            {"key": "user_name", "scope": "session", "value": "Alice",
+             "updated_at": "2025-01-01T00:00:00Z"},
+            {"key": "pref", "scope": "agent", "value": "dark mode",
+             "updated_at": "2025-01-01T00:00:00Z"},
+        ]
+        with patch(
+            "app.api.routes.memories.memory_stm.get_recent_memories",
+            new_callable=AsyncMock,
+            return_value=stm_entries,
+        ):
+            resp = client.get("/api/memories/stm/agent-1")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert len(data) == 2
+            assert data[0]["key"] == "user_name"
+
+    def test_get_stm_memories_empty(self, client):
+        with patch(
+            "app.api.routes.memories.memory_stm.get_recent_memories",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get("/api/memories/stm/agent-1")
+            assert resp.status_code == 200
+            assert resp.json() == []
+
+    def test_get_stm_memories_redis_error(self, client):
+        with patch(
+            "app.api.routes.memories.memory_stm.get_recent_memories",
+            new_callable=AsyncMock,
+            side_effect=Exception("Redis down"),
+        ):
+            resp = client.get("/api/memories/stm/agent-1")
+            assert resp.status_code == 200
+            assert resp.json() == []
+
 
 # ── store_memory tool handler ────────────────────────────────────────────────
 
