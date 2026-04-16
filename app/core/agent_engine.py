@@ -1694,8 +1694,11 @@ async def run_agent(
 
                 # Wait for the session to finish (idle or error)
                 # Poll for halt signal every 2 seconds while waiting.
+                # Infinite-session workflows are long-running investigations; give
+                # them 24 h per prompt instead of the global SESSION_TIMEOUT.
+                _prompt_timeout = 86400 if workflow.infinite_session else settings.session_timeout
                 try:
-                    deadline = asyncio.get_event_loop().time() + settings.session_timeout
+                    deadline = asyncio.get_event_loop().time() + _prompt_timeout
                     while not done.is_set():
                         remaining = deadline - asyncio.get_event_loop().time()
                         if remaining <= 0:
@@ -1727,7 +1730,7 @@ async def run_agent(
                     await _log(
                         workflow,
                         "error",
-                        f"Session timed out after {settings.session_timeout}s",
+                        f"Session timed out after {_prompt_timeout}s",
                         task_exec,
                     )
                     await _publish_status(workflow, "failed")
