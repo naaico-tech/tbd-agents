@@ -243,6 +243,7 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
             patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
+            patch("app.core.agent_engine.enforce_output_guardrails", new_callable=AsyncMock, return_value=[]),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "You are helpful.", openai_provider, "sk-test", None
@@ -318,6 +319,7 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
             patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
+            patch("app.core.agent_engine.enforce_output_guardrails", new_callable=AsyncMock, return_value=[]),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "sk-test", None

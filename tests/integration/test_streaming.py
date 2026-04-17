@@ -34,7 +34,7 @@ class TestSSEStreaming:
             None,  # signals end
         ]
 
-        async def fake_subscribe(workflow_id):
+        async def fake_subscribe(workflow_id, last_event_id=None):
             for evt in events_to_deliver:
                 if evt is None:
                     return
@@ -67,7 +67,7 @@ class TestSSEStreaming:
         wf = await create_workflow(agent)
         wf_id = str(wf.id)
 
-        async def fake_subscribe(workflow_id):
+        async def fake_subscribe(workflow_id, last_event_id=None):
             yield None  # keepalive
             yield json.dumps({"type": "status", "data": {"status": "completed"}})
 

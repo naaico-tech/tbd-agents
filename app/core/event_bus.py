@@ -2,6 +2,10 @@
 
 Works across processes — Celery workers publish events via Redis,
 FastAPI SSE endpoints subscribe via async Redis pub/sub.
+
+Supports SSE reconnection via ``Last-Event-ID``: each published event
+is assigned a monotonic ID and stored in a short-lived Redis list so
+that reconnecting clients can replay missed events.
 """
 
 import asyncio
@@ -18,6 +22,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _CHANNEL_PREFIX = "workflow:events:"
+_HISTORY_PREFIX = "workflow:history:"
+_COUNTER_PREFIX = "workflow:eventid:"
+_HISTORY_TTL = 300  # seconds to keep event history (5 min)
+_HISTORY_MAX_LEN = 500  # max events retained per workflow
 _pub_redis: aioredis.Redis | None = None
 
 
@@ -25,24 +33,54 @@ def _channel(workflow_id: str) -> str:
     return f"{_CHANNEL_PREFIX}{workflow_id}"
 
 
+def _history_key(workflow_id: str) -> str:
+    return f"{_HISTORY_PREFIX}{workflow_id}"
+
+
+def _counter_key(workflow_id: str) -> str:
+    return f"{_COUNTER_PREFIX}{workflow_id}"
+
+
+async def _get_pub_redis() -> aioredis.Redis:
+    """Return the shared publisher Redis connection, reconnecting if needed."""
+    global _pub_redis
+    if _pub_redis is None:
+        _pub_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _pub_redis
+
+
 async def publish(workflow_id: str, event_type: str, data: dict[str, Any]) -> None:
     """Publish an event to a workflow's Redis channel.
 
-    Uses a cached Redis connection; automatically reconnects if the
-    connection is stale (e.g. new event loop in a Celery worker).
+    Each event is assigned a monotonic ``id`` and appended to a capped
+    history list so reconnecting SSE clients can replay missed events.
     """
     global _pub_redis
-    payload = json.dumps(
-        {"type": event_type, "data": data, "timestamp": datetime.now(UTC).isoformat()},
-        default=str,
-    )
     for attempt in range(2):
         try:
-            if _pub_redis is None:
-                _pub_redis = aioredis.from_url(
-                    settings.redis_url, decode_responses=True
-                )
-            await _pub_redis.publish(_channel(workflow_id), payload)
+            r = await _get_pub_redis()
+            # Assign monotonic event ID
+            event_id = await r.incr(_counter_key(workflow_id))
+            await r.expire(_counter_key(workflow_id), _HISTORY_TTL)
+
+            payload = json.dumps(
+                {
+                    "id": event_id,
+                    "type": event_type,
+                    "data": data,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+                default=str,
+            )
+
+            pipe = r.pipeline()
+            pipe.publish(_channel(workflow_id), payload)
+            # Store in history for replay
+            hkey = _history_key(workflow_id)
+            pipe.rpush(hkey, payload)
+            pipe.ltrim(hkey, -_HISTORY_MAX_LEN, -1)
+            pipe.expire(hkey, _HISTORY_TTL)
+            await pipe.execute()
             return
         except Exception:
             if _pub_redis is not None:
@@ -54,12 +92,48 @@ async def publish(workflow_id: str, event_type: str, data: dict[str, Any]) -> No
     logger.warning("Failed to publish event for workflow %s", workflow_id)
 
 
-async def subscribe(workflow_id: str) -> AsyncGenerator[str | None, None]:
+async def get_events_since(
+    workflow_id: str, last_event_id: int
+) -> list[str]:
+    """Return all stored events with id > *last_event_id*.
+
+    Used by the SSE endpoint to replay missed events on reconnect.
+    """
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        raw_events = await r.lrange(_history_key(workflow_id), 0, -1)
+        result: list[str] = []
+        for raw in raw_events:
+            try:
+                evt = json.loads(raw)
+                if evt.get("id", 0) > last_event_id:
+                    result.append(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return result
+    finally:
+        await r.aclose()
+
+
+async def subscribe(
+    workflow_id: str, last_event_id: int | None = None
+) -> AsyncGenerator[str | None, None]:
     """Subscribe to a workflow's events via Redis pub/sub.
+
+    If *last_event_id* is provided, first replays any stored events with a
+    higher ID before switching to live pub/sub — ensuring no events are lost
+    on reconnection.
 
     Yields JSON payload strings, or None on timeout (for keepalive signalling).
     Automatically cleans up the subscription when the generator is closed.
     """
+    # ── Replay missed events ─────────────────────────────────────────────────
+    if last_event_id is not None:
+        missed = await get_events_since(workflow_id, last_event_id)
+        for payload in missed:
+            yield payload
+
+    # ── Live subscription ────────────────────────────────────────────────────
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     pubsub = r.pubsub()
     await pubsub.subscribe(_channel(workflow_id))
