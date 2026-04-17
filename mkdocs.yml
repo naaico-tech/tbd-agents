@@ -86,6 +86,7 @@ nav:
       - Knowledge Bases: guide/knowledge.md
       - Agent Memory: guide/memory.md
       - Guardrails: guide/guardrails.md
+      - BYOK Providers: guide/byok-providers.md
   - Architecture:
       - architecture/index.md
       - System Overview: architecture/system-overview.md

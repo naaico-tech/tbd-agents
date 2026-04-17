@@ -106,7 +106,7 @@ class TestProviderSchema:
         assert resp.provider_type == ProviderType.OPENAI
 
 
-# ── _build_provider_request ───────────────────────────────────────────────────
+# ── _build_provider_headers + _resolve_provider_url ──────────────────────────
 
 
 class TestBuildProviderRequest:
@@ -116,18 +116,23 @@ class TestBuildProviderRequest:
             provider_type=provider_type,
             api_key_token_name="key",
             base_url=base_url,
+            azure_deployment=None,
+            azure_api_version="2024-12-01-preview",
         )
 
     def _call(self, provider: Provider, api_key: str = "sk-test") -> tuple:
-        from app.core.agent_engine import _build_provider_request
+        from app.core.agent_engine import _build_provider_headers, _resolve_provider_url
 
-        return _build_provider_request(
-            provider,
-            api_key,
-            model="gpt-4o",
-            system_prompt="You are helpful.",
-            user_prompt="Hello!",
-        )
+        url = _resolve_provider_url(provider, model="gpt-4o")
+        headers = _build_provider_headers(provider, api_key)
+        body = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello!"},
+            ],
+        }
+        return url, headers, body
 
     def test_openai_defaults(self):
         provider = self._make_provider(ProviderType.OPENAI)
@@ -154,10 +159,14 @@ class TestBuildProviderRequest:
     def test_azure_openai_headers(self):
         provider = self._make_provider(
             ProviderType.AZURE_OPENAI,
-            base_url="https://myresource.openai.azure.com/openai/deployments/gpt-4",
+            base_url="https://myresource.openai.azure.com",
         )
+        provider.azure_deployment = "gpt-4"
         url, headers, body = self._call(provider, api_key="azure-key-999")
-        assert url == "https://myresource.openai.azure.com/openai/deployments/gpt-4/chat/completions"
+        assert (
+            url
+            == "https://myresource.openai.azure.com/openai/deployments/gpt-4/chat/completions?api-version=2024-12-01-preview"
+        )
         assert headers["api-key"] == "azure-key-999"
         assert "Authorization" not in headers
 
@@ -175,11 +184,11 @@ class TestBuildProviderRequest:
         assert url == "https://api.openai.com/v1/chat/completions"
 
     def test_missing_base_url_raises(self):
-        from app.core.agent_engine import _build_provider_request
+        from app.core.agent_engine import _resolve_provider_url
 
         provider = self._make_provider(ProviderType.CUSTOM, base_url=None)
         with pytest.raises(ValueError, match="no base_url"):
-            _build_provider_request(provider, "key", "gpt-4", "sys", "user")
+            _resolve_provider_url(provider)
 
 
 # ── _run_with_custom_provider ─────────────────────────────────────────────────
@@ -193,6 +202,8 @@ def mock_workflow():
     wf.model = "gpt-4o"
     wf.output_format = "json"
     wf.status = "active"
+    wf.max_turns = 25
+    wf.skill_ids = []
     wf.messages = []
     wf.usage = None
     wf.save = AsyncMock()
@@ -219,10 +230,8 @@ class TestRunWithCustomProvider:
 
         mock_workflow.output_format = OutputFormat.JSON
 
-        http_response = MagicMock()
-        http_response.raise_for_status = MagicMock()
-        http_response.json.return_value = {
-            "choices": [{"message": {"role": "assistant", "content": "Hello, world!"}}],
+        stream_result = {
+            "choices": [{"message": {"role": "assistant", "content": "Hello, world!"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
         }
 
@@ -233,14 +242,8 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("httpx.AsyncClient") as mock_http_cls,
+            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
         ):
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=http_response)
-            mock_http_cls.return_value = mock_client
-
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "You are helpful.", openai_provider, "sk-test", None
             )
@@ -268,14 +271,8 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("httpx.AsyncClient") as mock_http_cls,
+            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, side_effect=http_error),
         ):
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(side_effect=http_error)
-            mock_http_cls.return_value = mock_client
-
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "bad-key", None
             )
@@ -293,14 +290,8 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("httpx.AsyncClient") as mock_http_cls,
+            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, side_effect=RuntimeError("network error")),
         ):
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(side_effect=RuntimeError("network error"))
-            mock_http_cls.return_value = mock_client
-
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "sk-test", None
             )
@@ -314,10 +305,8 @@ class TestRunWithCustomProvider:
 
         mock_workflow.output_format = OutputFormat.MARKDOWN
 
-        http_response = MagicMock()
-        http_response.raise_for_status = MagicMock()
-        http_response.json.return_value = {
-            "choices": [{"message": {"role": "assistant", "content": "## Report"}}],
+        stream_result = {
+            "choices": [{"message": {"role": "assistant", "content": "## Report"}, "finish_reason": "stop"}],
             "usage": {},
         }
 
@@ -328,14 +317,8 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("httpx.AsyncClient") as mock_http_cls,
+            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
         ):
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=http_response)
-            mock_http_cls.return_value = mock_client
-
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "sk-test", None
             )
@@ -361,6 +344,8 @@ class TestProviderAPI:
         doc.provider_type = provider_type
         doc.api_key_token_name = "openai-key"
         doc.base_url = None
+        doc.azure_api_version = "2024-12-01-preview"
+        doc.azure_deployment = None
         doc.description = ""
         doc.created_at = now
         doc.updated_at = now
@@ -477,7 +462,11 @@ class TestAgentProviderField:
             system_prompt="sys",
             model=None,
             mcp_server_ids=[],
+            mcp_server_tags=[],
             tool_definitions=[],
+            knowledge_source_ids=[],
+            knowledge_tags=[],
+            builtin_tools=[],
             provider_id="prov-1",
             created_at=now,
             updated_at=now,
@@ -514,6 +503,11 @@ class TestRunAgentProviderRouting:
         agent.id = "6601a1b2c3d4e5f607890abc"
         agent.provider_id = provider_id
         agent.mcp_server_ids = []
+        agent.mcp_server_tags = []
+        agent.knowledge_source_ids = []
+        agent.knowledge_tags = []
+        agent.skill_ids = []
+        agent.builtin_tools = []
         agent.system_prompt = "You are helpful."
         return agent
 
@@ -536,9 +530,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
             patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
-            patch.object(agent_engine, "_build_dynamic_mcp_config", new_callable=_am, return_value={}),
             patch.object(agent_engine, "_build_system_prompt", new_callable=_am, return_value="sys"),
             patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
             patch.object(agent_engine, "_log", new_callable=_am),
             patch.object(agent_engine, "_publish_status", new_callable=_am),
             patch.object(agent_engine, "build_client") as mock_build_client,
@@ -551,6 +545,7 @@ class TestRunAgentProviderRouting:
             mock_agent_cls.get = AsyncMock(return_value=agent)
             mock_prov_cls.get = AsyncMock(return_value=provider)
             mock_tm.get_token_value = AsyncMock(return_value="ghp_stored_token")
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
 
             # Make build_client raise so we can verify the token passed
             captured_token = {}
@@ -586,9 +581,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
             patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
-            patch.object(agent_engine, "_build_dynamic_mcp_config", new_callable=_am, return_value={}),
             patch.object(agent_engine, "_build_system_prompt", new_callable=_am, return_value="sys"),
             patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
             patch.object(agent_engine, "_log", new_callable=_am),
             patch.object(agent_engine, "_publish_status", new_callable=_am),
             patch.object(agent_engine, "_run_with_custom_provider", return_value="answer") as mock_custom,
@@ -597,6 +592,7 @@ class TestRunAgentProviderRouting:
             mock_agent_cls.get = AsyncMock(return_value=agent)
             mock_prov_cls.get = AsyncMock(return_value=provider)
             mock_tm.get_token_value = AsyncMock(return_value="sk-test-key")
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
             mock_custom.return_value = "answer"
             mock_custom.side_effect = mock_custom_rv
 
@@ -627,9 +623,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
             patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
-            patch.object(agent_engine, "_build_dynamic_mcp_config", new_callable=_am, return_value={}),
             patch.object(agent_engine, "_build_system_prompt", new_callable=_am, return_value="sys"),
             patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
             patch.object(agent_engine, "_log", new_callable=_am),
             patch.object(agent_engine, "_publish_status", new_callable=_am),
             patch.object(agent_engine, "_run_with_custom_provider", new_callable=_am) as mock_custom,
@@ -643,6 +639,7 @@ class TestRunAgentProviderRouting:
             mock_agent_cls.get = AsyncMock(return_value=agent)
             mock_prov_cls.get = AsyncMock(return_value=provider)
             mock_tm.get_token_value = AsyncMock(return_value=None)  # token missing
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
 
             mock_build_client.side_effect = RuntimeError("stop-here")
 

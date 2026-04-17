@@ -277,6 +277,179 @@ async def _sync_repo(workflow: Workflow) -> str | None:
 
 # ── BYOK Custom Provider Execution ───────────────────────────────────────────
 
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0  # seconds
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _compute_retry_delay(attempt: int, response: httpx.Response | None = None) -> float:
+    """Compute retry delay, honouring Retry-After header when available."""
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+    return _RETRY_BASE_DELAY * (2 ** attempt)
+
+
+async def _http_post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    body: dict,
+    *,
+    max_retries: int = _MAX_RETRIES,
+) -> httpx.Response:
+    """POST with exponential backoff for rate limits and transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = await client.post(url, headers=headers, json=body)
+            if response.status_code not in _RETRYABLE_STATUS_CODES or attempt == max_retries:
+                response.raise_for_status()
+                return response
+            # Retryable status — compute delay
+            delay = _compute_retry_delay(attempt, response)
+            logger.warning(
+                "Provider returned %d, retrying in %.1fs (attempt %d/%d)",
+                response.status_code, delay, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(delay)
+        except httpx.HTTPStatusError:
+            raise
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                raise
+            delay = _compute_retry_delay(attempt)
+            logger.warning(
+                "Provider connection error: %s, retrying in %.1fs (attempt %d/%d)",
+                exc, delay, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(delay)
+    # Should not reach here, but satisfy type checker
+    raise last_exc or RuntimeError("Retry logic exhausted")
+
+
+async def _stream_chat_completion(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    body: dict,
+    workflow_id: str,
+) -> dict:
+    """Stream an OpenAI-compatible chat completion, publishing deltas via event_bus.
+
+    Returns a synthetic response dict matching the non-streaming format so callers
+    don't need separate handling.
+    """
+    body = {**body, "stream": True, "stream_options": {"include_usage": True}}
+
+    # Retry wrapper for initial streaming connection
+    last_exc: Exception | None = None
+    raw_response: httpx.Response | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            req = client.build_request("POST", url, headers=headers, json=body)
+            raw_response = await client.send(req, stream=True)
+            if raw_response.status_code in _RETRYABLE_STATUS_CODES and attempt < _MAX_RETRIES:
+                delay = _compute_retry_delay(attempt, raw_response)
+                await raw_response.aclose()
+                logger.warning(
+                    "Streaming: provider returned %d, retrying in %.1fs (attempt %d/%d)",
+                    raw_response.status_code, delay, attempt + 1, _MAX_RETRIES,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raw_response.raise_for_status()
+            break
+        except httpx.HTTPStatusError:
+            raise
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            last_exc = exc
+            if attempt == _MAX_RETRIES:
+                raise
+            delay = _compute_retry_delay(attempt)
+            await asyncio.sleep(delay)
+
+    if raw_response is None:
+        raise last_exc or RuntimeError("Streaming retry exhausted")
+
+    # Parse SSE stream
+    content_parts: list[str] = []
+    tool_calls_map: dict[int, dict] = {}  # index -> {id, type, function: {name, arguments}}
+    finish_reason = ""
+    usage_data: dict = {}
+
+    try:
+        async for line in raw_response.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            payload = line[len("data:"):].lstrip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            # Usage is in the final chunk (when stream_options.include_usage is set)
+            if "usage" in chunk and chunk["usage"]:
+                usage_data = chunk["usage"]
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta", {})
+            fr = choices[0].get("finish_reason")
+            if fr:
+                finish_reason = fr
+
+            # Content delta
+            content_delta = delta.get("content")
+            if content_delta:
+                content_parts.append(content_delta)
+                asyncio.create_task(event_bus.publish(
+                    workflow_id, "message_delta", {"delta": content_delta},
+                ))
+
+            # Tool call deltas
+            tc_deltas = delta.get("tool_calls") or []
+            for tcd in tc_deltas:
+                idx = tcd.get("index", 0)
+                if idx not in tool_calls_map:
+                    tool_calls_map[idx] = {
+                        "id": tcd.get("id", ""),
+                        "type": tcd.get("type", "function"),
+                        "function": {"name": "", "arguments": ""},
+                    }
+                existing = tool_calls_map[idx]
+                if tcd.get("id"):
+                    existing["id"] = tcd["id"]
+                func_delta = tcd.get("function", {})
+                if func_delta.get("name"):
+                    existing["function"]["name"] += func_delta["name"]
+                if func_delta.get("arguments"):
+                    existing["function"]["arguments"] += func_delta["arguments"]
+    finally:
+        await raw_response.aclose()
+
+    # Build synthetic non-streaming response
+    message: dict = {}
+    if content_parts:
+        message["content"] = "".join(content_parts)
+    if tool_calls_map:
+        message["tool_calls"] = [tool_calls_map[i] for i in sorted(tool_calls_map)]
+    message.setdefault("role", "assistant")
+
+    return {
+        "choices": [{"message": message, "finish_reason": finish_reason}],
+        "usage": usage_data,
+    }
+
 
 def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
     """Build HTTP headers for a provider request."""
@@ -299,15 +472,79 @@ def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
         }
 
 
-def _resolve_provider_url(provider: Provider) -> str:
-    """Resolve the chat completions endpoint URL for a provider."""
+def _compact_messages(messages: list[dict]) -> list[dict]:
+    """Compact message history by keeping system prompt, original user message, and recent context.
+
+    Strategy:
+      - Always keep the system message (index 0)
+      - Always keep the last 6 messages (recent context / tool interactions)
+      - Drop intermediate assistant/tool messages between them
+      - Insert a summary placeholder so the model knows context was truncated
+    """
+    if len(messages) <= 8:
+        return messages  # Nothing to compact
+
+    kept_head = [messages[0]]  # system prompt
+    # Find the first user message (usually index 1)
+    first_user_idx = 1
+    for i, m in enumerate(messages[1:], start=1):
+        if m.get("role") == "user":
+            first_user_idx = i
+            break
+    kept_head.append(messages[first_user_idx])
+
+    # Keep the last 6 messages (recent exchanges)
+    kept_tail = messages[-6:]
+
+    # Insert a compaction marker
+    dropped_count = len(messages) - len(kept_head) - len(kept_tail)
+    compaction_note = {
+        "role": "system",
+        "content": (
+            f"[Context compacted: {dropped_count} intermediate messages were removed "
+            "to fit within the context window. The conversation continues below.]"
+        ),
+    }
+    return kept_head + [compaction_note] + kept_tail
+
+
+def _resolve_provider_url(provider: Provider, model: str = "") -> str:
+    """Resolve the chat completions endpoint URL for a provider.
+
+    For Azure OpenAI, builds the deployment-specific URL with api-version.
+    For others, appends ``/chat/completions`` to the base URL.
+    """
     raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider.provider_type)
     if raw_url is None:
         raise ValueError(
             f"Provider '{provider.name}' has no base_url configured and none is available "
             f"for provider_type '{provider.provider_type}'."
         )
-    return raw_url.rstrip("/") + "/chat/completions"
+    base = raw_url.rstrip("/")
+    if provider.provider_type == ProviderType.AZURE_OPENAI:
+        # Support both Azure base_url formats:
+        #   - https://resource.openai.azure.com
+        #   - https://resource.openai.azure.com/openai/deployments/my-deploy
+        azure_deployments_path = "/openai/deployments/"
+        azure_resource_base = base
+        existing_deployment = ""
+        if azure_deployments_path in base:
+            azure_resource_base, deployment_suffix = base.split(azure_deployments_path, 1)
+            existing_deployment = deployment_suffix.strip("/").split("/", 1)[0]
+            azure_resource_base = azure_resource_base.rstrip("/")
+
+        deployment = provider.azure_deployment or model or existing_deployment
+        if not deployment:
+            raise ValueError(
+                f"Azure OpenAI provider '{provider.name}' requires a deployment name. "
+                "Set azure_deployment on the provider or use the workflow model field."
+            )
+        api_version = provider.azure_api_version
+        return (
+            f"{azure_resource_base}/openai/deployments/{deployment}"
+            f"/chat/completions?api-version={api_version}"
+        )
+    return base + "/chat/completions"
 
 
 def _mcp_tool_to_openai(tool) -> dict:
@@ -1088,13 +1325,16 @@ async def _run_with_custom_provider(
     tool_call_count = 0
     total_input_tokens = 0
     total_output_tokens = 0
+    total_cache_read_tokens = 0
+    total_cache_write_tokens = 0
+    total_cost = 0.0
 
     try:
         from contextlib import AsyncExitStack
         mcp_exit_stack = AsyncExitStack()
         await mcp_exit_stack.__aenter__()
 
-        url = _resolve_provider_url(provider)
+        url = _resolve_provider_url(provider, model)
         headers = _build_provider_headers(provider, api_key)
 
         # Build conversation messages
@@ -1130,23 +1370,60 @@ async def _run_with_custom_provider(
             task_exec,
         )
 
+        # Context compaction thresholds
+        # Approximate token count from serialized JSON (~4 chars per token)
+        # Default context window: 128k tokens for modern models
+        context_window = 128_000
+        compaction_threshold = 0.80  # Start compacting at 80% of context window
+
+        def _estimate_message_tokens(message_list: list[dict]) -> int:
+            """Approximate prompt token count from serialized message payload."""
+            serialized = json.dumps(message_list, ensure_ascii=False, separators=(",", ":"))
+            return max(1, len(serialized) // 4)
+
         # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
             while True:
+                # ── Context compaction ───────────────────────────────────
+                # If the current request context exceeds the compaction threshold,
+                # prune older intermediate messages to free context space.
+                current_prompt_tokens = _estimate_message_tokens(messages)
+                if current_prompt_tokens > context_window * compaction_threshold and len(messages) > 4:
+                    await _log(
+                        workflow, "compaction_start",
+                        f"Compacting context ({current_prompt_tokens} estimated input tokens, "
+                        f"{len(messages)} messages)",
+                        task_exec,
+                    )
+                    messages = _compact_messages(messages)
+                    await _log(
+                        workflow, "compaction_complete",
+                        f"Compacted to {len(messages)} messages",
+                        task_exec,
+                    )
+
                 body: dict = {"model": model, "messages": messages}
                 if openai_tools:
                     body["tools"] = openai_tools
                     body["tool_choice"] = "auto"
 
-                response = await http.post(url, headers=headers, json=body)
-                response.raise_for_status()
+                response = await _stream_chat_completion(
+                    http, url, headers, body, str(workflow.id),
+                )
 
-                data = response.json()
+                data = response
 
-                # Track token usage
+                # Track token usage (OpenAI, Azure OpenAI, and compatible APIs)
                 usage_data = data.get("usage", {})
                 total_input_tokens += int(usage_data.get("prompt_tokens", 0))
                 total_output_tokens += int(usage_data.get("completion_tokens", 0))
+                # Cache tokens (OpenAI prompt_tokens_details / completion_tokens_details)
+                prompt_details = usage_data.get("prompt_tokens_details", {})
+                total_cache_read_tokens += int(prompt_details.get("cached_tokens", 0))
+                # Cost (returned by some providers)
+                cost_val = usage_data.get("cost")
+                if cost_val is not None:
+                    total_cost += float(cost_val)
 
                 choices = data.get("choices") or []
                 if not choices:
@@ -1171,6 +1448,12 @@ async def _run_with_custom_provider(
                             tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                         except json.JSONDecodeError:
                             tool_args = {}
+
+                        # Parse TODO progress from manage_todo_list calls
+                        if tool_name == "manage_todo_list":
+                            progress = _parse_todo_list(tool_args)
+                            if progress:
+                                await _update_progress(workflow, task_exec, progress)
 
                         await _log(
                             workflow, "tool_call", tool_name, task_exec,
@@ -1213,12 +1496,14 @@ async def _run_with_custom_provider(
                             "Please provide your final answer based on the information gathered so far.",
                         })
                         final_body = {"model": model, "messages": messages}
-                        final_resp = await http.post(url, headers=headers, json=final_body)
-                        final_resp.raise_for_status()
-                        final_data = final_resp.json()
+                        final_data = await _stream_chat_completion(
+                            http, url, headers, final_body, str(workflow.id),
+                        )
                         fu = final_data.get("usage", {})
                         total_input_tokens += int(fu.get("prompt_tokens", 0))
                         total_output_tokens += int(fu.get("completion_tokens", 0))
+                        fu_details = fu.get("prompt_tokens_details", {})
+                        total_cache_read_tokens += int(fu_details.get("cached_tokens", 0))
                         fc = final_data.get("choices") or []
                         if fc:
                             final_text = fc[0].get("message", {}).get("content") or ""
@@ -1235,14 +1520,24 @@ async def _run_with_custom_provider(
         usage = UsageStats(
             total_input_tokens=total_input_tokens,
             total_output_tokens=total_output_tokens,
+            total_cache_read_tokens=total_cache_read_tokens,
+            total_cache_write_tokens=total_cache_write_tokens,
+            total_cost=total_cost,
         )
         workflow.usage = usage
         if total_input_tokens:
             tokens_total.labels(direction="input", model=model).inc(total_input_tokens)
         if total_output_tokens:
             tokens_total.labels(direction="output", model=model).inc(total_output_tokens)
+        if total_cache_read_tokens:
+            tokens_total.labels(direction="cache_read", model=model).inc(total_cache_read_tokens)
+        if total_cache_write_tokens:
+            tokens_total.labels(direction="cache_write", model=model).inc(total_cache_write_tokens)
+        if total_cost > 0:
+            cost_dollars_total.labels(model=model).inc(total_cost)
         if tool_call_count:
             tool_calls_total.labels(tool_name="byok_aggregate").inc(tool_call_count)
+        tool_calls_per_task.labels(model=model).observe(tool_call_count)
 
         workflow.messages.append(Message(role="assistant", content=final_text or ""))
 
@@ -1251,20 +1546,29 @@ async def _run_with_custom_provider(
             final_text = json.dumps({"response": final_text})
 
         await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
+
+        # Determine terminal status
+        if tool_call_count >= max_turns:
+            task_final_status = TaskStatus.MAX_TURNS_REACHED
+        else:
+            task_final_status = TaskStatus.COMPLETED
+
         await _log(
             workflow, "completed",
-            f"Final status: completed (tool_calls: {tool_call_count})",
+            f"Final status: {task_final_status} (tool_calls: {tool_call_count})",
             task_exec,
         )
-        await _publish_status(workflow, "completed")
+        await _publish_status(workflow, task_final_status)
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
         agent_task_duration_seconds.labels(
-            model=model, status="completed"
+            model=model, status=task_final_status
         ).observe(task_duration)
+        if usage.total_cost > 0:
+            cost_per_task_dollars.labels(model=model).observe(usage.total_cost)
 
         if task_exec:
-            task_exec.status = TaskStatus.COMPLETED
+            task_exec.status = task_final_status
             task_exec.finished_at = datetime.now(UTC)
             task_exec.tool_calls = tool_call_count
             task_exec.response = final_text

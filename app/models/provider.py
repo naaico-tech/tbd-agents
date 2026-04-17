@@ -38,6 +38,8 @@ class Provider(Document):
     provider_type: ProviderType
     api_key_token_name: str  # name of a Token document in the token store
     base_url: str | None = None  # required for azure_openai and custom types
+    azure_api_version: str = "2024-12-01-preview"  # Azure OpenAI API version
+    azure_deployment: str | None = None  # Azure deployment name (defaults to workflow model)
     description: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
