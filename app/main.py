@@ -47,7 +47,8 @@ async def _poll_celery_queue(stop_event: asyncio.Event) -> None:
                 length = await r.llen(_CELERY_QUEUE)
                 celery_queue_length.set(length)
             except Exception:
-                pass
+                logger.warning("Failed to read Celery queue length, resetting to 0", exc_info=True)
+                celery_queue_length.set(0)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=10)
             except asyncio.TimeoutError:
@@ -77,11 +78,14 @@ async def lifespan(app: FastAPI):
 
     # Graceful shutdown
     stop_event.set()
-    poller_task.cancel()
     try:
-        await poller_task
-    except asyncio.CancelledError:
-        pass
+        await asyncio.wait_for(poller_task, timeout=15)
+    except asyncio.TimeoutError:
+        poller_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
     await memory_stm.close()
 
 

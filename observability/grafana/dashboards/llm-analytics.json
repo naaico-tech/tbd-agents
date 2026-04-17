@@ -392,22 +392,7 @@
   ],
   "schemaVersion": 39,
   "tags": ["copilot", "llm", "usage"],
-  "templating": {
-    "list": [
-      {
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(copilot_hub_agent_tasks_total, model)",
-        "hide": 0,
-        "includeAll": true,
-        "multi": true,
-        "name": "model",
-        "query": { "query": "label_values(copilot_hub_agent_tasks_total, model)", "refId": "model" },
-        "refresh": 2,
-        "type": "query"
-      }
-    ]
-  },
+  "templating": { "list": [] },
   "time": { "from": "now-24h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",

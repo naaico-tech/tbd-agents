@@ -119,8 +119,9 @@ Deep dive into model usage and spend:
 - **Traces** — Recent distributed traces via Tempo
 - **Logs** — Combined app + worker logs via Loki
 
-Both dashboards include **template variables** (`model`, `job`) for
-filtering panels interactively.
+Template variables (`model`, `job`) are not yet wired into panel
+queries.  They will be added in a future iteration once baseline
+metric labels stabilise.
 
 ---
 
@@ -205,7 +206,8 @@ click a trace ID to jump directly to the corresponding trace in Tempo.
 
 - Check worker logs: `docker compose logs worker --tail=100`
 - Scale workers: `docker compose up -d --scale worker=3`
-- When scaling, each worker instance needs a unique external port
+  (the worker metrics port is exposed only to the Docker network, so
+  scaling works without host-port conflicts)
 
 ### Traces not appearing in Tempo
 
