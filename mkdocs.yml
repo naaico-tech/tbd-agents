@@ -76,6 +76,7 @@ nav:
       - Quick Start: getting-started/quickstart.md
       - Local Setup: getting-started/local-setup.md
       - Configuration: getting-started/configuration.md
+      - Migration & Upgrade: getting-started/migration.md
   - Guide:
       - guide/index.md
       - Agents: guide/agents.md
