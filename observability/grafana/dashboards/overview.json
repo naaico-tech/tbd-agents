@@ -294,7 +294,7 @@
       "targets": [
         {
           "expr": "topk(15, increase(copilot_hub_tool_calls_total[24h]))",
-          "legendFormat": "{{tool_name}} ({{agent}})",
+          "legendFormat": "{{tool_name}}",
           "refId": "A",
           "instant": true
         }
@@ -323,7 +323,7 @@
       "targets": [
         {
           "expr": "rate(copilot_hub_mcp_connections_total[5m])",
-          "legendFormat": "{{server}} ({{status}})",
+          "legendFormat": "{{server_name}}",
           "refId": "A"
         }
       ]
@@ -443,5 +443,5 @@
   "timezone": "browser",
   "title": "Copilot Agent Hub — Overview",
   "uid": "copilot-hub-overview",
-  "version": 1
+  "version": 2
 }

@@ -353,7 +353,7 @@
       "targets": [
         {
           "queryType": "nativeSearch",
-          "serviceName": "tbd-agents",
+          "serviceName": "tbd-agents-api|tbd-agents-worker",
           "limit": 20,
           "refId": "A"
         }
@@ -398,5 +398,5 @@
   "timezone": "browser",
   "title": "Copilot Agent Hub — LLM & Cost Analytics",
   "uid": "copilot-hub-llm",
-  "version": 1
+  "version": 2
 }

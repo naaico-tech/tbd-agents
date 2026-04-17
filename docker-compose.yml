@@ -63,6 +63,10 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-worker
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
+      - WORKER_METRICS_PORT=9101
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    expose:
+      - "9101"
     depends_on:
       mongodb:
         condition: service_started
@@ -105,7 +109,7 @@ services:
   # ── Observability Stack ─────────────────────────────────────────────────────
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.120.0
     command: ["--config", "/etc/otel/config.yaml"]
     volumes:
       - ./observability/otel-collector-config.yaml:/etc/otel/config.yaml:ro
@@ -126,6 +130,7 @@ services:
       - "--web.enable-remote-write-receiver"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"

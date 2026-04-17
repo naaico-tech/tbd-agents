@@ -8,6 +8,7 @@ from app.api.deps import extract_token, get_current_user
 from app.config import settings
 from app.core import event_bus
 from app.core.guardrails import enforce_guardrails
+from app.observability import sse_connections_active
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
@@ -222,6 +223,7 @@ async def stream_workflow(
             pass
 
     async def event_generator():
+        sse_connections_active.inc()
         try:
             async for payload in event_bus.subscribe(workflow_id, last_event_id=resume_id):
                 if await request.is_disconnected():
@@ -241,6 +243,8 @@ async def stream_workflow(
                         yield f"data: {payload}\n\n"
         except Exception:
             pass
+        finally:
+            sse_connections_active.dec()
 
     return StreamingResponse(
         event_generator(),
