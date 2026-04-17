@@ -124,9 +124,9 @@ class TestRepoSync:
                 result = await _sync_repo(wf)
 
         # Should still attempt clone even without auth
-        if captured_cmds:
-            clone_cmd = captured_cmds[0]
-            assert "nonexistent-token" not in clone_cmd
+        assert captured_cmds, "_sync_repo() did not invoke git"
+        clone_cmd = captured_cmds[0]
+        assert "nonexistent-token" not in clone_cmd
 
     @pytest.mark.asyncio
     async def test_clone_failure_returns_none(self):

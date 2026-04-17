@@ -99,9 +99,35 @@ def _sse_tool_then_text(tool_name, args_json, result_text="Done"):
     """SSE: one tool call → then a text response (simulated two-round)."""
     return [
         # Round 1: tool call
-        f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"index":0,"id":"call_1","type":"function","function":{{"name":"{tool_name}","arguments":""}}}}]}},"finish_reason":null}}]}}',
-        f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"index":0,"function":{{"arguments":"{args_json}"}}}}]}},"finish_reason":null}}]}}',
-        f'data: {{"choices":[{{"delta":{{}},"finish_reason":"tool_calls"}}],"usage":{{"prompt_tokens":20,"completion_tokens":10}}}}',
+        "data: " + json.dumps({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0, "id": "call_1", "type": "function",
+                        "function": {"name": tool_name, "arguments": ""},
+                    }]
+                },
+                "finish_reason": None,
+            }]
+        }),
+        "data: " + json.dumps({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {"arguments": args_json},
+                    }]
+                },
+                "finish_reason": None,
+            }]
+        }),
+        "data: " + json.dumps({
+            "choices": [{
+                "delta": {},
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+        }),
         "data: [DONE]",
     ]
 

@@ -6,7 +6,9 @@ external infrastructure at import time.
 
 Start MongoDB/Redis before running:
     docker compose -f docker-compose.test.yml up -d
-    pytest tests/integration/ -v
+    TOKEN_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") \
+      TEST_MONGO_URI=mongodb://localhost:27018 REDIS_URL=redis://localhost:6380 \
+      pytest tests/integration/ -v
 """
 
 import os

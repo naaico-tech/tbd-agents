@@ -87,7 +87,7 @@ class TestSSEStreaming:
         wf = await create_workflow(agent)
         wf_id = str(wf.id)
 
-        with patch("app.tasks.agent_task.run_agent_task.delay") as mock_delay:
+        with patch("app.api.routes.workflows.run_agent_task.delay") as mock_delay:
             mock_delay.return_value = type("AsyncResult", (), {"id": "celery-abc"})()
 
             resp = await app_client.post(
