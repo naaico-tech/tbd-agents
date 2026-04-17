@@ -6,6 +6,8 @@ by tag), then runs the appropriate checks before the agent task is dispatched.
 Prompt guardrails  — validate the incoming prompt string.
 Request guardrails — validate the structured ``request`` dict against a
                      JSON Schema definition.
+Output guardrails  — validate the agent's response after execution (PII
+                     detection, format enforcement, regex patterns).
 
 Raises ``fastapi.HTTPException(422)`` on the first violation encountered,
 with a detail message that identifies the failing guardrail and the reason.
@@ -106,6 +108,80 @@ def _check_request(request_data: dict, guardrail: Guardrail) -> None:
             status_code=500,
             detail=f"Guardrail '{guardrail.name}': invalid JSON Schema — {exc.message}.",
         ) from exc
+
+
+# ── Common PII patterns ─────────────────────────────────────────────────────
+
+_PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("email address", re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE)),
+    ("phone number", re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")),
+    ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+]
+
+
+def _check_output(output: str, guardrail: Guardrail) -> str | None:
+    """Validate *output* against an output guardrail's rules.
+
+    Returns a violation message string on failure, or ``None`` if clean.
+    """
+    cfg = guardrail.output_config
+    if cfg is None:
+        return None
+
+    if cfg.max_length is not None and len(output) > cfg.max_length:
+        return (
+            f"Guardrail '{guardrail.name}': output is too long "
+            f"({len(output)} chars, maximum {cfg.max_length})."
+        )
+
+    for pattern in cfg.forbidden_patterns:
+        if re.search(pattern, output, re.IGNORECASE):
+            return (
+                f"Guardrail '{guardrail.name}': output matches forbidden pattern '{pattern}'."
+            )
+
+    for pattern in cfg.required_patterns:
+        if not re.search(pattern, output, re.IGNORECASE):
+            return (
+                f"Guardrail '{guardrail.name}': output does not match "
+                f"required pattern '{pattern}'."
+            )
+
+    if cfg.must_be_valid_json:
+        try:
+            json.loads(output)
+        except (json.JSONDecodeError, TypeError):
+            return f"Guardrail '{guardrail.name}': output is not valid JSON."
+
+    if cfg.pii_detection:
+        for pii_label, pii_re in _PII_PATTERNS:
+            if pii_re.search(output):
+                return (
+                    f"Guardrail '{guardrail.name}': output appears to contain "
+                    f"PII ({pii_label})."
+                )
+
+    return None
+
+
+async def enforce_output_guardrails(
+    workflow: "Workflow",
+    output: str,
+) -> list[str]:
+    """Run all active output guardrails for *workflow* against the agent response.
+
+    Returns a list of violation messages (empty if all checks pass).
+    """
+    guardrails = await _load_guardrails(workflow)
+    output_guardrails = [g for g in guardrails if g.guardrail_type == GuardrailType.OUTPUT]
+
+    violations: list[str] = []
+    for guardrail in output_guardrails:
+        result = _check_output(output, guardrail)
+        if result:
+            violations.append(result)
+
+    return violations
 
 
 async def enforce_guardrails(

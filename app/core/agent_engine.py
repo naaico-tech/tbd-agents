@@ -25,6 +25,7 @@ import httpx
 
 from app.config import settings
 from app.core import event_bus
+from app.core.guardrails import enforce_output_guardrails
 from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
 from app.models.knowledge_source import KnowledgeSource
@@ -1228,6 +1229,16 @@ async def _run_with_claude_sdk(
                 {"role": "assistant", "content": final_text},
             )
 
+        # ── Output guardrail enforcement ─────────────────────────────────────
+        if final_text:
+            output_violations = await enforce_output_guardrails(workflow, final_text)
+            if output_violations:
+                await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                await event_bus.publish(
+                    str(workflow.id), "output_guardrail_violation",
+                    {"violations": output_violations},
+                )
+
         # ── Record usage & finalize ──────────────────────────────────────────
         usage = UsageStats(
             total_input_tokens=total_input_tokens,
@@ -1540,6 +1551,16 @@ async def _run_with_custom_provider(
         tool_calls_per_task.labels(model=model).observe(tool_call_count)
 
         workflow.messages.append(Message(role="assistant", content=final_text or ""))
+
+        # ── Output guardrail enforcement ─────────────────────────────────────
+        if final_text:
+            output_violations = await enforce_output_guardrails(workflow, final_text)
+            if output_violations:
+                await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                await event_bus.publish(
+                    str(workflow.id), "output_guardrail_violation",
+                    {"violations": output_violations},
+                )
 
         # Format output
         if final_text and workflow.output_format == OutputFormat.JSON:
@@ -2257,6 +2278,16 @@ async def run_agent(
 
                 # Persist usage stats
                 workflow.usage = usage
+
+                # ── Output guardrail enforcement ─────────────────────────────
+                if final_text:
+                    output_violations = await enforce_output_guardrails(workflow, final_text)
+                    if output_violations:
+                        await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                        await event_bus.publish(
+                            str(workflow.id), "output_guardrail_violation",
+                            {"violations": output_violations},
+                        )
 
                 # ── Record task-level Prometheus metrics ──
                 task_duration = (datetime.now(UTC) - task_start_time).total_seconds()

@@ -4,7 +4,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
-from app.models.guardrail import Guardrail, PromptGuardrailConfig, RequestGuardrailConfig
+from app.models.guardrail import Guardrail, OutputGuardrailConfig, PromptGuardrailConfig, RequestGuardrailConfig
 from app.schemas.guardrail import GuardrailCreate, GuardrailResponse, GuardrailUpdate
 
 router = APIRouter(prefix="/api/guardrails", tags=["guardrails"])
@@ -20,6 +20,7 @@ def _to_response(g: Guardrail) -> GuardrailResponse:
         enabled=g.enabled,
         prompt_config=g.prompt_config.model_dump() if g.prompt_config else None,
         request_config=g.request_config.model_dump() if g.request_config else None,
+        output_config=g.output_config.model_dump() if g.output_config else None,
         created_at=g.created_at,
         updated_at=g.updated_at,
     )
@@ -33,6 +34,9 @@ async def create_guardrail(body: GuardrailCreate, _user=Depends(get_current_user
     request_cfg = (
         RequestGuardrailConfig(**body.request_config.model_dump()) if body.request_config else None
     )
+    output_cfg = (
+        OutputGuardrailConfig(**body.output_config.model_dump()) if body.output_config else None
+    )
     guardrail = Guardrail(
         name=body.name,
         description=body.description,
@@ -41,6 +45,7 @@ async def create_guardrail(body: GuardrailCreate, _user=Depends(get_current_user
         enabled=body.enabled,
         prompt_config=prompt_cfg,
         request_config=request_cfg,
+        output_config=output_cfg,
     )
     await guardrail.insert()
     return _to_response(guardrail)
@@ -84,6 +89,10 @@ async def update_guardrail(
     if "request_config" in updates:
         rc = updates.pop("request_config")
         g.request_config = RequestGuardrailConfig(**rc) if rc else None
+
+    if "output_config" in updates:
+        oc = updates.pop("output_config")
+        g.output_config = OutputGuardrailConfig(**oc) if oc else None
 
     for k, v in updates.items():
         setattr(g, k, v)
