@@ -80,3 +80,63 @@ class TestParseTodoList:
     def test_list_input_ignored(self):
         result = _parse_todo_list([1, 2, 3])
         assert result is None
+
+
+# ── Auto-memory system prompt injection tests ────────────────────────────────
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.core.agent_engine import _build_system_prompt
+from app.models.agent import Agent
+from app.models.workflow import Workflow
+
+
+class TestAutoMemoryPromptInjection:
+    """Test that _build_system_prompt injects auto_memory instructions when enabled."""
+
+    @pytest.fixture
+    def mock_agent(self):
+        agent = MagicMock(spec=Agent)
+        agent.system_prompt = "You are a helpful assistant."
+        return agent
+
+    @pytest.fixture
+    def mock_workflow_auto_memory_on(self):
+        wf = MagicMock(spec=Workflow)
+        wf.auto_memory = True
+        return wf
+
+    @pytest.fixture
+    def mock_workflow_auto_memory_off(self):
+        wf = MagicMock(spec=Workflow)
+        wf.auto_memory = False
+        return wf
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_enabled_injects_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Should include auto_memory_policy when workflow.auto_memory is True."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        assert "<auto_memory_policy>" in prompt
+        assert "store_memory" in prompt
+        assert "snake_case" in prompt
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_disabled_no_policy(self, mock_agent, mock_workflow_auto_memory_off):
+        """Should NOT include auto_memory_policy when workflow.auto_memory is False."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_off)
+        assert "<auto_memory_policy>" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_preserves_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Auto-memory policy should appear alongside the execution policy."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        assert "<execution_policy>" in prompt
+        assert "<auto_memory_policy>" in prompt
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_after_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+        """Auto-memory policy should come after execution policy."""
+        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        exec_pos = prompt.index("<execution_policy>")
+        auto_pos = prompt.index("<auto_memory_policy>")
+        assert auto_pos > exec_pos

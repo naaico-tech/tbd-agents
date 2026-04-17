@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from datetime import UTC, datetime
 
 import httpx
@@ -62,6 +63,7 @@ from app.observability import (
 from app.services import token_manager
 from app.services.copilot_client import build_client
 from app.services.knowledge_manager import knowledge_manager
+from app.services.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +168,9 @@ async def _build_system_prompt(
     skill_ids: list[str],
     workflow: Workflow,
     knowledge_context: str = "",
+    memory_context: str = "",
 ) -> str:
-    """Assemble the system prompt from agent config + skills + knowledge."""
+    """Assemble the system prompt from agent config + skills + knowledge + memories."""
     system_prompt = agent.system_prompt
 
     # Skills
@@ -186,6 +189,10 @@ async def _build_system_prompt(
     if knowledge_context:
         system_prompt += "\n\n" + knowledge_context
 
+    # Memories
+    if memory_context:
+        system_prompt += "\n\n" + memory_context
+
     # Autonomous execution directive
     system_prompt += (
         "\n\n<execution_policy>"
@@ -197,6 +204,24 @@ async def _build_system_prompt(
         "actionable result."
         "\n</execution_policy>"
     )
+
+    # Auto-memory: instruct the agent to store learnings using store_memory tool
+    if workflow.auto_memory:
+        system_prompt += (
+            "\n\n<auto_memory_policy>"
+            "\nBefore completing your final response, reflect on this conversation and "
+            "use the store_memory tool to save any key learnings, decisions, user "
+            "preferences, or issues to avoid for future reference. Guidelines:"
+            "\n- Only store genuinely useful, persistent information"
+            "\n- Do NOT store trivial, obvious, or task-specific ephemeral details"
+            "\n- Do NOT duplicate information already present in your existing memories"
+            "\n- Use short snake_case keys (e.g. 'user_prefers_celsius', 'avoid_recursive_imports')"
+            "\n- Keep values concise (1-2 sentences max)"
+            "\n- Store at most 3 memories per task"
+            "\n- Use scope 'agent' for agent-specific learnings"
+            "\n- If there are no meaningful new learnings, do not call store_memory"
+            "\n</auto_memory_policy>"
+        )
 
     return system_prompt
 
@@ -373,6 +398,105 @@ async def _connect_mcp_and_list_tools(
             logger.warning("Failed to connect MCP server '%s' for BYOK tools: %s", server_name, exc)
 
     return openai_tools, tool_server_map
+
+
+async def _handle_store_memory(agent_id: str, arguments: dict) -> str:
+    """Handle the store_memory built-in tool call."""
+    from app.models.memory import MemoryScope
+
+    key = arguments.get("key", "")
+    value = arguments.get("value", "")
+    scope = arguments.get("scope", "agent")
+    metadata = arguments.get("metadata", {})
+
+    if not key or not value:
+        return json.dumps({"error": "Both 'key' and 'value' are required"})
+
+    try:
+        scope_enum = MemoryScope(scope)
+    except ValueError:
+        return json.dumps({"error": f"Invalid scope '{scope}'. Use: session, agent, global"})
+
+    mem = await memory_manager.store(
+        agent_id=agent_id,
+        scope=scope_enum,
+        key=key,
+        value=value,
+        metadata=metadata,
+    )
+    return json.dumps({"status": "stored", "key": mem.key, "scope": mem.scope})
+
+
+# OpenAI-format tool definition for store_memory
+STORE_MEMORY_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": "store_memory",
+        "description": (
+            "Save a key-value memory for future reference across conversations. "
+            "Use this to remember important facts, decisions, user preferences, "
+            "or context that should persist."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "A short descriptive key for the memory",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The content to remember",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["session", "agent", "global"],
+                    "description": "Memory scope: session (this workflow), agent (this agent), global (all agents)",
+                    "default": "agent",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Optional metadata tags",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    },
+}
+
+# Claude-format tool definition for store_memory
+STORE_MEMORY_TOOL_CLAUDE = {
+    "type": "custom",
+    "name": "store_memory",
+    "description": (
+        "Save a key-value memory for future reference across conversations. "
+        "Use this to remember important facts, decisions, user preferences, "
+        "or context that should persist."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string",
+                "description": "A short descriptive key for the memory",
+            },
+            "value": {
+                "type": "string",
+                "description": "The content to remember",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["session", "agent", "global"],
+                "description": "Memory scope: session (this workflow), agent (this agent), global (all agents)",
+            },
+            "metadata": {
+                "type": "object",
+                "description": "Optional metadata tags",
+            },
+        },
+        "required": ["key", "value"],
+    },
+}
 
 
 async def _execute_mcp_tool(
@@ -641,6 +765,8 @@ async def _run_with_claude_sdk(
             )
 
         # ── Build agent tools list ───────────────────────────────────────────
+        # Add store_memory as a custom tool
+        custom_tools.append(STORE_MEMORY_TOOL_CLAUDE)
         agent_tools = _build_claude_agent_tools(
             native_mcp_servers, custom_tools, builtin_tools=builtin_tools,
         )
@@ -737,10 +863,15 @@ async def _run_with_claude_sdk(
                     )
                     tool_calls_total.labels(tool_name=tool_name).inc()
 
-                    # Execute via local MCP session
-                    tool_result = await _execute_mcp_tool(
-                        tool_name, tool_args, tool_server_map,
-                    )
+                    # Execute — built-in memory tool or local MCP session
+                    if tool_name == "store_memory":
+                        tool_result = await _handle_store_memory(
+                            workflow.agent_id, tool_args
+                        )
+                    else:
+                        tool_result = await _execute_mcp_tool(
+                            tool_name, tool_args, tool_server_map,
+                        )
                     await _log(
                         workflow, "tool_result", f"{tool_name} completed", task_exec,
                         tool_output=tool_result[:500],
@@ -988,6 +1119,9 @@ async def _run_with_custom_provider(
                     task_exec,
                 )
 
+        # Always add the store_memory built-in tool
+        openai_tools.append(STORE_MEMORY_TOOL_OPENAI)
+
         await _log(
             workflow,
             "model_call",
@@ -1043,10 +1177,15 @@ async def _run_with_custom_provider(
                             tool_input=json.dumps(tool_args)[:500],
                         )
 
-                        # Execute the tool via MCP
-                        tool_result = await _execute_mcp_tool(
-                            tool_name, tool_args, tool_server_map
-                        )
+                        # Execute the tool — built-in memory or MCP
+                        if tool_name == "store_memory":
+                            tool_result = await _handle_store_memory(
+                                workflow.agent_id, tool_args
+                            )
+                        else:
+                            tool_result = await _execute_mcp_tool(
+                                tool_name, tool_args, tool_server_map
+                            )
 
                         await _log(
                             workflow, "tool_result", f"{tool_name} completed", task_exec,
@@ -1364,7 +1503,34 @@ async def run_agent(
                 task_exec,
             )
 
-    system_prompt = await _build_system_prompt(agent, workflow.skill_ids, workflow, knowledge_context)
+    # ── Memory context ───────────────────────────────────────────────────────
+    memory_context = ""
+    if getattr(workflow, "bypass_memory", False):
+        await _log(
+            workflow,
+            "memories_skipped",
+            "Memory injection bypassed (workflow setting)",
+            task_exec,
+        )
+    else:
+        try:
+            memory_context = await memory_manager.build_memory_context(
+                agent_id=str(agent.id),
+                workflow_id=str(workflow.id),
+            )
+            if memory_context:
+                await _log(
+                    workflow,
+                    "memories_loaded",
+                    "Agent memories injected into context",
+                    task_exec,
+                )
+        except Exception as exc:
+            logger.warning("Failed to load memories for agent %s: %s", agent.id, exc)
+
+    system_prompt = await _build_system_prompt(
+        agent, workflow.skill_ids, workflow, knowledge_context, memory_context
+    )
 
     # Sync repository if configured
     repo_path = await _sync_repo(workflow)
@@ -1387,7 +1553,7 @@ async def run_agent(
     if custom_provider and custom_provider_key:
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
-            return await _run_with_claude_sdk(
+            result = await _run_with_claude_sdk(
                 workflow,
                 user_prompt,
                 system_prompt,
@@ -1408,6 +1574,24 @@ async def run_agent(
             mcp_config=mcp_config,
             allowed_tools_set=allowed_tools_set,
         )
+
+    # ── Inject memory MCP server for Copilot SDK path ──────────────────────
+    # The Copilot SDK only supports MCP-based tools (no custom tool defs).
+    # Expose store_memory via a lightweight stdio MCP server subprocess so the
+    # model can store memories when bypass_memory is off.
+    if not getattr(workflow, "bypass_memory", False):
+        mcp_config["__memory__"] = {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "app.core.memory_mcp_server"],
+            "env": {
+                **os.environ,
+                "AGENT_ID": str(agent.id),
+                "API_BASE_URL": settings.api_base_url,
+                "API_TOKEN": github_token,
+            },
+            "tools": ["*"],
+        }
 
     # ── Usage tracking state ──
     usage = UsageStats()

@@ -7,6 +7,7 @@ from app.models.guardrail import Guardrail
 from app.models.knowledge_item import KnowledgeItem
 from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
+from app.models.memory import Memory
 from app.models.provider import Provider
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
@@ -20,6 +21,6 @@ async def init_db() -> None:
         database=client[settings.mongo_db_name],
         document_models=[
             Agent, Guardrail, KnowledgeItem, KnowledgeSource, McpServer,
-            Provider, Skill, TaskExecution, Token, Workflow,
+            Memory, Provider, Skill, TaskExecution, Token, Workflow,
         ],
     )

@@ -14,6 +14,7 @@ from app.api.routes import (
     knowledge_items,
     knowledge_sources,
     mcps,
+    memories,
     models,
     providers,
     skills,
@@ -23,6 +24,7 @@ from app.api.routes import (
 )
 from app.db import init_db
 from app.observability import init_telemetry
+from app.services import memory_stm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,7 +37,18 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized.")
+
+    # Warm up Short-Term Memory cache from MongoDB → Redis
+    try:
+        count = await memory_stm.warmup_all_agents()
+        logger.info("STM warmup loaded %d agent(s) into Redis.", count)
+    except Exception as exc:
+        logger.warning("STM warmup failed (non-fatal): %s", exc)
+
     yield
+
+    # Graceful shutdown: close STM Redis connection
+    await memory_stm.close()
 
 
 app = FastAPI(
@@ -56,6 +69,7 @@ app.include_router(providers.router)
 app.include_router(skills.router)
 app.include_router(knowledge_sources.router)
 app.include_router(knowledge_items.router)
+app.include_router(memories.router)
 app.include_router(mcps.router)
 app.include_router(models.router)
 app.include_router(tokens.router)

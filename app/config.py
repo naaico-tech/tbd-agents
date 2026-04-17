@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     session_timeout: int = 600
     # Redis URL for Celery broker/backend and event bus pub/sub
     redis_url: str = "redis://redis:6379/0"
+    # Short-Term Memory: max recent memories per agent cached in Redis
+    stm_max_entries: int = 20
+    # Long-Term Memory: max memories per agent stored in MongoDB (0 = unlimited)
+    ltm_max_entries: int = 200
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None
@@ -19,6 +23,8 @@ class Settings(BaseSettings):
     otel_endpoint: str = "http://otel-collector:4317"
     otel_http_endpoint: str = "http://otel-collector:4318"
     otel_service_name: str = "tbd-agents"
+    # Internal API base URL (used by memory MCP server subprocess)
+    api_base_url: str = "http://app:8000"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

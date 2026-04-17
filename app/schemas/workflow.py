@@ -21,6 +21,8 @@ class WorkflowCreate(BaseModel):
     model: str | None = None
     skill_ids: list[str] = []
     infinite_session: bool = True
+    bypass_memory: bool = False  # Skip memory injection during task runs
+    auto_memory: bool = False  # Auto-extract memories after task completion
     reasoning_effort: str | None = None  # low | medium | high
     guardrail_ids: list[str] = []  # Explicitly selected guardrail IDs
     guardrail_tags: list[str] = []  # Tag-based guardrail selection
@@ -37,6 +39,8 @@ class WorkflowUpdate(BaseModel):
     model: str | None = None
     skill_ids: list[str] | None = None
     infinite_session: bool | None = None
+    bypass_memory: bool | None = None
+    auto_memory: bool | None = None
     reasoning_effort: str | None = None
     guardrail_ids: list[str] | None = None
     guardrail_tags: list[str] | None = None
@@ -92,6 +96,8 @@ class WorkflowResponse(BaseModel):
     status: str
     output_format: str
     infinite_session: bool = True
+    bypass_memory: bool = False
+    auto_memory: bool = False
     reasoning_effort: str | None = None
     guardrail_ids: list[str] = []
     guardrail_tags: list[str] = []
