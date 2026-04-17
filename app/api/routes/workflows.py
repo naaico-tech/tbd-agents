@@ -1,3 +1,5 @@
+import json as _json
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -196,21 +198,47 @@ async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
 
 
 @router.get("/{workflow_id}/stream")
-async def stream_workflow(workflow_id: str, request: Request):
-    """SSE endpoint — streams real-time log/message/usage/status events."""
+async def stream_workflow(
+    workflow_id: str,
+    request: Request,
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+):
+    """SSE endpoint — streams real-time log/message/usage/status events.
+
+    Supports reconnection via the ``Last-Event-ID`` header: on reconnect the
+    server replays any events the client missed before switching to live
+    streaming.
+    """
     wf = await Workflow.get(PydanticObjectId(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
+    # Parse Last-Event-ID to an integer (ignore invalid values)
+    resume_id: int | None = None
+    if last_event_id is not None:
+        try:
+            resume_id = int(last_event_id)
+        except (ValueError, TypeError):
+            pass
+
     async def event_generator():
         try:
-            async for payload in event_bus.subscribe(workflow_id):
+            async for payload in event_bus.subscribe(workflow_id, last_event_id=resume_id):
                 if await request.is_disconnected():
                     break
                 if payload is None:
                     yield ": keepalive\n\n"
                 else:
-                    yield f"data: {payload}\n\n"
+                    # Extract event ID for the SSE id: field
+                    try:
+                        evt = _json.loads(payload)
+                        event_id = evt.get("id")
+                        if event_id is not None:
+                            yield f"id: {event_id}\ndata: {payload}\n\n"
+                        else:
+                            yield f"data: {payload}\n\n"
+                    except Exception:
+                        yield f"data: {payload}\n\n"
         except Exception:
             pass
 

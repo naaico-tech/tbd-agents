@@ -34,7 +34,7 @@ class TestSSEStreaming:
             None,  # signals end
         ]
 
-        async def fake_subscribe(workflow_id):
+        async def fake_subscribe(workflow_id, last_event_id=None):
             for evt in events_to_deliver:
                 if evt is None:
                     return
@@ -67,7 +67,7 @@ class TestSSEStreaming:
         wf = await create_workflow(agent)
         wf_id = str(wf.id)
 
-        async def fake_subscribe(workflow_id):
+        async def fake_subscribe(workflow_id, last_event_id=None):
             yield None  # keepalive
             yield json.dumps({"type": "status", "data": {"status": "completed"}})
 
@@ -77,6 +77,35 @@ class TestSSEStreaming:
         assert resp.status_code == 200
         # Keepalive lines start with ":"
         assert ": keepalive" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_stream_resumes_with_last_event_id(self, app_client: httpx.AsyncClient):
+        """Sending Last-Event-ID header passes resume_id to subscribe."""
+        agent = await create_agent()
+        wf = await create_workflow(agent)
+        wf_id = str(wf.id)
+
+        captured_args: dict = {}
+
+        async def fake_subscribe(workflow_id, last_event_id=None):
+            captured_args["workflow_id"] = workflow_id
+            captured_args["last_event_id"] = last_event_id
+            # Replay one "missed" event then a live event
+            yield json.dumps({"id": 5, "type": "log", "data": {"replayed": True}})
+            yield json.dumps({"id": 6, "type": "status", "data": {"status": "completed"}})
+
+        with patch("app.core.event_bus.subscribe", side_effect=fake_subscribe):
+            resp = await app_client.get(
+                f"/api/workflows/{wf_id}/stream",
+                headers={"Last-Event-ID": "4"},
+            )
+
+        assert resp.status_code == 200
+        assert captured_args["last_event_id"] == 4
+
+        # Verify replayed event has an id: field in SSE output
+        assert "id: 5" in resp.text
+        assert "id: 6" in resp.text
 
     @pytest.mark.asyncio
     async def test_prompt_triggers_task_and_returns_running(
