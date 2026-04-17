@@ -1,0 +1,122 @@
+groups:
+  - name: tbd-agents-alerts
+    rules:
+      # ── Task Failures ─────────────────────────────────────────────────
+      - alert: HighTaskFailureRate
+        expr: |
+          (
+            sum(rate(copilot_hub_agent_tasks_total{status="failed"}[5m]))
+            /
+            sum(rate(copilot_hub_agent_tasks_total[5m]))
+          ) > 0.25
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent task failure rate above 25%"
+          description: >-
+            More than 25% of agent tasks have failed over the last 5 minutes.
+            Current failure rate: {{ $value | humanizePercentage }}.
+
+      - alert: NoTaskCompletions
+        expr: |
+          sum(rate(copilot_hub_agent_tasks_total{status="completed"}[15m])) == 0
+          and
+          sum(rate(copilot_hub_agent_tasks_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No tasks completing despite submissions"
+          description: >-
+            Tasks are being submitted but none have completed in 15 minutes.
+
+      # ── Cost Spikes ───────────────────────────────────────────────────
+      - alert: CostSpikeHourly
+        expr: |
+          sum(increase(copilot_hub_cost_dollars_total[1h])) > 50
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hourly LLM cost exceeded $50"
+          description: >-
+            LLM spend in the last hour: ${{ $value | printf "%.2f" }}.
+
+      - alert: CostSpikeDaily
+        expr: |
+          sum(increase(copilot_hub_cost_dollars_total[24h])) > 500
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Daily LLM cost exceeded $500"
+          description: >-
+            LLM spend in the last 24 hours: ${{ $value | printf "%.2f" }}.
+
+      # ── Queue Depth ───────────────────────────────────────────────────
+      - alert: CeleryQueueBacklog
+        expr: copilot_hub_celery_queue_length > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery queue backlog exceeds 10 tasks"
+          description: >-
+            {{ $value }} tasks waiting in the Celery queue for over 5 minutes.
+
+      - alert: CeleryQueueCritical
+        expr: copilot_hub_celery_queue_length > 50
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Celery queue backlog exceeds 50 tasks"
+          description: >-
+            {{ $value }} tasks waiting — workers may be down or overwhelmed.
+
+      # ── Worker Health ──────────────────────────────────────────────────
+      - alert: WorkerDown
+        expr: up{job="celery-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Celery worker metrics endpoint unreachable"
+          description: >-
+            The worker Prometheus endpoint has been down for over 2 minutes.
+
+      - alert: AppDown
+        expr: up{job="fastapi"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FastAPI app metrics endpoint unreachable"
+          description: >-
+            The API Prometheus endpoint has been down for over 2 minutes.
+
+      # ── Task Duration ──────────────────────────────────────────────────
+      - alert: SlowTaskExecution
+        expr: |
+          histogram_quantile(0.95,
+            rate(copilot_hub_agent_task_duration_seconds_bucket[10m])
+          ) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 task duration exceeds 5 minutes"
+          description: >-
+            The 95th percentile task duration is {{ $value | humanizeDuration }}.
+
+      # ── SSE Connections ────────────────────────────────────────────────
+      - alert: HighSSEConnections
+        expr: copilot_hub_sse_connections_active > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 100 active SSE connections"
+          description: >-
+            {{ $value }} SSE connections active — may indicate connection leaks.
