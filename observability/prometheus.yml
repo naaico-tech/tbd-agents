@@ -13,3 +13,9 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["app:8000"]
+
+  # Celery worker metrics (prometheus_client HTTP server)
+  - job_name: celery-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9101"]

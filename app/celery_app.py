@@ -4,11 +4,16 @@ Start a worker with:
     celery -A app.celery_app worker --loglevel=info --concurrency=4
 """
 
+import logging
+import os
+
 from celery import Celery
 from celery.signals import worker_process_init
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 celery = Celery(
     "copilot_agent_hub",
@@ -37,8 +42,23 @@ celery.autodiscover_tasks(["app.tasks"])
 
 @worker_process_init.connect(weak=False)
 def _init_worker_telemetry(**_kwargs):
-    """Initialise OTEL tracing + Celery instrumentation in each worker process."""
+    """Initialise OTEL tracing, Celery instrumentation, and Prometheus HTTP server."""
     from app.observability import init_telemetry
 
     init_telemetry()
     CeleryInstrumentor().instrument()
+
+    # Expose Prometheus metrics on an HTTP port so they can be scraped.
+    # Each worker process picks a port starting from WORKER_METRICS_PORT (default 9101).
+    # With concurrency=4 each forked process gets the same call, but
+    # start_http_server raises OSError if the port is taken, so we silently
+    # skip subsequent forks.
+    try:
+        from prometheus_client import start_http_server
+
+        port = int(os.environ.get("WORKER_METRICS_PORT", "9101"))
+        start_http_server(port)
+        logger.info("Worker Prometheus metrics server started on :%d", port)
+    except OSError:
+        # Port already bound by another worker process — expected with prefork.
+        pass
