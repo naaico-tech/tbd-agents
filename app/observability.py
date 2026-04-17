@@ -50,7 +50,6 @@ agent_tasks_total = Counter(
 agent_tasks_active = Gauge(
     "copilot_hub_agent_tasks_active",
     "Currently running agent tasks",
-    multiprocess_mode="livesum",
 )
 
 agent_task_duration_seconds = Histogram(
@@ -101,13 +100,11 @@ repo_sync_duration_seconds = Histogram(
 sse_connections_active = Gauge(
     "copilot_hub_sse_connections_active",
     "Active SSE connections",
-    multiprocess_mode="livesum",
 )
 
 celery_queue_length = Gauge(
     "copilot_hub_celery_queue_length",
     "Number of tasks waiting in the Celery queue",
-    multiprocess_mode="liveall",
 )
 
 

@@ -64,7 +64,6 @@ services:
       - OTEL_SERVICE_NAME=tbd-agents-worker
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
       - WORKER_METRICS_PORT=9101
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     expose:
       - "9101"
     depends_on:

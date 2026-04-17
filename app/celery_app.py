@@ -49,18 +49,14 @@ def _init_worker_telemetry(**_kwargs):
     CeleryInstrumentor().instrument()
 
     # Expose Prometheus metrics on an HTTP port so they can be scraped.
-    # PROMETHEUS_MULTIPROC_DIR must be set (see docker-compose.yml) so that
-    # metrics recorded in every forked worker process are aggregated by a
-    # single MultiProcessCollector.  Only the first process can bind the
-    # port; subsequent forks skip via the OSError handler.
+    # Only the first forked process can bind the port; subsequent forks
+    # hit OSError which is silently skipped.  This means scraped metrics
+    # come from a single worker process — acceptable for now.
     try:
-        from prometheus_client import CollectorRegistry, start_http_server
-        from prometheus_client.multiprocess import MultiProcessCollector
+        from prometheus_client import start_http_server
 
         port = int(os.environ.get("WORKER_METRICS_PORT", "9101"))
-        registry = CollectorRegistry()
-        MultiProcessCollector(registry)
-        start_http_server(port, registry=registry)
+        start_http_server(port)
         logger.info("Worker Prometheus metrics server started on :%d", port)
     except OSError:
         # Port already bound by another worker process — expected with prefork.

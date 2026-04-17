@@ -197,34 +197,30 @@ class TestCeleryQueuePoller:
 
 
 class TestWorkerMetricsServer:
-    """_init_worker_telemetry starts a prometheus_client HTTP server with multiprocess collector."""
+    """_init_worker_telemetry starts a prometheus_client HTTP server."""
 
     def test_starts_metrics_server_on_configured_port(self):
         with (
             patch("app.observability.init_telemetry"),
             patch("app.celery_app.CeleryInstrumentor") as MockInstr,
-            patch.dict("os.environ", {"WORKER_METRICS_PORT": "9199", "PROMETHEUS_MULTIPROC_DIR": "/tmp/test_prom"}),
+            patch.dict("os.environ", {"WORKER_METRICS_PORT": "9199"}),
             patch("prometheus_client.start_http_server") as mock_start,
-            patch("prometheus_client.multiprocess.MultiProcessCollector"),
         ):
             MockInstr.return_value.instrument = MagicMock()
             from app.celery_app import _init_worker_telemetry
 
             _init_worker_telemetry()
-            mock_start.assert_called_once()
-            # First arg is port, second is the custom registry
-            assert mock_start.call_args[0][0] == 9199
+            mock_start.assert_called_once_with(9199)
 
     def test_silently_handles_port_already_bound(self):
         with (
             patch("app.observability.init_telemetry"),
             patch("app.celery_app.CeleryInstrumentor") as MockInstr,
-            patch.dict("os.environ", {"WORKER_METRICS_PORT": "9101", "PROMETHEUS_MULTIPROC_DIR": "/tmp/test_prom"}),
+            patch.dict("os.environ", {"WORKER_METRICS_PORT": "9101"}),
             patch(
                 "prometheus_client.start_http_server",
                 side_effect=OSError("Address already in use"),
             ),
-            patch("prometheus_client.multiprocess.MultiProcessCollector"),
         ):
             MockInstr.return_value.instrument = MagicMock()
             from app.celery_app import _init_worker_telemetry
