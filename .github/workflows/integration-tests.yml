@@ -1,0 +1,75 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'docker-compose.test.yml'
+      - '.github/workflows/integration-tests.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'docker-compose.test.yml'
+      - '.github/workflows/integration-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGO_URI: mongodb://localhost:27018
+      REDIS_URL: redis://localhost:6380
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Run integration tests
+        env:
+          TEST_MONGO_URI: mongodb://localhost:27018
+          TOKEN_ENCRYPTION_KEY: M6x0gSx-0KcqQyAdkG0eS5ja8CtmSlFZf62WtGKKZXM=
+        run: pytest tests/integration/ -v --tb=short -x
+
+      - name: Run unit tests
+        run: pytest tests/ --ignore=tests/integration -v --tb=short

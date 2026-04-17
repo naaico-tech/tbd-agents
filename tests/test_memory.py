@@ -406,16 +406,13 @@ class TestMemoryManager:
 
 class TestMemoryRoutes:
     @pytest.fixture()
-    def _auth(self):
-        with patch(
-            "app.api.deps.get_current_user",
-            return_value={"login": "testuser"},
-        ):
-            yield
+    def client(self, app_client):
+        from app.api.deps import get_current_user
+        from app.main import app
 
-    @pytest.fixture()
-    def client(self, app_client, _auth):
-        return app_client
+        app.dependency_overrides[get_current_user] = lambda: {"login": "testuser"}
+        yield app_client
+        app.dependency_overrides.pop(get_current_user, None)
 
     def test_create_memory(self, client):
         mock_mem = MagicMock()

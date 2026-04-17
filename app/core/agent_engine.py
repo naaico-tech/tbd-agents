@@ -1857,7 +1857,7 @@ async def run_agent(
     if custom_provider and custom_provider_key:
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
-            result = await _run_with_claude_sdk(
+            return await _run_with_claude_sdk(
                 workflow,
                 user_prompt,
                 system_prompt,
