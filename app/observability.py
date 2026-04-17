@@ -110,6 +110,11 @@ celery_queue_length = Gauge(
     multiprocess_mode="liveall",
 )
 
+celery_queue_length = Gauge(
+    "copilot_hub_celery_queue_length",
+    "Number of tasks waiting in the Celery queue",
+)
+
 
 # ── Telemetry initialisation ────────────────────────────────────────────────
 
