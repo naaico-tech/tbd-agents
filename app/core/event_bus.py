@@ -124,26 +124,52 @@ async def subscribe(
     higher ID before switching to live pub/sub — ensuring no events are lost
     on reconnection.
 
+    To avoid dropping events published between the history read and the
+    subscribe call, we establish the pub/sub subscription *first*, then
+    replay from history, and finally switch to live — deduplicating any
+    events that arrive in both the replay and the live stream.
+
     Yields JSON payload strings, or None on timeout (for keepalive signalling).
     Automatically cleans up the subscription when the generator is closed.
     """
-    # ── Replay missed events ─────────────────────────────────────────────────
-    if last_event_id is not None:
-        missed = await get_events_since(workflow_id, last_event_id)
-        for payload in missed:
-            yield payload
-
-    # ── Live subscription ────────────────────────────────────────────────────
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     pubsub = r.pubsub()
     await pubsub.subscribe(_channel(workflow_id))
+
+    # Track the highest replayed ID so live events can be deduplicated
+    seen_up_to: int = 0
+
     try:
+        # ── Replay missed events ─────────────────────────────────────────
+        if last_event_id is not None:
+            missed = await get_events_since(workflow_id, last_event_id)
+            for payload in missed:
+                yield payload
+                try:
+                    evt = json.loads(payload)
+                    eid = evt.get("id", 0)
+                    if eid > seen_up_to:
+                        seen_up_to = eid
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # ── Live subscription ────────────────────────────────────────────
         while True:
             msg = await pubsub.get_message(
                 ignore_subscribe_messages=True, timeout=30.0
             )
             if msg is not None:
-                yield msg["data"]
+                data = msg["data"]
+                # Deduplicate against replayed events
+                if seen_up_to:
+                    try:
+                        evt = json.loads(data)
+                        if evt.get("id", 0) <= seen_up_to:
+                            continue
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    seen_up_to = 0  # done deduplicating
+                yield data
             else:
                 yield None  # keepalive signal
     finally:

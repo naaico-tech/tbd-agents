@@ -4,7 +4,12 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
-from app.models.guardrail import Guardrail, OutputGuardrailConfig, PromptGuardrailConfig, RequestGuardrailConfig
+from app.models.guardrail import (
+    Guardrail,
+    OutputGuardrailConfig,
+    PromptGuardrailConfig,
+    RequestGuardrailConfig,
+)
 from app.schemas.guardrail import GuardrailCreate, GuardrailResponse, GuardrailUpdate
 
 router = APIRouter(prefix="/api/guardrails", tags=["guardrails"])

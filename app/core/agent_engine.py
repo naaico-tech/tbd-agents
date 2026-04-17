@@ -1233,7 +1233,12 @@ async def _run_with_claude_sdk(
         if final_text:
             output_violations = await enforce_output_guardrails(workflow, final_text)
             if output_violations:
-                await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                await _log(
+                    workflow,
+                    "output_guardrail_violation",
+                    "; ".join(output_violations),
+                    task_exec,
+                )
                 await event_bus.publish(
                     str(workflow.id), "output_guardrail_violation",
                     {"violations": output_violations},
@@ -1556,7 +1561,12 @@ async def _run_with_custom_provider(
         if final_text:
             output_violations = await enforce_output_guardrails(workflow, final_text)
             if output_violations:
-                await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                await _log(
+                    workflow,
+                    "output_guardrail_violation",
+                    "; ".join(output_violations),
+                    task_exec,
+                )
                 await event_bus.publish(
                     str(workflow.id), "output_guardrail_violation",
                     {"violations": output_violations},
@@ -2283,7 +2293,12 @@ async def run_agent(
                 if final_text:
                     output_violations = await enforce_output_guardrails(workflow, final_text)
                     if output_violations:
-                        await _log(workflow, "output_guardrail_violation", "; ".join(output_violations), task_exec)
+                        await _log(
+                            workflow,
+                            "output_guardrail_violation",
+                            "; ".join(output_violations),
+                            task_exec,
+                        )
                         await event_bus.publish(
                             str(workflow.id), "output_guardrail_violation",
                             {"violations": output_violations},

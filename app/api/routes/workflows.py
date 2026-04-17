@@ -1,3 +1,5 @@
+import json as _json
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -229,9 +231,12 @@ async def stream_workflow(
                 else:
                     # Extract event ID for the SSE id: field
                     try:
-                        evt = __import__("json").loads(payload)
-                        event_id = evt.get("id", "")
-                        yield f"id: {event_id}\ndata: {payload}\n\n"
+                        evt = _json.loads(payload)
+                        event_id = evt.get("id")
+                        if event_id is not None:
+                            yield f"id: {event_id}\ndata: {payload}\n\n"
+                        else:
+                            yield f"data: {payload}\n\n"
                     except Exception:
                         yield f"data: {payload}\n\n"
         except Exception:

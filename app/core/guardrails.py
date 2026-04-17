@@ -9,8 +9,11 @@ Request guardrails — validate the structured ``request`` dict against a
 Output guardrails  — validate the agent's response after execution (PII
                      detection, format enforcement, regex patterns).
 
-Raises ``fastapi.HTTPException(422)`` on the first violation encountered,
-with a detail message that identifies the failing guardrail and the reason.
+Prompt and request guardrails raise ``fastapi.HTTPException(422)`` on the
+first violation encountered, with a detail message that identifies the
+failing guardrail and the reason.  Output guardrails return a list of
+violation strings to the caller (the agent engine) which logs and publishes
+them rather than raising.
 """
 
 import json
@@ -113,9 +116,23 @@ def _check_request(request_data: dict, guardrail: Guardrail) -> None:
 # ── Common PII patterns ─────────────────────────────────────────────────────
 
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("email address", re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE)),
-    ("phone number", re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")),
-    ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+    (
+        "email address",
+        re.compile(
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "phone number",
+        re.compile(
+            r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
+        ),
+    ),
+    (
+        "SSN",
+        re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    ),
 ]
 
 
