@@ -14,6 +14,7 @@ import pytest
 from app.core.agent_engine import (
     _build_provider_headers,
     _compact_messages,
+    _compute_retry_delay,
     _http_post_with_retry,
     _resolve_provider_url,
     _stream_chat_completion,
@@ -92,6 +93,28 @@ class TestResolveProviderUrl:
         p = _make_provider(ProviderType.ANTHROPIC)
         assert _resolve_provider_url(p) == "https://api.anthropic.com/v1/chat/completions"
 
+    def test_azure_base_url_already_has_deployment(self):
+        """base_url already contains /openai/deployments/{dep} — should not duplicate."""
+        p = _make_provider(
+            ProviderType.AZURE_OPENAI,
+            base_url="https://myinstance.openai.azure.com/openai/deployments/gpt-4o",
+        )
+        url = _resolve_provider_url(p)
+        assert url == (
+            "https://myinstance.openai.azure.com/openai/deployments/gpt-4o"
+            "/chat/completions?api-version=2024-12-01-preview"
+        )
+
+    def test_azure_explicit_deployment_overrides_base_url_deployment(self):
+        """Explicit azure_deployment takes precedence over deployment in base_url."""
+        p = _make_provider(
+            ProviderType.AZURE_OPENAI,
+            base_url="https://myinstance.openai.azure.com/openai/deployments/old-dep",
+            azure_deployment="new-dep",
+        )
+        url = _resolve_provider_url(p)
+        assert "/deployments/new-dep/" in url
+
 
 # ── _build_provider_headers ──────────────────────────────────────────────────
 
@@ -125,7 +148,7 @@ class TestCompactMessages:
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
         ]
-        result = _compact_messages(msgs, "hi")
+        result = _compact_messages(msgs)
         assert result == msgs
 
     def test_compacts_large_list(self):
@@ -137,7 +160,7 @@ class TestCompactMessages:
             msgs.append({"role": "tool", "tool_call_id": f"tc_{i}", "content": f"result {i}"})
         # Total: 1 system + 1 user + 40 assistant/tool = 42
 
-        result = _compact_messages(msgs, "original question")
+        result = _compact_messages(msgs)
 
         # Should have: system + first user + compaction note + last 6
         assert len(result) == 9  # 1 + 1 + 1 + 6
@@ -152,7 +175,7 @@ class TestCompactMessages:
         for i in range(7):
             msgs.append({"role": "user" if i % 2 == 0 else "assistant", "content": str(i)})
         assert len(msgs) == 8
-        result = _compact_messages(msgs, "0")
+        result = _compact_messages(msgs)
         assert result == msgs
 
     def test_compaction_note_contains_count(self):
@@ -161,7 +184,7 @@ class TestCompactMessages:
         for i in range(10):
             msgs.append({"role": "assistant", "content": f"a{i}"})
         # 12 messages total, 2 head + 6 tail = 8, dropped = 4
-        result = _compact_messages(msgs, "q")
+        result = _compact_messages(msgs)
         note = [m for m in result if "compacted" in m.get("content", "").lower()]
         assert len(note) == 1
         assert "4" in note[0]["content"]
@@ -378,3 +401,60 @@ class TestStreamChatCompletion:
         assert len(delta_calls) == 2
         assert delta_calls[0][2]["delta"] == "Hi"
         assert delta_calls[1][2]["delta"] == "!"
+
+    @pytest.mark.asyncio
+    async def test_handles_data_without_space(self):
+        """SSE lines like 'data:{"choices":...}' (no space after colon) should be parsed."""
+        lines = [
+            'data:{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}',
+            'data:{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            "data:[DONE]",
+        ]
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.aclose = AsyncMock()
+
+        async def aiter_lines():
+            for line in lines:
+                yield line
+
+        mock_response.aiter_lines = aiter_lines
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.build_request.return_value = MagicMock()
+        client.send.return_value = mock_response
+
+        with patch("app.core.agent_engine.event_bus") as mock_bus:
+            mock_bus.publish = AsyncMock()
+            result = await _stream_chat_completion(
+                client, "http://test", {}, {"model": "gpt-4"}, "wf-123",
+            )
+
+        assert result["choices"][0]["message"]["content"] == "ok"
+
+
+# ── _compute_retry_delay ────────────────────────────────────────────────────
+
+
+class TestComputeRetryDelay:
+    def test_exponential_backoff_without_response(self):
+        assert _compute_retry_delay(0) == 1.0
+        assert _compute_retry_delay(1) == 2.0
+        assert _compute_retry_delay(2) == 4.0
+
+    def test_honours_retry_after_header(self):
+        resp = MagicMock(spec=httpx.Response)
+        resp.headers = {"Retry-After": "5.5"}
+        assert _compute_retry_delay(0, resp) == 5.5
+
+    def test_falls_back_on_invalid_retry_after(self):
+        resp = MagicMock(spec=httpx.Response)
+        resp.headers = {"Retry-After": "not-a-number"}
+        assert _compute_retry_delay(1, resp) == 2.0
+
+    def test_no_retry_after_header(self):
+        resp = MagicMock(spec=httpx.Response)
+        resp.headers = {}
+        assert _compute_retry_delay(2, resp) == 4.0

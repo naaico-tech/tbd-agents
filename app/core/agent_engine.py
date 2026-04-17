@@ -257,6 +257,18 @@ _RETRY_BASE_DELAY = 1.0  # seconds
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
+def _compute_retry_delay(attempt: int, response: httpx.Response | None = None) -> float:
+    """Compute retry delay, honouring Retry-After header when available."""
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+    return _RETRY_BASE_DELAY * (2 ** attempt)
+
+
 async def _http_post_with_retry(
     client: httpx.AsyncClient,
     url: str,
@@ -274,14 +286,7 @@ async def _http_post_with_retry(
                 response.raise_for_status()
                 return response
             # Retryable status — compute delay
-            retry_after = response.headers.get("Retry-After")
-            if retry_after:
-                try:
-                    delay = float(retry_after)
-                except ValueError:
-                    delay = _RETRY_BASE_DELAY * (2 ** attempt)
-            else:
-                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            delay = _compute_retry_delay(attempt, response)
             logger.warning(
                 "Provider returned %d, retrying in %.1fs (attempt %d/%d)",
                 response.status_code, delay, attempt + 1, max_retries,
@@ -293,7 +298,7 @@ async def _http_post_with_retry(
             last_exc = exc
             if attempt == max_retries:
                 raise
-            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            delay = _compute_retry_delay(attempt)
             logger.warning(
                 "Provider connection error: %s, retrying in %.1fs (attempt %d/%d)",
                 exc, delay, attempt + 1, max_retries,
@@ -325,8 +330,8 @@ async def _stream_chat_completion(
             req = client.build_request("POST", url, headers=headers, json=body)
             raw_response = await client.send(req, stream=True)
             if raw_response.status_code in _RETRYABLE_STATUS_CODES and attempt < _MAX_RETRIES:
+                delay = _compute_retry_delay(attempt, raw_response)
                 await raw_response.aclose()
-                delay = _RETRY_BASE_DELAY * (2 ** attempt)
                 logger.warning(
                     "Streaming: provider returned %d, retrying in %.1fs (attempt %d/%d)",
                     raw_response.status_code, delay, attempt + 1, _MAX_RETRIES,
@@ -341,7 +346,7 @@ async def _stream_chat_completion(
             last_exc = exc
             if attempt == _MAX_RETRIES:
                 raise
-            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            delay = _compute_retry_delay(attempt)
             await asyncio.sleep(delay)
 
     if raw_response is None:
@@ -355,10 +360,10 @@ async def _stream_chat_completion(
 
     try:
         async for line in raw_response.aiter_lines():
-            if not line.startswith("data: "):
+            if not line.startswith("data:"):
                 continue
-            payload = line[6:]
-            if payload.strip() == "[DONE]":
+            payload = line[len("data:"):].lstrip()
+            if payload == "[DONE]":
                 break
             try:
                 chunk = json.loads(payload)
@@ -442,7 +447,7 @@ def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
         }
 
 
-def _compact_messages(messages: list[dict], user_prompt: str) -> list[dict]:
+def _compact_messages(messages: list[dict]) -> list[dict]:
     """Compact message history by keeping system prompt, original user message, and recent context.
 
     Strategy:
@@ -492,15 +497,28 @@ def _resolve_provider_url(provider: Provider, model: str = "") -> str:
         )
     base = raw_url.rstrip("/")
     if provider.provider_type == ProviderType.AZURE_OPENAI:
-        # Azure format: {base}/openai/deployments/{deployment}/chat/completions?api-version={ver}
-        deployment = provider.azure_deployment or model
+        # Support both Azure base_url formats:
+        #   - https://resource.openai.azure.com
+        #   - https://resource.openai.azure.com/openai/deployments/my-deploy
+        azure_deployments_path = "/openai/deployments/"
+        azure_resource_base = base
+        existing_deployment = ""
+        if azure_deployments_path in base:
+            azure_resource_base, deployment_suffix = base.split(azure_deployments_path, 1)
+            existing_deployment = deployment_suffix.strip("/").split("/", 1)[0]
+            azure_resource_base = azure_resource_base.rstrip("/")
+
+        deployment = provider.azure_deployment or model or existing_deployment
         if not deployment:
             raise ValueError(
                 f"Azure OpenAI provider '{provider.name}' requires a deployment name. "
                 "Set azure_deployment on the provider or use the workflow model field."
             )
         api_version = provider.azure_api_version
-        return f"{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+        return (
+            f"{azure_resource_base}/openai/deployments/{deployment}"
+            f"/chat/completions?api-version={api_version}"
+        )
     return base + "/chat/completions"
 
 
@@ -1218,25 +1236,32 @@ async def _run_with_custom_provider(
             task_exec,
         )
 
-        # Context compaction thresholds (approximate token-to-char ratio ~4 chars/token)
+        # Context compaction thresholds
+        # Approximate token count from serialized JSON (~4 chars per token)
         # Default context window: 128k tokens for modern models
         context_window = 128_000
         compaction_threshold = 0.80  # Start compacting at 80% of context window
+
+        def _estimate_message_tokens(message_list: list[dict]) -> int:
+            """Approximate prompt token count from serialized message payload."""
+            serialized = json.dumps(message_list, ensure_ascii=False, separators=(",", ":"))
+            return max(1, len(serialized) // 4)
 
         # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
             while True:
                 # ── Context compaction ───────────────────────────────────
-                # If accumulated input tokens exceed the compaction threshold,
+                # If the current request context exceeds the compaction threshold,
                 # prune older intermediate messages to free context space.
-                if total_input_tokens > context_window * compaction_threshold and len(messages) > 4:
+                current_prompt_tokens = _estimate_message_tokens(messages)
+                if current_prompt_tokens > context_window * compaction_threshold and len(messages) > 4:
                     await _log(
                         workflow, "compaction_start",
-                        f"Compacting context ({total_input_tokens} input tokens, "
+                        f"Compacting context ({current_prompt_tokens} estimated input tokens, "
                         f"{len(messages)} messages)",
                         task_exec,
                     )
-                    messages = _compact_messages(messages, user_prompt)
+                    messages = _compact_messages(messages)
                     await _log(
                         workflow, "compaction_complete",
                         f"Compacted to {len(messages)} messages",

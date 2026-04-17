@@ -4,7 +4,7 @@ icon: material/key-variant
 
 # BYOK Providers
 
-Bring Your Own Key (BYOK) lets you run agents against **any OpenAI-compatible provider** — OpenAI, Azure OpenAI, Anthropic, or a custom endpoint — using your own API keys. TBD Agents handles streaming, retries, context management, and tool orchestration identically to the built-in Copilot SDK path.
+Bring Your Own Key (BYOK) lets you run agents against **external LLM providers** — OpenAI, Azure OpenAI, Anthropic, or a custom endpoint — using your own API keys. TBD Agents handles streaming, retries, context management, and tool orchestration identically to the built-in Copilot SDK path.
 
 ## Supported Provider Types
 
@@ -12,7 +12,7 @@ Bring Your Own Key (BYOK) lets you run agents against **any OpenAI-compatible pr
 |---|---|
 | `openai` | OpenAI API (`api.openai.com`) or any compatible proxy |
 | `azure_openai` | Azure OpenAI Service with deployment-based routing |
-| `anthropic` | Anthropic Claude via the OpenAI-compatible API |
+| `anthropic` | Anthropic Claude via the Claude Agent SDK (`beta.agents/sessions`) |
 | `github_copilot` | Overrides the default GitHub token with a stored PAT |
 | `custom` | Any OpenAI-compatible endpoint — set `base_url` |
 
@@ -78,7 +78,7 @@ If `azure_deployment` is not set, the workflow's `model` field is used as the de
 
 ### Streaming
 
-All BYOK provider calls stream responses via SSE. Content deltas are published in real-time to the same event bus used by the Copilot SDK path — clients receive `message_delta` events identical to those from the built-in path.
+OpenAI, Azure OpenAI, and custom OpenAI-compatible providers stream responses via SSE. Anthropic providers stream via Claude Agent SDK events. In both cases, content deltas are published in real-time to the same event bus used by the Copilot SDK path — clients receive `message_delta` events identical to those from the built-in path.
 
 ### Retry & Error Handling
 
@@ -86,7 +86,7 @@ Transient errors are retried automatically with exponential backoff:
 
 - **Retryable status codes:** 429, 500, 502, 503, 504
 - **Retryable exceptions:** connection errors, read/write timeouts
-- **Max retries:** 3 attempts with exponential backoff (1s, 2s, 4s)
+- **Max retries:** 3 retries / 4 total attempts, with exponential backoff between retries (1s, 2s, 4s)
 - **Retry-After:** Honoured when the provider sends the header
 
 Non-retryable errors (e.g. 401, 403) fail immediately.

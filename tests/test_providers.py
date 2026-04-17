@@ -163,7 +163,10 @@ class TestBuildProviderRequest:
         )
         provider.azure_deployment = "gpt-4"
         url, headers, body = self._call(provider, api_key="azure-key-999")
-        assert "deployments/gpt-4" in url
+        assert (
+            url
+            == "https://myresource.openai.azure.com/openai/deployments/gpt-4/chat/completions?api-version=2024-12-01-preview"
+        )
         assert headers["api-key"] == "azure-key-999"
         assert "Authorization" not in headers
 
