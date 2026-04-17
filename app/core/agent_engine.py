@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from datetime import UTC, datetime
 
 import httpx
@@ -1573,6 +1574,24 @@ async def run_agent(
             mcp_config=mcp_config,
             allowed_tools_set=allowed_tools_set,
         )
+
+    # ── Inject memory MCP server for Copilot SDK path ──────────────────────
+    # The Copilot SDK only supports MCP-based tools (no custom tool defs).
+    # Expose store_memory via a lightweight stdio MCP server subprocess so the
+    # model can store memories when bypass_memory is off.
+    if not getattr(workflow, "bypass_memory", False):
+        mcp_config["__memory__"] = {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "app.core.memory_mcp_server"],
+            "env": {
+                **os.environ,
+                "AGENT_ID": str(agent.id),
+                "API_BASE_URL": settings.api_base_url,
+                "API_TOKEN": github_token,
+            },
+            "tools": ["*"],
+        }
 
     # ── Usage tracking state ──
     usage = UsageStats()
