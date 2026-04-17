@@ -52,7 +52,7 @@ jobs:
       TEST_MONGO_URI: mongodb://localhost:27018
       MONGO_URI: mongodb://localhost:27018
       REDIS_URL: redis://localhost:6380
-      ENCRYPTION_KEY: dGVzdC1lbmNyeXB0aW9uLWtleS0zMmJ5dGVzISE=
+      TOKEN_ENCRYPTION_KEY: M6x0gSx-0KcqQyAdkG0eS5ja8CtmSlFZf62WtGKKZXM=
 
     steps:
       - uses: actions/checkout@v4
