@@ -24,6 +24,8 @@ POST /api/providers
 | `provider_type` | string | Yes | One of: `github_copilot`, `openai`, `anthropic`, `azure_openai`, `custom` |
 | `api_key_token_name` | string | Yes | Name of the encrypted token storing the API key |
 | `base_url` | string | No | Override base URL (required for `azure_openai` and `custom`) |
+| `azure_api_version` | string | No | Azure OpenAI API version (default: `2024-12-01-preview`) |
+| `azure_deployment` | string | No | Azure deployment name (defaults to workflow model) |
 | `description` | string | No | Human-readable description |
 
 === "Anthropic (Claude Agent SDK)"
@@ -46,6 +48,19 @@ POST /api/providers
       "name": "openai-provider",
       "provider_type": "openai",
       "api_key_token_name": "openai-key"
+    }
+    ```
+
+=== "Azure OpenAI"
+
+    ```json
+    {
+      "name": "azure-provider",
+      "provider_type": "azure_openai",
+      "api_key_token_name": "azure-key",
+      "base_url": "https://myresource.openai.azure.com",
+      "azure_deployment": "gpt-4o",
+      "azure_api_version": "2024-12-01-preview"
     }
     ```
 

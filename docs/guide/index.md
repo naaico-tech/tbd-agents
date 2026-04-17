@@ -67,4 +67,12 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: Guardrails](guardrails.md)
 
+-   :material-key-variant:{ .lg .middle } **BYOK Providers**
+
+    ---
+
+    Bring your own API keys for OpenAI, Azure, Anthropic, or custom endpoints.
+
+    [:octicons-arrow-right-24: BYOK Providers](byok-providers.md)
+
 </div>

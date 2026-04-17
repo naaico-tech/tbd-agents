@@ -85,6 +85,7 @@ nav:
       - Streaming: guide/streaming.md
       - Knowledge Bases: guide/knowledge.md
       - Guardrails: guide/guardrails.md
+      - BYOK Providers: guide/byok-providers.md
   - Architecture:
       - architecture/index.md
       - System Overview: architecture/system-overview.md
