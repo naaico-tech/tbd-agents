@@ -10,6 +10,13 @@ Custom Prometheus metrics are exposed as module-level singletons so that
 import logging
 import os
 
+# Prometheus multiprocess mode requires the directory to exist before any
+# metric is instantiated at module level.  Create it here so that both the
+# FastAPI process and Celery fork workers never hit a FileNotFoundError.
+_mp_dir = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+if _mp_dir:
+    os.makedirs(_mp_dir, exist_ok=True)
+
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -108,11 +115,6 @@ celery_queue_length = Gauge(
     "copilot_hub_celery_queue_length",
     "Number of tasks waiting in the Celery queue",
     multiprocess_mode="liveall",
-)
-
-celery_queue_length = Gauge(
-    "copilot_hub_celery_queue_length",
-    "Number of tasks waiting in the Celery queue",
 )
 
 
