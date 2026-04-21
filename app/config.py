@@ -23,6 +23,21 @@ class Settings(BaseSettings):
     prompt_memory_char_budget: int = 4000
     prompt_context_item_char_limit: int = 1200
     prompt_context_max_items: int = 12
+    # Embeddings (fastembed, for semantic memory + knowledge retrieval)
+    embeddings_enabled: bool = True
+    embeddings_model: str = "BAAI/bge-small-en-v1.5"
+    embeddings_dim: int = 384  # auto-detected from model, but used for Qdrant collection creation
+    memory_retrieval_top_k: int = 8
+    knowledge_retrieval_top_k: int = 8
+    knowledge_chunk_chars: int = 1200
+    knowledge_chunk_overlap_chars: int = 150
+    # Conversation compaction
+    compaction_enabled: bool = True
+    compaction_token_threshold_pct: float = 0.75  # compact at 75% of context window
+    compaction_keep_recent_turns: int = 6
+    compaction_summary_max_chars: int = 1500
+    tool_result_clearing_enabled: bool = True
+    tool_result_clearing_keep_recent: int = 4
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None

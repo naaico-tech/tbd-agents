@@ -421,6 +421,107 @@ class TestMemoryManager:
             assert len(result) <= 250
             assert "..." in result
 
+    @pytest.mark.asyncio
+    async def test_build_memory_context_uses_semantic_when_query_provided(self, manager):
+        """When a query is provided and embeddings are enabled, semantic hits are used."""
+        semantic_hits = [
+            {"key": "semantic_fact", "scope": "agent", "value": "semantic match"},
+        ]
+
+        with (
+            patch.object(manager, "prune", new_callable=AsyncMock),
+            patch.object(manager, "search_semantic", new_callable=AsyncMock, return_value=semantic_hits) as mock_sem,
+            patch("app.services.memory_manager.settings") as mock_settings,
+        ):
+            mock_settings.embeddings_enabled = True
+            mock_settings.memory_retrieval_top_k = 8
+            mock_settings.prompt_context_max_items = 12
+            mock_settings.prompt_memory_char_budget = 4000
+            mock_settings.prompt_context_item_char_limit = 1200
+            result = await manager.build_memory_context("agent-1", query="find semantic fact")
+            mock_sem.assert_awaited_once()
+            assert "semantic match" in result
+
+    @pytest.mark.asyncio
+    async def test_build_memory_context_falls_back_to_stm_when_no_semantic_hits(self, manager):
+        """When semantic search returns nothing, STM is used as fallback."""
+        stm_entries = [{"key": "stm_key", "scope": "agent", "value": "stm_value"}]
+
+        with (
+            patch.object(manager, "prune", new_callable=AsyncMock),
+            patch.object(manager, "search_semantic", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "app.services.memory_manager.memory_stm.get_recent_memories",
+                new_callable=AsyncMock,
+                return_value=stm_entries,
+            ),
+            patch("app.services.memory_manager.settings") as mock_settings,
+        ):
+            mock_settings.embeddings_enabled = True
+            mock_settings.memory_retrieval_top_k = 8
+            mock_settings.prompt_context_max_items = 12
+            mock_settings.prompt_memory_char_budget = 4000
+            mock_settings.prompt_context_item_char_limit = 1200
+            result = await manager.build_memory_context("agent-1", query="something")
+            assert "stm_value" in result
+
+    @pytest.mark.asyncio
+    async def test_search_semantic_returns_empty_when_no_qdrant_url(self, manager):
+        """search_semantic returns [] when qdrant_url is not configured."""
+        with patch("app.services.memory_manager.settings") as mock_settings:
+            mock_settings.qdrant_url = None
+            mock_settings.embeddings_enabled = True
+            result = await manager.search_semantic("agent-1", "any query")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_search_semantic_returns_empty_when_embeddings_disabled(self, manager):
+        """search_semantic returns [] when embeddings are disabled."""
+        with patch("app.services.memory_manager.settings") as mock_settings:
+            mock_settings.qdrant_url = "http://qdrant:6333"
+            mock_settings.embeddings_enabled = False
+            result = await manager.search_semantic("agent-1", "any query")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_search_semantic_returns_empty_when_embed_fails(self, manager):
+        """search_semantic returns [] when embedding generation fails."""
+        with (
+            patch("app.services.memory_manager.settings") as mock_settings,
+            patch("app.services.memory_manager.embeddings_service") as mock_emb,
+        ):
+            mock_settings.qdrant_url = "http://qdrant:6333"
+            mock_settings.embeddings_enabled = True
+            mock_emb.embed_one = AsyncMock(return_value=None)
+            result = await manager.search_semantic("agent-1", "any query")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_store_auto_generates_embedding(self, manager):
+        """store() should call embeddings_service.embed_one when no embedding is supplied."""
+        with (
+            patch("app.services.memory_manager.settings") as mock_settings,
+            patch("app.services.memory_manager.embeddings_service") as mock_emb,
+            patch("app.services.memory_manager.Memory") as MockMemory,
+            patch("app.services.memory_manager.memory_stm.push_memory", new_callable=AsyncMock),
+            patch.object(manager, "_enforce_ltm_cap", new_callable=AsyncMock),
+            patch.object(manager, "_upsert_qdrant", new_callable=AsyncMock),
+        ):
+            mock_settings.embeddings_enabled = True
+            mock_emb.embed_one = AsyncMock(return_value=[0.1, 0.2, 0.3])
+
+            instance = MagicMock()
+            instance.insert = AsyncMock()
+            instance.key = "k"
+            instance.scope = MemoryScope.AGENT
+            instance.value = "v"
+            instance.updated_at = datetime.now(UTC)
+            MockMemory.return_value = instance
+            MockMemory.find_one = AsyncMock(return_value=None)
+
+            await manager.store("agent-1", MemoryScope.AGENT, "k", "v")
+            mock_emb.embed_one.assert_awaited_once_with("k: v")
+
 
 # ── Memory Routes ────────────────────────────────────────────────────────────
 

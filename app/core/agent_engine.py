@@ -67,6 +67,7 @@ from app.services import custom_tool_runner, token_manager
 from app.services.copilot_client import build_client
 from app.services.knowledge_manager import knowledge_manager
 from app.services.memory_manager import memory_manager
+from app.services.token_counter import count_tokens, estimate_messages_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -245,9 +246,9 @@ def _clip_prompt_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 3].rstrip() + "..."
 
 
-def _estimate_text_tokens(text: str) -> int:
-    """Approximate token count from plain text using a 4-char heuristic."""
-    return max(1, len(text) // 4) if text else 0
+def _estimate_text_tokens(text: str, model: str = "") -> int:
+    """Estimate token count for a text string using the best available counter."""
+    return count_tokens(text, model) if text else 0
 
 
 async def _update_progress(
@@ -615,20 +616,66 @@ def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
         }
 
 
-def _compact_messages(messages: list[dict]) -> list[dict]:
-    """Compact message history by keeping system prompt, original user message, and recent context.
+def _clear_old_tool_results(
+    messages: list[dict], keep_recent: int
+) -> tuple[list[dict], int]:
+    """Replace content of older tool-result messages with a short placeholder.
 
-    Strategy:
-      - Always keep the system message (index 0)
-      - Always keep the last 6 messages (recent context / tool interactions)
-      - Drop intermediate assistant/tool messages between them
-      - Insert a summary placeholder so the model knows context was truncated
+    Keeps the *keep_recent* most recent tool-call / tool-result pairs intact.
+    Returns the modified message list and the number of messages cleared.
     """
-    if len(messages) <= 8:
-        return messages  # Nothing to compact
+    # Identify tool-result message indices (oldest first)
+    tool_indices = [
+        i for i, m in enumerate(messages)
+        if m.get("role") == "tool"
+    ]
+    # Keep the last keep_recent tool results; clear the rest
+    to_clear = tool_indices[: max(0, len(tool_indices) - keep_recent)]
+    if not to_clear:
+        return messages, 0
+
+    cleared_msgs = list(messages)
+    for idx in to_clear:
+        orig = cleared_msgs[idx]
+        cleared_msgs[idx] = {
+            **orig,
+            "content": "[tool result cleared for context efficiency]",
+        }
+    return cleared_msgs, len(to_clear)
+
+
+def _compact_messages(
+    messages: list[dict],
+    model: str = "",
+    context_window: int = 128_000,
+    force: bool = False,
+) -> list[dict]:
+    """Compact message history to fit within the context window.
+
+    Two-pass strategy:
+      1. **Tool-result clearing**: replace content of older tool messages with
+         a short placeholder (preserves conversation structure).
+      2. **Head/tail truncation**: if still too long, keep system + first user
+         + recent turns and insert a compaction note.
+
+    Only triggers when message count > 8 or *force* is True.
+    """
+    if not force and len(messages) <= 8:
+        return messages
+
+    # Pass 1 — tool-result clearing
+    keep_recent_tool = settings.tool_result_clearing_keep_recent
+    if settings.tool_result_clearing_enabled:
+        messages, _cleared = _clear_old_tool_results(messages, keep_recent_tool)
+
+    # Re-check length after clearing
+    if not force and len(messages) <= 8:
+        return messages
+
+    keep_recent = settings.compaction_keep_recent_turns
 
     kept_head = [messages[0]]  # system prompt
-    # Find the first user message (usually index 1)
+    # Find the first user message
     first_user_idx = 1
     for i, m in enumerate(messages[1:], start=1):
         if m.get("role") == "user":
@@ -636,11 +683,14 @@ def _compact_messages(messages: list[dict]) -> list[dict]:
             break
     kept_head.append(messages[first_user_idx])
 
-    # Keep the last 6 messages (recent exchanges)
-    kept_tail = messages[-6:]
+    # Keep the last N turns
+    tail_start = max(len(kept_head), len(messages) - keep_recent)
+    kept_tail = messages[tail_start:]
 
-    # Insert a compaction marker
     dropped_count = len(messages) - len(kept_head) - len(kept_tail)
+    if dropped_count <= 0:
+        return messages
+
     compaction_note = {
         "role": "system",
         "content": (
@@ -1639,15 +1689,12 @@ async def _run_with_custom_provider(
         )
 
         # Context compaction thresholds
-        # Approximate token count from serialized JSON (~4 chars per token)
-        # Default context window: 128k tokens for modern models
-        context_window = 128_000
-        compaction_threshold = 0.80  # Start compacting at 80% of context window
-
-        def _estimate_message_tokens(message_list: list[dict]) -> int:
-            """Approximate prompt token count from serialized message payload."""
-            serialized = json.dumps(message_list, ensure_ascii=False, separators=(",", ":"))
-            return max(1, len(serialized) // 4)
+        _raw_cw = getattr(workflow, "context_window", None)
+        try:
+            context_window = int(_raw_cw) if _raw_cw is not None else 128_000
+        except (TypeError, ValueError):
+            context_window = 128_000
+        compaction_threshold = settings.compaction_token_threshold_pct
 
         # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
@@ -1655,15 +1702,19 @@ async def _run_with_custom_provider(
                 # ── Context compaction ───────────────────────────────────
                 # If the current request context exceeds the compaction threshold,
                 # prune older intermediate messages to free context space.
-                current_prompt_tokens = _estimate_message_tokens(messages)
-                if current_prompt_tokens > context_window * compaction_threshold and len(messages) > 4:
+                current_prompt_tokens = estimate_messages_tokens(messages, model)
+                if (
+                    settings.compaction_enabled
+                    and current_prompt_tokens > context_window * compaction_threshold
+                    and len(messages) > 4
+                ):
                     await _log(
                         workflow, "compaction_start",
                         f"Compacting context ({current_prompt_tokens} estimated input tokens, "
                         f"{len(messages)} messages)",
                         task_exec,
                     )
-                    messages = _compact_messages(messages)
+                    messages = _compact_messages(messages, model=model, context_window=context_window)
                     await _log(
                         workflow, "compaction_complete",
                         f"Compacted to {len(messages)} messages",
@@ -1675,9 +1726,27 @@ async def _run_with_custom_provider(
                     body["tools"] = openai_tools
                     body["tool_choice"] = "auto"
 
-                response = await _stream_chat_completion(
-                    http, url, headers, body, str(workflow.id),
-                )
+                try:
+                    response = await _stream_chat_completion(
+                        http, url, headers, body, str(workflow.id),
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429:
+                        # Rate-limited — respect Retry-After header if present
+                        retry_after = exc.response.headers.get("retry-after", "5")
+                        try:
+                            wait_secs = float(retry_after)
+                        except ValueError:
+                            wait_secs = 5.0
+                        wait_secs = min(wait_secs, 60.0)
+                        await _log(
+                            workflow, "rate_limited",
+                            f"Provider rate-limited; retrying after {wait_secs:.0f}s",
+                            task_exec,
+                        )
+                        await asyncio.sleep(wait_secs)
+                        continue
+                    raise
 
                 data = response
 
@@ -1729,17 +1798,23 @@ async def _run_with_custom_provider(
                         )
 
                         # Execute the tool — built-in memory, custom Python, or MCP
-                        if tool_name == "store_memory":
-                            tool_result = await _handle_store_memory(
-                                workflow.agent_id, tool_args
-                            )
-                        elif tool_name in custom_python_tool_map:
-                            tool_result = await _execute_custom_tool(
-                                tool_name, tool_args, custom_python_tool_map
-                            )
-                        else:
-                            tool_result = await _execute_mcp_tool(
-                                tool_name, tool_args, tool_server_map
+                        try:
+                            if tool_name == "store_memory":
+                                tool_result = await _handle_store_memory(
+                                    workflow.agent_id, tool_args
+                                )
+                            elif tool_name in custom_python_tool_map:
+                                tool_result = await _execute_custom_tool(
+                                    tool_name, tool_args, custom_python_tool_map
+                                )
+                            else:
+                                tool_result = await _execute_mcp_tool(
+                                    tool_name, tool_args, tool_server_map
+                                )
+                        except Exception as tool_exc:
+                            tool_result = f"Tool execution error: {tool_exc}"
+                            logger.warning(
+                                "Tool '%s' raised an exception: %s", tool_name, tool_exc
                             )
 
                         await _log(
@@ -2088,6 +2163,7 @@ async def run_agent(
             agent.knowledge_tags,
             max_chars=settings.prompt_knowledge_char_budget,
             item_limit=settings.prompt_context_max_items,
+            query=user_prompt,
         )
         if knowledge_context:
             await _log(
@@ -2124,6 +2200,7 @@ async def run_agent(
                 workflow_id=str(workflow.id),
                 limit=settings.prompt_context_max_items,
                 max_chars=settings.prompt_memory_char_budget,
+                query=user_prompt,
             )
             if memory_context:
                 await _log(
