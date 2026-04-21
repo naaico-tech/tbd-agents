@@ -32,6 +32,7 @@ class TestPublish:
         mock_pipe.expire = MagicMock()
         mock_pipe.execute = AsyncMock(return_value=[1, 1, True, True])
         mock_pipe.xadd = MagicMock()
+        mock_pipe.xtrim = MagicMock()
 
         mock_redis = AsyncMock()
         mock_redis.incr = AsyncMock(return_value=1)
@@ -54,6 +55,7 @@ class TestPublish:
         # Stored in history
         mock_pipe.rpush.assert_called_once()
         mock_pipe.xadd.assert_not_called()
+        mock_pipe.xtrim.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_publish_status_enqueues_task_status_event(self):
@@ -62,8 +64,9 @@ class TestPublish:
         mock_pipe.rpush = MagicMock()
         mock_pipe.ltrim = MagicMock()
         mock_pipe.expire = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[1, 1, True, "1-0", True])
+        mock_pipe.execute = AsyncMock(return_value=[1, 1, True, "1-0", 1, True])
         mock_pipe.xadd = MagicMock()
+        mock_pipe.xtrim = MagicMock()
 
         mock_redis = AsyncMock()
         mock_redis.incr = AsyncMock(return_value=7)
@@ -90,6 +93,7 @@ class TestPublish:
         assert payload["data"]["status"] == "completed"
         assert payload["data"]["task_execution_id"] == "task-123"
         assert payload["id"] == 7
+        mock_pipe.xtrim.assert_called_once()
         assert mock_pipe.expire.call_args_list[-1].args == (_TASK_STATUS_STREAM, 3600)
 
     @pytest.mark.asyncio
@@ -106,6 +110,7 @@ class TestPublish:
         mock_pipe.expire = MagicMock()
         mock_pipe.execute = AsyncMock(return_value=[1, 1, True, True])
         mock_pipe.xadd = MagicMock()
+        mock_pipe.xtrim = MagicMock()
 
         new_redis = AsyncMock()
         new_redis.incr = AsyncMock(return_value=1)
