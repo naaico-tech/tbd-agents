@@ -247,7 +247,7 @@
     <a data-page="dashboard" class="active"><span class="icon">📊</span> Dashboard</a>
     <a data-page="agents"><span class="icon">🤖</span> Agents</a>
     <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
-    <a data-page="custom_tools"><span class="icon">🛠️</span> Custom Tools</a>
+    <a data-page="custom-tools"><span class="icon">🛠️</span> Custom Tools</a>
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
     <a data-page="knowledge"><span class="icon">📚</span> Knowledge</a>
     <a data-page="guardrails"><span class="icon">🛡️</span> Guardrails</a>
@@ -677,7 +677,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', custom_tools:'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -689,7 +689,7 @@ function navigateTo(page, title) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('page-title').textContent = title ||
-    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', custom_tools:'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory' }[page] || page;
+    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory' }[page] || page;
   loadPage(page);
 }
 
@@ -697,7 +697,7 @@ function loadPage(page) {
   if (page === 'dashboard') loadDashboard();
   else if (page === 'agents') loadAgents();
   else if (page === 'mcps') loadMcps();
-  else if (page === 'custom_tools') loadCustomTools();
+  else if (page === 'custom-tools') loadCustomTools();
   else if (page === 'skills') loadSkills();
   else if (page === 'knowledge') loadKnowledge();
   else if (page === 'guardrails') loadGuardrails();
