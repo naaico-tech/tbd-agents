@@ -66,9 +66,10 @@ async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
     await init_db()
 
     # Publish failure to SSE subscribers
-    await event_bus.publish(
-        workflow_id, "status", {"status": "failed", "current_turn": 0}
-    )
+    payload = {"status": "failed", "current_turn": 0}
+    if task_execution_id:
+        payload["task_execution_id"] = task_execution_id
+    await event_bus.publish(workflow_id, "status", payload)
 
     if task_execution_id:
         te = await TaskExecution.get(PydanticObjectId(task_execution_id))

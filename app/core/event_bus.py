@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _CHANNEL_PREFIX = "workflow:events:"
 _HISTORY_PREFIX = "workflow:history:"
 _COUNTER_PREFIX = "workflow:eventid:"
+_TASK_STATUS_STREAM = "task:status:events"
 _HISTORY_TTL = 300  # seconds to keep event history (5 min)
 _HISTORY_MAX_LEN = 500  # max events retained per workflow
 _pub_redis: aioredis.Redis | None = None
@@ -80,6 +81,18 @@ async def publish(workflow_id: str, event_type: str, data: dict[str, Any]) -> No
             pipe.rpush(hkey, payload)
             pipe.ltrim(hkey, -_HISTORY_MAX_LEN, -1)
             pipe.expire(hkey, _HISTORY_TTL)
+            if event_type == "status":
+                pipe.xadd(
+                    _TASK_STATUS_STREAM,
+                    {
+                        "workflow_id": workflow_id,
+                        "payload": payload,
+                    },
+                )
+                pipe.expire(
+                    _TASK_STATUS_STREAM,
+                    settings.task_status_event_ttl_seconds,
+                )
             await pipe.execute()
             return
         except Exception:
@@ -206,4 +219,3 @@ async def clear_halt(workflow_id: str) -> None:
     if _pub_redis is None:
         _pub_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     await _pub_redis.delete(f"{_HALT_KEY_PREFIX}{workflow_id}")
-

@@ -100,12 +100,22 @@ async def _log(
     )
 
 
-async def _publish_status(workflow: Workflow, status: str | None = None) -> None:
+async def _publish_status(
+    workflow: Workflow,
+    status: str | None = None,
+    task_exec: TaskExecution | None = None,
+) -> None:
     """Publish a status change to SSE subscribers."""
+    payload: dict[str, str | int] = {
+        "status": status or "running",
+        "current_turn": workflow.current_turn,
+    }
+    if task_exec:
+        payload["task_execution_id"] = str(task_exec.id)
     await event_bus.publish(
         str(workflow.id),
         "status",
-        {"status": status or "running", "current_turn": workflow.current_turn},
+        payload,
     )
 
 
@@ -1209,7 +1219,7 @@ async def _run_with_claude_sdk(
             if not done and await event_bus.check_halt(str(workflow.id)):
                 await event_bus.clear_halt(str(workflow.id))
                 await _log(workflow, "halted", "Execution halted by user", task_exec)
-                await _publish_status(workflow, "halted")
+                await _publish_status(workflow, "halted", task_exec)
                 if task_exec:
                     task_exec.status = TaskStatus.HALTED
                     task_exec.finished_at = datetime.now(UTC)
@@ -1262,7 +1272,7 @@ async def _run_with_claude_sdk(
             tool_calls_per_task.labels(model=model).observe(tool_call_count)
 
         await _log(workflow, "completed", f"Final status: completed (tool_calls: {tool_call_count})", task_exec)
-        await _publish_status(workflow, "completed")
+        await _publish_status(workflow, "completed", task_exec)
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
         agent_task_duration_seconds.labels(model=model, status="completed").observe(task_duration)
@@ -1280,7 +1290,7 @@ async def _run_with_claude_sdk(
 
     except Exception as exc:
         await _log(workflow, "error", str(exc), task_exec)
-        await _publish_status(workflow, "failed")
+        await _publish_status(workflow, "failed", task_exec)
         logger.exception("Claude Agent SDK run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
@@ -1589,7 +1599,7 @@ async def _run_with_custom_provider(
             f"Final status: {task_final_status} (tool_calls: {tool_call_count})",
             task_exec,
         )
-        await _publish_status(workflow, task_final_status)
+        await _publish_status(workflow, task_final_status, task_exec)
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
         agent_task_duration_seconds.labels(
@@ -1616,7 +1626,7 @@ async def _run_with_custom_provider(
             f"Provider HTTP error {exc.response.status_code}: {exc.response.text[:500]}",
             task_exec,
         )
-        await _publish_status(workflow, "failed")
+        await _publish_status(workflow, "failed", task_exec)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -1625,7 +1635,7 @@ async def _run_with_custom_provider(
         await workflow.save()
     except Exception as exc:
         await _log(workflow, "error", str(exc), task_exec)
-        await _publish_status(workflow, "failed")
+        await _publish_status(workflow, "failed", task_exec)
         logger.exception("Custom provider run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
@@ -1692,7 +1702,7 @@ async def run_agent(
     agent = await Agent.get(workflow.agent_id)
     if not agent:
         await _log(workflow, "error", "Agent not found", task_exec)
-        await _publish_status(workflow, "failed")
+        await _publish_status(workflow, "failed", task_exec)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -1753,7 +1763,7 @@ async def run_agent(
 
     # Log prompt and publish running status for SSE
     await _log(workflow, "prompt_received", user_prompt[:200], task_exec)
-    await _publish_status(workflow, "running")
+    await _publish_status(workflow, "running", task_exec)
 
     # Append user message
     workflow.messages.append(Message(role="user", content=user_prompt))
@@ -2233,7 +2243,7 @@ async def run_agent(
                                 await session.abort()
                                 workflow.current_turn = tool_call_count
                                 await _log(workflow, "halted", "Execution halted by user", task_exec)
-                                await _publish_status(workflow, "halted")
+                                await _publish_status(workflow, "halted", task_exec)
                                 if task_exec:
                                     task_exec.status = TaskStatus.HALTED
                                     task_exec.finished_at = datetime.now(UTC)
@@ -2252,7 +2262,7 @@ async def run_agent(
                         f"Session timed out after {_prompt_timeout}s",
                         task_exec,
                     )
-                    await _publish_status(workflow, "failed")
+                    await _publish_status(workflow, "failed", task_exec)
                     if task_exec:
                         task_exec.status = TaskStatus.FAILED
                         task_exec.finished_at = datetime.now(UTC)
@@ -2326,7 +2336,7 @@ async def run_agent(
                     final_text = json.dumps({"response": final_text})
 
                 await _log(workflow, "completed", f"Final status: {task_final_status}", task_exec)
-                await _publish_status(workflow, task_final_status)
+                await _publish_status(workflow, task_final_status, task_exec)
 
                 # Finalize task execution
                 if task_exec:
@@ -2346,7 +2356,7 @@ async def run_agent(
 
     except Exception as e:
         await _log(workflow, "error", str(e), task_exec)
-        await _publish_status(workflow, "failed")
+        await _publish_status(workflow, "failed", task_exec)
         logger.exception("Agent run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED

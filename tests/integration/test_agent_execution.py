@@ -121,6 +121,17 @@ class TestCopilotSDKExecution:
         event_types = [e[1] for e in mock_event_bus.events]
         assert "log" in event_types
         assert "status" in event_types
+        status_events = [e for e in mock_event_bus.events if e[1] == "status"]
+        assert any(
+            e[2].get("status") == "running"
+            and e[2].get("task_execution_id") == str(task.id)
+            for e in status_events
+        )
+        assert any(
+            e[2].get("status") == TaskStatus.COMPLETED
+            and e[2].get("task_execution_id") == str(task.id)
+            for e in status_events
+        )
 
     @pytest.mark.asyncio
     async def test_inactive_workflow_returns_none(self, mock_event_bus):

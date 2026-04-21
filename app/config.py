@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     session_timeout: int = 600
     # Redis URL for Celery broker/backend and event bus pub/sub
     redis_url: str = "redis://redis:6379/0"
+    # Task status event queue retention (seconds, capped at one hour)
+    task_status_event_ttl_seconds: int = Field(default=3600, ge=1, le=3600)
     # Short-Term Memory: max recent memories per agent cached in Redis
     stm_max_entries: int = 20
     # Long-Term Memory: max memories per agent stored in MongoDB (0 = unlimited)
