@@ -13,14 +13,14 @@ class TestSettings:
             s = Settings(
                 _env_file=None,  # Don't read .env during tests
             )
-        assert s.mongo_db_name == "copilot_agent_hub"
-        assert s.default_model == "gpt-4.1"
-        assert s.default_max_turns == 5
-        assert s.session_timeout == 600
-        assert s.task_status_event_ttl_seconds == 3600
-        assert s.github_token is None
-        assert s.token_encryption_key is None
-        assert s.otel_service_name == "tbd-agents"
+            assert s.mongo_db_name == "copilot_agent_hub"
+            assert s.default_model == "gpt-4.1"
+            assert s.default_max_turns == 5
+            assert s.session_timeout == 600
+            assert s.task_status_event_ttl_seconds == 3600
+            assert s.github_token is None
+            assert s.token_encryption_key is None
+            assert s.otel_service_name == "tbd-agents"
 
     def test_env_override(self):
         """Settings should pick up environment variables."""
