@@ -88,6 +88,7 @@ nav:
       - Agent Memory: guide/memory.md
       - Guardrails: guide/guardrails.md
       - BYOK Providers: guide/byok-providers.md
+      - Custom Tools: guide/custom-tools.md
       - Observability: guide/observability.md
   - Architecture:
       - architecture/index.md
@@ -103,6 +104,7 @@ nav:
       - Knowledge: api/knowledge.md
       - Memory: api/memory.md
       - Providers: api/providers.md
+      - Custom Tools: api/custom-tools.md
       - Tokens: api/tokens.md
       - Guardrails: api/guardrails.md
       - Tasks: api/tasks.md
