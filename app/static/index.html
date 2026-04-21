@@ -247,6 +247,7 @@
     <a data-page="dashboard" class="active"><span class="icon">📊</span> Dashboard</a>
     <a data-page="agents"><span class="icon">🤖</span> Agents</a>
     <a data-page="mcps"><span class="icon">🔌</span> MCP Servers</a>
+    <a data-page="custom_tools"><span class="icon">🛠️</span> Custom Tools</a>
     <a data-page="skills"><span class="icon">⚡</span> Skills</a>
     <a data-page="knowledge"><span class="icon">📚</span> Knowledge</a>
     <a data-page="guardrails"><span class="icon">🛡️</span> Guardrails</a>
@@ -307,6 +308,18 @@
         <div class="card-body"><table><thead><tr>
           <th>Name</th><th>Transport</th><th>Status</th><th>Tools</th><th>Created</th><th></th>
         </tr></thead><tbody id="mcps-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Custom Tools Page -->
+    <div id="page-custom-tools" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openCustomToolModal()">+ New Custom Tool</button>
+      </div>
+      <div class="card">
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Status</th><th>Created</th><th></th>
+        </tr></thead><tbody id="custom-tools-body"></tbody></table></div>
       </div>
     </div>
 
@@ -613,7 +626,7 @@
 
 <script>
 const API = '';  // same origin
-let agents = [], mcps = [], skills = [], guardrails = [], workflows = [], tokens = [], providers = [];
+let agents = [], mcps = [], customTools = [], skills = [], guardrails = [], workflows = [], tokens = [], providers = [];
 let knowledgeSources = [], knowledgeItems = [];
 let pollTimer = null;
 let sseSource = null;         // current EventSource
@@ -664,7 +677,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', custom_tools:'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task' }[page];
     loadPage(page);
   });
 });
@@ -676,7 +689,7 @@ function navigateTo(page, title) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('page-title').textContent = title ||
-    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory' }[page] || page;
+    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', custom_tools:'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory' }[page] || page;
   loadPage(page);
 }
 
@@ -684,6 +697,7 @@ function loadPage(page) {
   if (page === 'dashboard') loadDashboard();
   else if (page === 'agents') loadAgents();
   else if (page === 'mcps') loadMcps();
+  else if (page === 'custom_tools') loadCustomTools();
   else if (page === 'skills') loadSkills();
   else if (page === 'knowledge') loadKnowledge();
   else if (page === 'guardrails') loadGuardrails();
@@ -698,8 +712,8 @@ function loadPage(page) {
 // ── Dashboard ──
 async function loadDashboard() {
   try {
-    [agents, mcps, skills, workflows, tokens, providers, taskExecs] = await Promise.all([
-      api('/api/agents'), api('/api/mcps'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/providers'), api('/api/tasks')
+    [agents, mcps, customTools, skills, workflows, tokens, providers, taskExecs] = await Promise.all([
+      api('/api/agents'), api('/api/mcps'), api('/api/custom-tools'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/providers'), api('/api/tasks')
     ]);
     let ksStat = '-';
     try { const ks = await api('/api/knowledge-sources'); ksStat = ks.length; } catch {}
@@ -729,7 +743,7 @@ async function loadDashboard() {
 // ── Agents ──
 async function loadAgents() {
   try {
-    [agents, providers, knowledgeSources] = await Promise.all([api('/api/agents'), api('/api/providers'), api('/api/knowledge-sources').catch(()=>[])]);
+    [agents, customTools, providers, knowledgeSources] = await Promise.all([api('/api/agents'), api('/api/custom-tools'), api('/api/providers'), api('/api/knowledge-sources').catch(()=>[])]);
     document.getElementById('agents-body').innerHTML = agents.length
       ? agents.map(a => {
           const prov = a.provider_id ? providers.find(p => p.id === a.provider_id) : null;
@@ -758,6 +772,10 @@ function openAgentModal(id) {
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" value="${m.id}" ${a?.mcp_server_ids?.includes(m.id)?'checked':''}> ${esc(m.name)}
     </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No MCP servers registered</span>';
+  const customToolOpts = customTools.map(ct =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" value="${ct.id}" ${a?.custom_tool_ids?.includes(ct.id)?'checked':''}> ${esc(ct.name)}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No custom tools registered</span>';
   const ksOpts = knowledgeSources.map(k =>
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" value="${k.id}" ${a?.knowledge_source_ids?.includes(k.id)?'checked':''}> ${esc(k.name)} <span class="badge badge-blue" style="font-size:10px">${k.source_type}</span>
@@ -799,6 +817,7 @@ function openAgentModal(id) {
       <div id="f-agent-builtin-tools">${builtinToolsHtml}</div>
       <div class="hint">Select which built-in tools the agent can use. If none are selected, no agent toolset is added.</div></div>
     <div class="form-group"><label>MCP Servers</label><div id="f-agent-mcps">${mcpOpts}</div></div>
+    <div class="form-group"><label>Custom Tools</label><div id="f-agent-custom-tools">${customToolOpts}</div></div>
     <div class="form-group"><label>MCP Server Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching MCP servers)</span></label>
       <input id="f-agent-mcp-tags" value="${esc(a?.mcp_server_tags?.join(', ')||'')}" placeholder="e.g. dev-tools, communication">
       <div class="hint">Any MCP server that has at least one of these tags will be available to this agent.</div></div>
@@ -821,6 +840,7 @@ function toggleBuiltinTools() {
 
 async function saveAgent(id) {
   const mcpIds = [...document.querySelectorAll('#f-agent-mcps input:checked')].map(c => c.value);
+  const customToolIds = [...document.querySelectorAll('#f-agent-custom-tools input:checked')].map(c => c.value);
   const mcpTags = document.getElementById('f-agent-mcp-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
   const ksIds = [...document.querySelectorAll('#f-agent-ks input:checked')].map(c => c.value);
   const kTags = document.getElementById('f-agent-knowledge-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
@@ -833,6 +853,7 @@ async function saveAgent(id) {
     provider_id: document.getElementById('f-agent-provider').value || null,
     mcp_server_ids: mcpIds,
     mcp_server_tags: mcpTags,
+    custom_tool_ids: customToolIds,
     knowledge_source_ids: ksIds,
     knowledge_tags: kTags,
     builtin_tools: builtinTools,
@@ -1048,6 +1069,104 @@ async function saveTools(id) {
     closeModal();
     loadMcps();
   } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Custom Tools ──
+async function loadCustomTools() {
+  try {
+    customTools = await api('/api/custom-tools');
+    document.getElementById('custom-tools-body').innerHTML = customTools.length
+      ? customTools.map(c => {
+          const tagBadges = c.tags?.length ? c.tags.map(t => `<span class="badge badge-purple">${esc(t)}</span> `).join('') : '';
+          return `<tr>
+          <td><strong>${esc(c.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(c.description||'')}</span>${tagBadges ? '<br>'+tagBadges : ''}</td>
+          <td>${statusBadge(c.is_enabled ? 'active' : 'halted')}</td>
+          <td>${fmtDate(c.created_at)}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-sm" onclick="openCustomToolModal('${c.id}')">Edit</button>
+            <button class="btn btn-sm" onclick="runCustomToolModal('${c.id}')">Run</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteCustomTool('${c.id}')">Delete</button>
+          </div></td>
+        </tr>`;
+        }).join('')
+      : '<tr><td colspan="5" class="empty-state">No custom tools. Create one to run python tools natively.</td></tr>';
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openCustomToolModal(id) {
+  const c = id ? customTools.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = c ? 'Edit Custom Tool' : 'Create Custom Tool';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Name</label><input id="f-ct-name" value="${esc(c?.name||'')}" placeholder="e.g. read_mysql"></div>
+    <div class="form-group"><label>Description</label><input id="f-ct-desc" value="${esc(c?.description||'')}"></div>
+    <div class="form-group"><label>Source Code (Python)</label>
+      <textarea id="f-ct-code" rows="8">${esc(c?.source_code||'')}</textarea></div>
+    <div class="form-group"><label>Env Config (JSON object, optional)</label>
+      <textarea id="f-ct-env" rows="3" placeholder='{"API_KEY":"{{token:my-api-key}}"}'>${c?.env_config?esc(JSON.stringify(c.env_config,null,2)):''}</textarea>
+      <div class="hint">Use <code style="color:var(--accent)">{{token:NAME}}</code> to reference secrets from the Tokens store.</div></div>
+    <div class="form-group"><label>Tags (comma-separated)</label>
+      <input id="f-ct-tags" value="${esc(c?.tags?.join(', ')||'')}"></div>
+    <div class="form-group"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="f-ct-enabled" ${!c || c.is_enabled ? 'checked' : ''}> Enabled</label></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveCustomTool('${id||''}')">${c?'Update':'Create'}</button>`;
+  showModal();
+}
+
+async function saveCustomTool(id) {
+  let env_config = {};
+  const envVal = document.getElementById('f-ct-env').value.trim();
+  if (envVal) {
+    try { env_config = JSON.parse(envVal); } catch(e) { return toast('Invalid JSON in Env Config', 'error'); }
+  }
+  const body = {
+    name: document.getElementById('f-ct-name').value,
+    description: document.getElementById('f-ct-desc').value,
+    source_code: document.getElementById('f-ct-code').value,
+    env_config: env_config,
+    tags: document.getElementById('f-ct-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+    is_enabled: document.getElementById('f-ct-enabled').checked
+  };
+  try {
+    if (id) await api('/api/custom-tools/'+id, { method:'PUT', body:JSON.stringify(body) });
+    else await api('/api/custom-tools', { method:'POST', body:JSON.stringify(body) });
+    toast(id ? 'Tool updated' : 'Tool created'); closeModal(); loadCustomTools();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteCustomTool(id) {
+  if (!confirm('Delete this custom tool?')) return;
+  try { await api('/api/custom-tools/'+id, { method:'DELETE' }); toast('Tool deleted'); loadCustomTools(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+async function runCustomToolModal(id) {
+  const c = customTools.find(x => x.id === id);
+  document.getElementById('modal-title').textContent = 'Test Custom Tool: ' + c.name;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group"><label>Arguments (JSON object)</label>
+      <textarea id="f-ct-test-args" rows="4" placeholder='{"arg1": "val1"}'>{}</textarea></div>
+    <div class="form-group"><label>Result</label>
+      <pre id="f-ct-test-result" style="background:var(--surface2);padding:10px;border-radius:4px;min-height:50px"></pre></div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn btn-primary" onclick="executeCustomToolTest('${id}')">Run</button>`;
+  showModal();
+}
+
+async function executeCustomToolTest(id) {
+  const argsVal = document.getElementById('f-ct-test-args').value.trim();
+  let args = {};
+  if (argsVal) {
+    try { args = JSON.parse(argsVal); } catch(e) { return toast('Invalid JSON in args', 'error'); }
+  }
+  document.getElementById('f-ct-test-result').textContent = 'Running...';
+  try {
+    const res = await api('/api/custom-tools/'+id+'/run', { method:'POST', body:JSON.stringify({arguments: args}) });
+    document.getElementById('f-ct-test-result').textContent = res.result || JSON.stringify(res, null, 2);
+  } catch(e) {
+    document.getElementById('f-ct-test-result').textContent = e.message;
+  }
 }
 
 // ── Tokens ──
