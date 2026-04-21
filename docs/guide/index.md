@@ -75,4 +75,12 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: BYOK Providers](byok-providers.md)
 
+-   :material-code-braces:{ .lg .middle } **Custom Tools**
+
+    ---
+
+    Write Python tool functions and lock them to specific agents.
+
+    [:octicons-arrow-right-24: Custom Tools](custom-tools.md)
+
 </div>

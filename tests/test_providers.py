@@ -469,6 +469,7 @@ class TestAgentProviderField:
             knowledge_source_ids=[],
             knowledge_tags=[],
             builtin_tools=[],
+            custom_tool_ids=[],
             provider_id="prov-1",
             created_at=now,
             updated_at=now,

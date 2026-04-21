@@ -43,6 +43,9 @@ curl -X POST http://localhost:8000/api/agents \
 | `model` | string | Copilot model identifier |
 | `mcp_server_ids` | string[] | Explicit list of MCP server IDs |
 | `mcp_server_tags` | string[] | Tag-based MCP server resolution |
+| `custom_tool_ids` | string[] | IDs of Custom Python Tools to mount on this agent |
+| `builtin_tools` | string[] | Built-in tool names to enable (e.g. `bash`, `read`) |
+| `provider_id` | string | Optional BYOK provider ID |
 
 ---
 
@@ -99,6 +102,36 @@ graph LR
       "mcp_server_tags": ["documentation", "messaging"]
     }
     ```
+
+---
+
+## Custom Tool Lock-in
+
+Custom Tools are user-written Python functions registered on the platform. You lock them to an agent by listing their IDs in `custom_tool_ids`.
+
+```bash
+# 1. Create the tool
+curl -X POST http://localhost:8000/api/custom-tools \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "summarise_csv",
+    "description": "Compute basic statistics for a numeric CSV column",
+    "source_code": "def summarise_csv(csv_text: str, column: str) -> dict:\n    return {\"column\": column}",
+    "tags": ["data"]
+  }'
+
+# 2. Mount the tool on an agent
+curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"custom_tool_ids": ["<TOOL_ID>"] }'
+```
+
+Custom tools are **additive** — they combine with MCP servers and built-in tools. Disabled tools (``is_enabled: false``) are silently skipped at runtime.
+
+!!! tip
+    See the [Custom Tools guide](custom-tools.md) for the full authoring reference, execution model, and examples.
 
 ---
 

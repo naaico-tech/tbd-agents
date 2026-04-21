@@ -23,6 +23,7 @@ def _to_response(agent: Agent) -> AgentResponse:
         knowledge_source_ids=agent.knowledge_source_ids,
         knowledge_tags=agent.knowledge_tags,
         builtin_tools=agent.builtin_tools,
+        custom_tool_ids=agent.custom_tool_ids,
         provider_id=agent.provider_id,
         created_at=agent.created_at,
         updated_at=agent.updated_at,

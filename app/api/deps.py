@@ -23,7 +23,13 @@ def _resolve_token(authorization: str | None) -> str:
 async def get_current_user(authorization: str | None = Header(None)) -> dict[str, Any]:
     """Validate GitHub token from header (or env fallback) and return user info."""
     token = _resolve_token(authorization)
-    return await validate_github_token(token)
+    # If the token came from the server-level env var (no Authorization header
+    # provided, or the header matched the env var exactly), skip the remote
+    # GitHub API call — the token is already trusted by the operator.
+    is_server_token = (
+        settings.github_token is not None and token == settings.github_token
+    )
+    return await validate_github_token(token, skip_remote=is_server_token)
 
 
 def extract_token(authorization: str | None) -> str:

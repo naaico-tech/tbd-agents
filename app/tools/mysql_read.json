@@ -1,0 +1,8 @@
+{
+  "description": "Read-only MySQL database access for querying user metrics and logs.",
+  "tags": ["database", "mysql"],
+  "is_enabled": true,
+  "env_config": {
+    "MYSQL_CONNECTION": "{{token:mysql-readonly-conn}}"
+  }
+}

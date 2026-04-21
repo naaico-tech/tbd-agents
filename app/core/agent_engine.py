@@ -30,6 +30,7 @@ from app.core import event_bus
 from app.core.guardrails import enforce_output_guardrails
 from app.core.tool_registry import build_mcp_servers_config
 from app.models.agent import Agent
+from app.models.custom_tool import CustomTool
 from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
 from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderType
@@ -62,7 +63,7 @@ from app.observability import (
     tool_calls_per_task,
     tool_calls_total,
 )
-from app.services import token_manager
+from app.services import custom_tool_runner, token_manager
 from app.services.copilot_client import build_client
 from app.services.knowledge_manager import knowledge_manager
 from app.services.memory_manager import memory_manager
@@ -748,6 +749,76 @@ async def _connect_mcp_and_list_tools(
     return openai_tools, tool_server_map
 
 
+# ── Custom Python tool helpers ────────────────────────────────────────────────
+
+
+async def _build_custom_tools_config(
+    custom_tool_ids: list[str],
+) -> tuple[list[dict], list[dict], dict[str, CustomTool]]:
+    """Load enabled CustomTool documents and build tool definition lists.
+
+    Returns:
+        openai_tool_defs  — OpenAI function-calling format (for BYOK path)
+        claude_tool_defs  — Claude Agent SDK custom format (for Claude path)
+        tool_fn_map       — tool name → CustomTool (for execution routing)
+    """
+    from beanie import PydanticObjectId as _CtObjId
+
+    openai_defs: list[dict] = []
+    claude_defs: list[dict] = []
+    fn_map: dict[str, CustomTool] = {}
+
+    for tid in custom_tool_ids:
+        try:
+            tool = await CustomTool.get(_CtObjId(tid))
+        except Exception:
+            logger.warning("Skipping invalid custom_tool_id: %s", tid)
+            continue
+        if not tool or not tool.is_enabled:
+            continue
+
+        schema = tool.parameters_schema or {"type": "object", "properties": {}}
+
+        openai_defs.append({
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": schema,
+            },
+        })
+        # Claude requires only the allowed keys in input_schema
+        allowed_keys = {"type", "properties", "required", "description", "additionalProperties"}
+        claude_schema = {k: v for k, v in schema.items() if k in allowed_keys}
+        claude_schema.setdefault("type", "object")
+        claude_schema.setdefault("properties", {})
+        claude_defs.append({
+            "type": "custom",
+            "name": tool.name,
+            "description": tool.description or "",
+            "input_schema": claude_schema,
+        })
+        fn_map[tool.name] = tool
+
+    return openai_defs, claude_defs, fn_map
+
+
+async def _execute_custom_tool(tool_name: str, arguments: dict, fn_map: dict) -> str:
+    """Execute a custom Python tool from *fn_map* via the subprocess runner."""
+    tool = fn_map.get(tool_name)
+    if not tool:
+        return json.dumps({"error": f"Custom tool '{tool_name}' not found"})
+
+    resolved_env = None
+    if getattr(tool, "env_config", None):
+        from app.services import token_manager
+        resolved_env = await token_manager.resolve_config(tool.env_config)
+
+    return await custom_tool_runner.run_tool(
+        tool.source_code, tool.name, arguments, env=resolved_env
+    )
+
+
 async def _handle_store_memory(agent_id: str, arguments: dict) -> str:
     """Handle the store_memory built-in tool call."""
     from app.models.memory import MemoryScope
@@ -1102,6 +1173,24 @@ async def _run_with_claude_sdk(
                     task_exec,
                 )
 
+        # ── Custom Python tools (user-supplied, Claude format) ────────────────
+        custom_python_tool_map_claude: dict[str, CustomTool] = {}
+        try:
+            _agent_for_claude = await Agent.get(workflow.agent_id)
+            if _agent_for_claude and _agent_for_claude.custom_tool_ids:
+                _, _ct_claude_defs, custom_python_tool_map_claude = await _build_custom_tools_config(
+                    _agent_for_claude.custom_tool_ids
+                )
+                if _ct_claude_defs:
+                    custom_tools.extend(_ct_claude_defs)
+                    await _log(
+                        workflow, "custom_tools_loaded",
+                        f"{len(_ct_claude_defs)} custom Python tool(s): {[t['name'] for t in _ct_claude_defs]}",
+                        task_exec,
+                    )
+        except Exception as _ct_exc:
+            logger.debug("Custom tool lookup skipped: %s", _ct_exc)
+
         # ── Build native MCP servers for URL-based transports ────────────────
         native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
         if native_mcp_servers:
@@ -1211,10 +1300,14 @@ async def _run_with_claude_sdk(
                     )
                     tool_calls_total.labels(tool_name=tool_name).inc()
 
-                    # Execute — built-in memory tool or local MCP session
+                    # Execute — built-in memory, custom Python, or local MCP session
                     if tool_name == "store_memory":
                         tool_result = await _handle_store_memory(
                             workflow.agent_id, tool_args
+                        )
+                    elif tool_name in custom_python_tool_map_claude:
+                        tool_result = await _execute_custom_tool(
+                            tool_name, tool_args, custom_python_tool_map_claude
                         )
                     else:
                         tool_result = await _execute_mcp_tool(
@@ -1485,6 +1578,24 @@ async def _run_with_custom_provider(
                     task_exec,
                 )
 
+        # ── Custom Python tools (user-supplied) ──────────────────────────────
+        custom_python_tool_map: dict[str, CustomTool] = {}
+        try:
+            _agent_for_custom = await Agent.get(workflow.agent_id)
+            if _agent_for_custom and _agent_for_custom.custom_tool_ids:
+                _ct_openai, _, custom_python_tool_map = await _build_custom_tools_config(
+                    _agent_for_custom.custom_tool_ids
+                )
+                if _ct_openai:
+                    openai_tools.extend(_ct_openai)
+                    await _log(
+                        workflow, "custom_tools_loaded",
+                        f"{len(_ct_openai)} custom Python tool(s): {[t['function']['name'] for t in _ct_openai]}",
+                        task_exec,
+                    )
+        except Exception as _ct_exc:
+            logger.debug("Custom tool lookup skipped: %s", _ct_exc)
+
         # Always add the store_memory built-in tool
         openai_tools.append(STORE_MEMORY_TOOL_OPENAI)
 
@@ -1586,10 +1697,14 @@ async def _run_with_custom_provider(
                             tool_input=json.dumps(tool_args)[:500],
                         )
 
-                        # Execute the tool — built-in memory or MCP
+                        # Execute the tool — built-in memory, custom Python, or MCP
                         if tool_name == "store_memory":
                             tool_result = await _handle_store_memory(
                                 workflow.agent_id, tool_args
+                            )
+                        elif tool_name in custom_python_tool_map:
+                            tool_result = await _execute_custom_tool(
+                                tool_name, tool_args, custom_python_tool_map
                             )
                         else:
                             tool_result = await _execute_mcp_tool(

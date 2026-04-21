@@ -23,11 +23,29 @@ POST /api/agents
   "system_prompt": "You are an SRE investigating production incidents.",
   "model": "gpt-4.1",
   "mcp_server_ids": ["<MCP_ID>"],
-  "mcp_server_tags": ["observability", "ticketing"]
+  "mcp_server_tags": ["observability", "ticketing"],
+  "custom_tool_ids": ["<TOOL_ID>"],
+  "provider_id": null
 }
 ```
 
 **Response:** `201 Created`
+
+---
+
+## Agent Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique agent name |
+| `description` | string | Human-readable description |
+| `system_prompt` | string | Agent persona and instructions |
+| `model` | string | Model identifier |
+| `mcp_server_ids` | string[] | Explicit MCP server IDs |
+| `mcp_server_tags` | string[] | Tag-based MCP server resolution |
+| `custom_tool_ids` | string[] | IDs of Custom Python Tools mounted on this agent |
+| `builtin_tools` | string[] | Platform built-in tool names |
+| `provider_id` | string \| null | BYOK provider ID; `null` for GitHub Copilot SDK |
 
 ---
 
