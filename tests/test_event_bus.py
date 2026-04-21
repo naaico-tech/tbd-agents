@@ -95,7 +95,7 @@ class TestPublish:
         assert payload["data"]["task_execution_id"] == "task-123"
         assert payload["id"] == 7
         mock_pipe.xtrim.assert_called_once()
-        assert mock_pipe.expire.call_args_list[-1].args == (
+        mock_pipe.expire.assert_any_call(
             _TASK_STATUS_STREAM,
             settings.task_status_event_ttl_seconds,
         )

@@ -81,6 +81,7 @@ async def publish(workflow_id: str, event_type: str, data: dict[str, Any]) -> No
             pipe.ltrim(hkey, -_HISTORY_MAX_LEN, -1)
             pipe.expire(hkey, _HISTORY_TTL)
             if event_type == "status":
+                # Keep only entries newer than the configured retention window.
                 cutoff_ms = int(
                     (datetime.now(UTC).timestamp() - settings.task_status_event_ttl_seconds)
                     * 1000
