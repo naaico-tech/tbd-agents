@@ -11,6 +11,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.routes import (
     agents,
+    custom_tools,
     guardrails,
     health,
     knowledge_items,
@@ -102,6 +103,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 
 app.include_router(health.router)
 app.include_router(agents.router)
+app.include_router(custom_tools.router)
 app.include_router(guardrails.router)
 app.include_router(providers.router)
 app.include_router(skills.router)

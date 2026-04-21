@@ -15,6 +15,7 @@ class Agent(Document):
     knowledge_source_ids: list[str] = Field(default_factory=list)
     knowledge_tags: list[str] = Field(default_factory=list)
     builtin_tools: list[str] = Field(default_factory=list)  # e.g. ["bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search"]
+    custom_tool_ids: list[str] = Field(default_factory=list)  # IDs of CustomTool documents to mount on this agent
     provider_id: str | None = None  # Optional BYOK provider reference
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -14,6 +14,7 @@ class AgentCreate(BaseModel):
     knowledge_source_ids: list[str] = []
     knowledge_tags: list[str] = []
     builtin_tools: list[str] = []
+    custom_tool_ids: list[str] = []
     provider_id: str | None = None
 
 
@@ -28,6 +29,7 @@ class AgentUpdate(BaseModel):
     knowledge_source_ids: list[str] | None = None
     knowledge_tags: list[str] | None = None
     builtin_tools: list[str] | None = None
+    custom_tool_ids: list[str] | None = None
     provider_id: str | None = None
 
 
@@ -43,6 +45,7 @@ class AgentResponse(BaseModel):
     knowledge_source_ids: list[str]
     knowledge_tags: list[str]
     builtin_tools: list[str]
+    custom_tool_ids: list[str]
     provider_id: str | None
     created_at: datetime
     updated_at: datetime
