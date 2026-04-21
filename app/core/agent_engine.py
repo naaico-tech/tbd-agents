@@ -698,7 +698,15 @@ async def _execute_custom_tool(tool_name: str, arguments: dict, fn_map: dict) ->
     tool = fn_map.get(tool_name)
     if not tool:
         return json.dumps({"error": f"Custom tool '{tool_name}' not found"})
-    return await custom_tool_runner.run_tool(tool.source_code, tool.name, arguments)
+
+    resolved_env = None
+    if getattr(tool, "env_config", None):
+        from app.services import token_manager
+        resolved_env = await token_manager.resolve_config(tool.env_config)
+
+    return await custom_tool_runner.run_tool(
+        tool.source_code, tool.name, arguments, env=resolved_env
+    )
 
 
 async def _handle_store_memory(agent_id: str, arguments: dict) -> str:

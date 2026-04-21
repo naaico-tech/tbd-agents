@@ -184,12 +184,13 @@ async def validate_tool(source_code: str, func_name: str) -> dict:
 # ── Execution ────────────────────────────────────────────────────────────────
 
 
-async def run_tool(source_code: str, func_name: str, arguments: dict) -> str:
+async def run_tool(source_code: str, func_name: str, arguments: dict, env: dict[str, str] | None = None) -> str:
     """Execute *func_name* from *source_code* with *arguments*.
 
     Returns the JSON-encoded result string (ready to use as a tool message).
     Both sync and async functions are supported.
     """
+    import os
     args_json = json.dumps(arguments)
 
     # The runner script is eval-safe: source_code + func_name are embedded
@@ -219,10 +220,16 @@ async def run_tool(source_code: str, func_name: str, arguments: dict) -> str:
             print(json.dumps({{"result": str(result) if result is not None else ""}}))
     """)
 
+    # Merge host environment variables with the tools specific env dict
+    merged_env = dict(os.environ)
+    if env:
+        merged_env.update(env)
+
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-c", script,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=merged_env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(

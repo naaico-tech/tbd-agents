@@ -21,6 +21,7 @@ class CustomTool(Document):
     description: str = ""
     source_code: str
     parameters_schema: dict = Field(default_factory=dict)
+    env_config: dict[str, str] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     is_enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

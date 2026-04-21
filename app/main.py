@@ -26,6 +26,7 @@ from app.api.routes import (
     workflows,
 )
 from app.config import settings
+from app.core import tools_loader
 from app.db import init_db
 from app.observability import celery_queue_length, init_telemetry
 from app.services import memory_stm
@@ -63,6 +64,12 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized.")
+
+    # Auto-load disk-based tools
+    try:
+        await tools_loader.load_tools_from_disk()
+    except Exception as exc:
+        logger.error("Failed to auto-load custom tools: %s", exc)
 
     # Warm up Short-Term Memory cache from MongoDB → Redis
     try:

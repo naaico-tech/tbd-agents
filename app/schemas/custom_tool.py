@@ -10,6 +10,7 @@ class CustomToolCreate(BaseModel):
     description: str = ""
     source_code: str
     parameters_schema: dict = {}
+    env_config: dict[str, str] = {}
     tags: list[str] = []
     is_enabled: bool = True
 
@@ -19,6 +20,7 @@ class CustomToolUpdate(BaseModel):
     description: str | None = None
     source_code: str | None = None
     parameters_schema: dict | None = None
+    env_config: dict[str, str] | None = None
     tags: list[str] | None = None
     is_enabled: bool | None = None
 
@@ -29,6 +31,7 @@ class CustomToolResponse(BaseModel):
     description: str
     source_code: str
     parameters_schema: dict
+    env_config: dict[str, str]
     tags: list[str]
     is_enabled: bool
     created_at: datetime

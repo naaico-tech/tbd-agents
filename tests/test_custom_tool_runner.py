@@ -47,6 +47,13 @@ def slow():
     time.sleep(9999)
 """
 
+ENV_TOOL = """
+import os
+
+def get_env_var(var_name: str) -> dict:
+    return {"value": os.environ.get(var_name, "not-found")}
+"""
+
 
 # ── validate_tool ─────────────────────────────────────────────────────────────
 
@@ -177,3 +184,11 @@ async def test_run_tool_timeout(monkeypatch):
     parsed = json.loads(result)
     assert "error" in parsed
     assert "timed out" in parsed["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_env_tool():
+    from app.services.custom_tool_runner import run_tool
+    result = await run_tool(ENV_TOOL, "get_env_var", {"var_name": "API_KEY"}, env={"API_KEY": "secret-value"})
+    parsed = json.loads(result)
+    assert parsed == {"value": "secret-value"}
