@@ -9,9 +9,10 @@ from app.config import Settings
 class TestSettings:
     def test_default_values(self):
         """Settings should have sensible defaults."""
-        s = Settings(
-            _env_file=None,  # Don't read .env during tests
-        )
+        with patch.dict(os.environ, {}, clear=True):
+            s = Settings(
+                _env_file=None,  # Don't read .env during tests
+            )
         assert s.mongo_db_name == "copilot_agent_hub"
         assert s.default_model == "gpt-4.1"
         assert s.default_max_turns == 5

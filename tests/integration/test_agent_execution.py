@@ -7,8 +7,6 @@ Mocks the Copilot SDK session layer so the test exercises:
 Closes #35
 """
 
-import asyncio
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,7 +17,6 @@ from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import WorkflowStatus
 
 from .conftest import create_agent, create_skill, create_workflow
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,7 +40,7 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
     class _FakeSession:
         session_id = "fake-session-123"
 
-        class _client:
+        class _client:  # noqa: N801
             @staticmethod
             async def request(*args, **kwargs):
                 if _on_callback is None:
@@ -185,7 +182,9 @@ class TestCopilotSDKExecution:
 
             def capture_session(**kwargs):
                 sm = kwargs.get("system_message", {})
-                captured_instructions["system_prompt"] = sm.get("content", "") if isinstance(sm, dict) else ""
+                captured_instructions["system_prompt"] = (
+                    sm.get("content", "") if isinstance(sm, dict) else ""
+                )
                 return session
 
             mock_client.create_session = AsyncMock(side_effect=capture_session)
