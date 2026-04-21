@@ -238,6 +238,7 @@ WORKFLOW=$(curl -s -X POST http://localhost:8000/api/workflows \
     "max_turns": 10,
     "output_format": "markdown",
     "infinite_session": true,
+    "caveman": true,
     "output_destination": {
       "notion_base_page_id": "abc123..."
     }

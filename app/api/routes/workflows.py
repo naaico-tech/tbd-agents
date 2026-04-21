@@ -8,7 +8,6 @@ from app.api.deps import extract_token, get_current_user
 from app.config import settings
 from app.core import event_bus
 from app.core.guardrails import enforce_guardrails
-from app.observability import sse_connections_active
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
@@ -17,6 +16,7 @@ from app.models.workflow import (
     Workflow,
     WorkflowStatus,
 )
+from app.observability import sse_connections_active
 from app.schemas.workflow import (
     LogEntryResponse,
     MessageResponse,
@@ -60,6 +60,7 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
         status=wf.status,
         output_format=wf.output_format,
         infinite_session=wf.infinite_session,
+        caveman=wf.caveman,
         bypass_memory=wf.bypass_memory,
         auto_memory=wf.auto_memory,
         reasoning_effort=wf.reasoning_effort,
@@ -100,6 +101,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         skill_ids=body.skill_ids,
         output_format=OutputFormat(body.output_format),
         infinite_session=body.infinite_session,
+        caveman=body.caveman,
         bypass_memory=body.bypass_memory,
         auto_memory=body.auto_memory,
         reasoning_effort=body.reasoning_effort,
@@ -171,6 +173,7 @@ async def send_prompt(
         response=None,
         output_format=wf.output_format,
         infinite_session=wf.infinite_session,
+        caveman=wf.caveman,
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],

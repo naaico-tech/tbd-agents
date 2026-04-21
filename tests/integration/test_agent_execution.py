@@ -7,8 +7,6 @@ Mocks the Copilot SDK session layer so the test exercises:
 Closes #35
 """
 
-import asyncio
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,7 +17,6 @@ from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import WorkflowStatus
 
 from .conftest import create_agent, create_skill, create_workflow
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,7 +40,7 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
     class _FakeSession:
         session_id = "fake-session-123"
 
-        class _client:
+        class _Client:
             @staticmethod
             async def request(*args, **kwargs):
                 if _on_callback is None:
@@ -58,6 +55,8 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
                     type=SimpleNamespace(value="session.idle"),
                     data=None,
                 ))
+
+        _client = _Client()
 
         async def __aenter__(self):
             return self
@@ -174,7 +173,9 @@ class TestCopilotSDKExecution:
 
             def capture_session(**kwargs):
                 sm = kwargs.get("system_message", {})
-                captured_instructions["system_prompt"] = sm.get("content", "") if isinstance(sm, dict) else ""
+                captured_instructions["system_prompt"] = (
+                    sm.get("content", "") if isinstance(sm, dict) else ""
+                )
                 return session
 
             mock_client.create_session = AsyncMock(side_effect=capture_session)
@@ -187,3 +188,49 @@ class TestCopilotSDKExecution:
 
         # Verify the skill text was injected
         assert "please and thank you" in captured_instructions.get("system_prompt", "")
+
+    @pytest.mark.asyncio
+    async def test_caveman_workflow_compresses_injected_context(self, mock_event_bus):
+        """Caveman workflows should add caveman policy and compress memory context."""
+        agent = await create_agent()
+        wf = await create_workflow(agent, caveman=True)
+        task = TaskExecution(
+            workflow_id=str(wf.id), prompt="Hello", status=TaskStatus.PENDING
+        )
+        await task.insert()
+
+        session = _mock_copilot_session("Hello!")
+        captured_instructions = {}
+        memory_context = (
+            "<memories>\n"
+            "<memory key=\"prefs\" scope=\"agent\">"
+            "It is important to make sure you always run `pytest` before push to main."
+            "</memory>\n"
+            "</memories>"
+        )
+
+        with (
+            patch("app.core.agent_engine.build_client") as mock_build,
+            patch("app.core.agent_engine.memory_manager") as mock_mm,
+            patch("app.core.agent_engine._sync_repo", new_callable=AsyncMock, return_value=None),
+        ):
+            mock_client = MagicMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            def capture_session(**kwargs):
+                sm = kwargs.get("system_message", {})
+                captured_instructions["system_prompt"] = (
+                    sm.get("content", "") if isinstance(sm, dict) else ""
+                )
+                return session
+
+            mock_client.create_session = AsyncMock(side_effect=capture_session)
+            mock_build.return_value = mock_client
+            mock_mm.build_memory_context = AsyncMock(return_value=memory_context)
+
+            await run_agent(wf, "Hello", "ghp_token", task_execution_id=str(task.id))
+
+        prompt = captured_instructions.get("system_prompt", "")
+        assert "<caveman_policy>" in prompt
+        assert "run `pytest` before push main" in prompt
