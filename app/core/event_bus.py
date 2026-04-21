@@ -95,7 +95,7 @@ async def publish(workflow_id: str, event_type: str, data: dict[str, Any]) -> No
                 pipe.xtrim(
                     _TASK_STATUS_STREAM,
                     minid=f"{cutoff_ms}-0",
-                    approximate=False,
+                    approximate=True,
                 )
                 pipe.expire(
                     _TASK_STATUS_STREAM,

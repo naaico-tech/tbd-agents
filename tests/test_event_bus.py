@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.config import settings
 from app.core.event_bus import (
     _TASK_STATUS_STREAM,
     _channel,
@@ -94,7 +95,10 @@ class TestPublish:
         assert payload["data"]["task_execution_id"] == "task-123"
         assert payload["id"] == 7
         mock_pipe.xtrim.assert_called_once()
-        assert mock_pipe.expire.call_args_list[-1].args == (_TASK_STATUS_STREAM, 3600)
+        assert mock_pipe.expire.call_args_list[-1].args == (
+            _TASK_STATUS_STREAM,
+            settings.task_status_event_ttl_seconds,
+        )
 
     @pytest.mark.asyncio
     async def test_publish_reconnects_on_failure(self):
