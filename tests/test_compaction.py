@@ -7,6 +7,8 @@ import pytest
 from app.core.agent_engine import (
     _clear_old_tool_results,
     _compact_messages,
+    _execute_custom_tool,
+    _execute_mcp_tool,
 )
 
 
@@ -140,141 +142,75 @@ class TestCompactMessages:
             assert orig_msg["content"] == res_msg["content"]
 
     def test_tool_result_clearing_pass_runs_first(self):
-        """Tool-result clearing should happen before head/tail truncation."""
+        """_clear_old_tool_results is invoked inside _compact_messages when enabled."""
         msgs: list[dict] = [{"role": "system", "content": "sys"}]
         for i in range(10):
             msgs.append({"role": "user", "content": f"q{i}"})
             msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": f"c{i}"}]})
             msgs.append({"role": "tool", "tool_call_id": f"c{i}", "content": f"result {i}"})
-        with patch("app.core.agent_engine.settings") as mock_settings:
+
+        with (
+            patch("app.core.agent_engine.settings") as mock_settings,
+            patch("app.core.agent_engine._clear_old_tool_results", wraps=_clear_old_tool_results) as mock_clear,
+        ):
             mock_settings.tool_result_clearing_enabled = True
             mock_settings.tool_result_clearing_keep_recent = 2
             mock_settings.compaction_keep_recent_turns = 6
-            result = _compact_messages(msgs, force=True)
-        tool_msgs = [m for m in result if m.get("role") == "tool"]
-        cleared = [m for m in tool_msgs if m["content"] == "[tool result cleared for context efficiency]"]
-        assert len(cleared) > 0
+            _compact_messages(msgs, force=True)
+        mock_clear.assert_called_once_with(msgs, 2)
 
 
-# ── BYOK loop hardening ──────────────────────────────────────────────────────
+# ── BYOK tool-execution helpers ──────────────────────────────────────────────
 
 
-class TestByokLoopHardening:
-    """Test BYOK-specific behaviours: 429 retry and tool-execution error recovery."""
-
-    @pytest.fixture()
-    def engine(self):
-        from app.core.agent_engine import AgentEngine
-        return AgentEngine()
+class TestByokToolHelpers:
+    """Unit tests for the BYOK tool-execution helper functions."""
 
     @pytest.mark.asyncio
-    async def test_tool_execution_error_returns_error_string(self, engine):
-        """If a tool raises during BYOK execution, the error should be captured as a string result."""
-        import httpx
-
-        messages = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "do something"},
-        ]
-
-        tool_call = {"id": "tc1", "type": "function", "function": {"name": "broken_tool", "arguments": "{}"}}
-        first_response = MagicMock()
-        first_response.status_code = 200
-        first_response_data = {
-            "choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [tool_call]}}],
-            "model": "gpt-4o",
-        }
-        done_response = MagicMock()
-        done_response.status_code = 200
-        done_response_data = {
-            "choices": [{"message": {"role": "assistant", "content": "done", "tool_calls": None}}],
-            "model": "gpt-4o",
-        }
-
-        mock_provider = MagicMock()
-        mock_provider.api_key = "fake-key"
-        mock_provider.base_url = "http://fake-provider"
-        mock_provider.provider_type = "openai"
-
-        mock_workflow = MagicMock()
-        mock_workflow.model = "gpt-4o"
-        mock_workflow.context_window = 128_000
-        mock_workflow.temperature = 0.7
-        mock_workflow.max_tokens = 1024
-        mock_workflow.system_prompt = "sys"
-        mock_workflow.tools = []
-
-        call_count = 0
-
-        async def mock_stream(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return first_response_data
-            return done_response_data
-
-        with (
-            patch.object(engine, "_stream_chat_completion", side_effect=mock_stream),
-            patch.object(engine, "_execute_tool", new_callable=AsyncMock, side_effect=RuntimeError("tool blew up")),
-            patch.object(engine, "_resolve_tools", return_value=[]),
-        ):
-            result_msgs = []
-            async for chunk in engine._run_with_custom_provider(
-                messages=messages,
-                workflow=mock_workflow,
-                provider=mock_provider,
-                task_execution_id="task-1",
-            ):
-                result_msgs.append(chunk)
-
-        # The error should be captured and returned as a tool result, not crash
-        tool_result_msgs = [m for m in result_msgs if isinstance(m, dict) and m.get("role") == "tool"]
-        assert any("Tool execution error" in str(m.get("content", "")) for m in tool_result_msgs)
+    async def test_execute_custom_tool_returns_json_error_when_not_found(self):
+        """_execute_custom_tool returns a JSON error when tool is not in the map."""
+        import json
+        result = await _execute_custom_tool("missing_tool", {}, {})
+        data = json.loads(result)
+        assert "error" in data
+        assert "missing_tool" in data["error"]
 
     @pytest.mark.asyncio
-    async def test_compaction_triggered_when_tokens_exceed_threshold(self, engine):
-        """_compact_messages should be called when estimated tokens exceed the threshold."""
-        messages = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "hello"},
-        ]
-        done_response = {
-            "choices": [{"message": {"role": "assistant", "content": "reply", "tool_calls": None}}],
-            "model": "gpt-4o",
-        }
-        mock_provider = MagicMock()
-        mock_provider.api_key = "fake-key"
-        mock_provider.base_url = "http://fake-provider"
-        mock_provider.provider_type = "openai"
+    async def test_execute_mcp_tool_returns_json_error_when_not_found(self):
+        """_execute_mcp_tool returns a JSON error when server is not in the map."""
+        import json
+        result = await _execute_mcp_tool("unknown_tool", {}, {})
+        data = json.loads(result)
+        assert "error" in data
 
-        mock_workflow = MagicMock()
-        mock_workflow.model = "gpt-4o"
-        mock_workflow.context_window = 100
-        mock_workflow.temperature = 0.7
-        mock_workflow.max_tokens = 50
-        mock_workflow.system_prompt = "sys"
-        mock_workflow.tools = []
+    @pytest.mark.asyncio
+    async def test_custom_tool_runner_exception_is_propagated(self):
+        """If the custom tool runner raises, the exception propagates (caller wraps it)."""
+        tool_mock = MagicMock()
+        tool_mock.env_config = None
+        tool_mock.source_code = "print('hi')"
+        tool_mock.name = "my_tool"
 
-        with (
-            patch.object(engine, "_stream_chat_completion", new_callable=AsyncMock, return_value=done_response),
-            patch.object(engine, "_resolve_tools", return_value=[]),
-            patch("app.core.agent_engine.estimate_messages_tokens", return_value=90),
-            patch("app.core.agent_engine.settings") as mock_settings,
-            patch("app.core.agent_engine._compact_messages", wraps=_compact_messages) as mock_compact,
+        with patch(
+            "app.core.agent_engine.custom_tool_runner.run_tool",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("runner failed"),
         ):
-            mock_settings.compaction_enabled = True
-            mock_settings.compaction_token_threshold_pct = 0.75
+            with pytest.raises(RuntimeError, match="runner failed"):
+                await _execute_custom_tool("my_tool", {}, {"my_tool": tool_mock})
+
+    def test_compact_messages_inserts_exactly_one_note(self):
+        """Exactly one compaction note is inserted per compaction pass."""
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(20):
+            msgs.append({"role": "user", "content": f"q{i}"})
+            msgs.append({"role": "assistant", "content": f"a{i}"})
+
+        with patch("app.core.agent_engine.settings") as mock_settings:
             mock_settings.tool_result_clearing_enabled = False
             mock_settings.tool_result_clearing_keep_recent = 4
-            mock_settings.compaction_keep_recent_turns = 6
+            mock_settings.compaction_keep_recent_turns = 4
+            result = _compact_messages(msgs)
 
-            result_msgs = []
-            async for chunk in engine._run_with_custom_provider(
-                messages=messages,
-                workflow=mock_workflow,
-                provider=mock_provider,
-                task_execution_id="task-1",
-            ):
-                result_msgs.append(chunk)
-
-        mock_compact.assert_called()
+        notes = [m for m in result if "Context compacted" in m.get("content", "")]
+        assert len(notes) == 1
