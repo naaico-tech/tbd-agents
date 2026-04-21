@@ -1944,9 +1944,9 @@ async def run_agent(
             await _log(
                 workflow,
                 "knowledge_loaded",
-                    f"{len(knowledge_sources_list)} knowledge source(s) resolved",
-                    task_exec,
-                )
+                f"{len(knowledge_sources_list)} knowledge source(s) resolved",
+                task_exec,
+            )
             if workflow.caveman:
                 compressed = _compress_caveman_context(knowledge_context)
                 if compressed != knowledge_context:

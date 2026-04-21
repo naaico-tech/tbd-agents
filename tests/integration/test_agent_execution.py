@@ -195,7 +195,7 @@ class TestCopilotSDKExecution:
         agent = await create_agent()
         wf = await create_workflow(agent, caveman=True)
         task = TaskExecution(
-            workflow_id=str(wf.id), prompt="Hello", status=TaskStatus.PENDING,
+            workflow_id=str(wf.id), prompt="Hello", status=TaskStatus.PENDING
         )
         await task.insert()
 
@@ -229,9 +229,7 @@ class TestCopilotSDKExecution:
             mock_build.return_value = mock_client
             mock_mm.build_memory_context = AsyncMock(return_value=memory_context)
 
-            await run_agent(
-                wf, "Hello", "ghp_token", task_execution_id=str(task.id),
-            )
+            await run_agent(wf, "Hello", "ghp_token", task_execution_id=str(task.id))
 
         prompt = captured_instructions.get("system_prompt", "")
         assert "<caveman_policy>" in prompt
