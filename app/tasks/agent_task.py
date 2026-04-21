@@ -9,7 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 @celery.task(name="run_agent_task", bind=True, max_retries=1)
-def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str, task_execution_id: str | None = None, reasoning_effort: str | None = None):
+def run_agent_task(
+    self,
+    workflow_id: str,
+    user_prompt: str,
+    github_token: str,
+    task_execution_id: str | None = None,
+    reasoning_effort: str | None = None,
+):
     """Execute the agent engine inside an asyncio event loop.
 
     Each invocation creates a fresh event loop via asyncio.run(), initialises
@@ -18,7 +25,16 @@ def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str, 
     """
     worker = getattr(self.request, "hostname", None)
     try:
-        asyncio.run(_execute(workflow_id, user_prompt, github_token, task_execution_id, worker, reasoning_effort))
+        asyncio.run(
+            _execute(
+                workflow_id,
+                user_prompt,
+                github_token,
+                task_execution_id,
+                worker,
+                reasoning_effort,
+            )
+        )
     except Exception:
         # Best-effort: mark the workflow as failed if the task crashes
         try:
@@ -28,7 +44,14 @@ def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str, 
         raise
 
 
-async def _execute(workflow_id: str, user_prompt: str, github_token: str, task_execution_id: str | None = None, worker: str | None = None, reasoning_effort: str | None = None):
+async def _execute(
+    workflow_id: str,
+    user_prompt: str,
+    github_token: str,
+    task_execution_id: str | None = None,
+    worker: str | None = None,
+    reasoning_effort: str | None = None,
+):
     """Async entry point — initialises DB and runs the agent."""
     from beanie import PydanticObjectId
 
@@ -66,9 +89,10 @@ async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
     await init_db()
 
     # Publish failure to SSE subscribers
-    await event_bus.publish(
-        workflow_id, "status", {"status": "failed", "current_turn": 0}
-    )
+    payload = {"status": "failed", "current_turn": 0}
+    if task_execution_id:
+        payload["task_execution_id"] = task_execution_id
+    await event_bus.publish(workflow_id, "status", payload)
 
     if task_execution_id:
         te = await TaskExecution.get(PydanticObjectId(task_execution_id))

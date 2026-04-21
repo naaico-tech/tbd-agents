@@ -7,8 +7,6 @@ Mocks the Copilot SDK session layer so the test exercises:
 Closes #35
 """
 
-import asyncio
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,7 +17,6 @@ from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import WorkflowStatus
 
 from .conftest import create_agent, create_skill, create_workflow
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,7 +40,7 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
     class _FakeSession:
         session_id = "fake-session-123"
 
-        class _client:
+        class _Client:
             @staticmethod
             async def request(*args, **kwargs):
                 if _on_callback is None:
@@ -58,6 +55,8 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
                     type=SimpleNamespace(value="session.idle"),
                     data=None,
                 ))
+
+        _client = _Client
 
         async def __aenter__(self):
             return self
@@ -121,6 +120,17 @@ class TestCopilotSDKExecution:
         event_types = [e[1] for e in mock_event_bus.events]
         assert "log" in event_types
         assert "status" in event_types
+        status_events = [e for e in mock_event_bus.events if e[1] == "status"]
+        assert any(
+            e[2].get("status") == "running"
+            and e[2].get("task_execution_id") == str(task.id)
+            for e in status_events
+        )
+        assert any(
+            e[2].get("status") == TaskStatus.COMPLETED
+            and e[2].get("task_execution_id") == str(task.id)
+            for e in status_events
+        )
 
     @pytest.mark.asyncio
     async def test_inactive_workflow_returns_none(self, mock_event_bus):
@@ -174,7 +184,9 @@ class TestCopilotSDKExecution:
 
             def capture_session(**kwargs):
                 sm = kwargs.get("system_message", {})
-                captured_instructions["system_prompt"] = sm.get("content", "") if isinstance(sm, dict) else ""
+                captured_instructions["system_prompt"] = (
+                    sm.get("content", "") if isinstance(sm, dict) else ""
+                )
                 return session
 
             mock_client.create_session = AsyncMock(side_effect=capture_session)

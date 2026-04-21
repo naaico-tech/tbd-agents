@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -12,12 +13,15 @@ class Settings(BaseSettings):
     session_timeout: int = 600
     # Redis URL for Celery broker/backend and event bus pub/sub
     redis_url: str = "redis://redis:6379/0"
+    # Task status event queue retention in seconds (1-3600, capped at one hour)
+    task_status_event_ttl_seconds: int = Field(default=3600, ge=1, le=3600)
     # Short-Term Memory: max recent memories per agent cached in Redis
     stm_max_entries: int = 20
     # Long-Term Memory: max memories per agent stored in MongoDB (0 = unlimited)
     ltm_max_entries: int = 200
-    # Fernet encryption key for token store
-    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Fernet encryption key for token store.
+    # Generate with:
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None
     # OpenTelemetry
     otel_endpoint: str = "http://otel-collector:4317"
