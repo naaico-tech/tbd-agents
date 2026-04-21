@@ -43,6 +43,7 @@ def _to_response(tool: CustomTool) -> CustomToolResponse:
         description=tool.description,
         source_code=tool.source_code,
         parameters_schema=tool.parameters_schema,
+        env_config=tool.env_config,
         tags=tool.tags,
         is_enabled=tool.is_enabled,
         created_at=tool.created_at,
@@ -85,6 +86,7 @@ async def create_custom_tool(body: CustomToolCreate, _user=Depends(get_current_u
         description=body.description,
         source_code=body.source_code,
         parameters_schema=schema,
+        env_config=body.env_config,
         tags=body.tags,
         is_enabled=body.is_enabled,
     )
