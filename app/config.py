@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     stm_max_entries: int = 20
     # Long-Term Memory: max memories per agent stored in MongoDB (0 = unlimited)
     ltm_max_entries: int = 200
+    # Prompt context budgets (approximate character budgets before model tokenization)
+    prompt_context_char_budget: int = 24000
+    prompt_skills_char_budget: int = 6000
+    prompt_knowledge_char_budget: int = 12000
+    prompt_memory_char_budget: int = 4000
+    prompt_context_item_char_limit: int = 1200
+    prompt_context_max_items: int = 12
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None

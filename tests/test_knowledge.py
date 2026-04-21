@@ -1,5 +1,10 @@
 """Tests for Knowledge Base models and schemas."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from app.models.knowledge_item import KnowledgeContentType, KnowledgeItem
 from app.models.knowledge_source import (
     KnowledgeSource,
@@ -15,6 +20,7 @@ from app.schemas.knowledge import (
     KnowledgeSourceResponse,
     KnowledgeSourceUpdate,
 )
+from app.services.knowledge_manager import KnowledgeManager
 
 
 # ── KnowledgeSource Model ───────────────────────────────────────────────────
@@ -263,3 +269,41 @@ class TestAgentKnowledgeFields:
         )
         assert len(a.knowledge_source_ids) == 2
         assert a.knowledge_tags == ["docs", "faq"]
+
+
+class TestKnowledgeManager:
+    @pytest.fixture()
+    def manager(self):
+        return KnowledgeManager()
+
+    @pytest.mark.asyncio
+    async def test_build_knowledge_context_dedupes_and_respects_budget(self, manager):
+        duplicate_text = "A" * 2000
+        item = SimpleNamespace(
+            content_type=KnowledgeContentType.TEXT,
+            text_content=duplicate_text,
+            name="doc-1",
+            tags=["docs"],
+        )
+        source = SimpleNamespace(name="qdrant-1", source_type=KnowledgeSourceType.VECTOR_DB)
+
+        with (
+            patch.object(manager, "get_items_by_tags", new_callable=AsyncMock, return_value=[item, item]),
+            patch.object(
+                manager,
+                "query_vector_db",
+                new_callable=AsyncMock,
+                return_value=[{"text": duplicate_text}, {"text": "B" * 100}],
+            ),
+        ):
+            result = await manager.build_knowledge_context(
+                [source],
+                ["docs"],
+                max_chars=350,
+                item_limit=4,
+            )
+
+        assert result.startswith("<knowledge>")
+        assert len(result) <= 350
+        assert result.count("doc-1") == 1
+        assert "..." in result

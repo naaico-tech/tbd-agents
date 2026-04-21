@@ -9,6 +9,15 @@ from app.services import memory_stm
 logger = logging.getLogger(__name__)
 
 
+def _clip_text(text: str, max_chars: int) -> str:
+    """Trim text to a soft character budget while preserving useful prefix context."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3].rstrip() + "..."
+
+
 class MemoryManager:
     """Manages agent memory storage, retrieval, and lifecycle.
 
@@ -162,6 +171,7 @@ class MemoryManager:
         agent_id: str,
         workflow_id: str | None = None,
         limit: int = 50,
+        max_chars: int | None = None,
     ) -> str:
         """Build a <memories> XML context block for system prompt injection.
 
@@ -170,11 +180,15 @@ class MemoryManager:
         """
         await self.prune()
 
+        effective_limit = min(limit, settings.prompt_context_max_items)
+        effective_max_chars = max_chars or settings.prompt_memory_char_budget
+        item_char_limit = settings.prompt_context_item_char_limit
+
         memories_dicts: list[dict] = []
 
         # ── Try Redis STM first ──────────────────────────────────────────
         try:
-            stm_entries = await memory_stm.get_recent_memories(agent_id, limit=limit)
+            stm_entries = await memory_stm.get_recent_memories(agent_id, limit=effective_limit)
             if stm_entries:
                 memories_dicts = stm_entries
         except Exception as exc:
@@ -186,12 +200,12 @@ class MemoryManager:
 
             agent_mems = await Memory.find(
                 {"agent_id": agent_id, "scope": MemoryScope.AGENT}
-            ).sort("-updated_at").limit(limit).to_list()
+            ).sort("-updated_at").limit(effective_limit).to_list()
             memories.extend(agent_mems)
 
             global_mems = await Memory.find(
                 {"scope": MemoryScope.GLOBAL}
-            ).sort("-updated_at").limit(limit).to_list()
+            ).sort("-updated_at").limit(effective_limit).to_list()
             memories.extend(global_mems)
 
             if workflow_id:
@@ -201,7 +215,7 @@ class MemoryManager:
                         "scope": MemoryScope.SESSION,
                         "metadata.workflow_id": workflow_id,
                     }
-                ).sort("-updated_at").limit(limit).to_list()
+                ).sort("-updated_at").limit(effective_limit).to_list()
                 memories.extend(session_mems)
 
             memories_dicts = [
@@ -212,13 +226,41 @@ class MemoryManager:
         if not memories_dicts:
             return ""
 
+        seen: set[tuple[str, str]] = set()
         sections: list[str] = []
+        total_chars = len("<memories>\n\n</memories>")
         for mem in memories_dicts:
-            sections.append(
-                f'<memory key={quoteattr(str(mem.get("key", "")))} scope={quoteattr(str(mem.get("scope", "")))}>\n'
-                f'{escape(str(mem.get("value", "")))}\n'
-                f"</memory>"
+            scope = str(mem.get("scope", ""))
+            key = str(mem.get("key", ""))
+            identity = (scope, key)
+            if identity in seen:
+                continue
+            seen.add(identity)
+
+            section_prefix = f'<memory key={quoteattr(key)} scope={quoteattr(scope)}>\n'
+            section_suffix = "\n</memory>"
+            remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
+            value_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+            if value_budget <= 0:
+                break
+            value = _clip_text(
+                str(mem.get("value", "")),
+                min(item_char_limit, value_budget),
             )
+            section = (
+                section_prefix
+                + f"{escape(value)}\n"
+                + "</memory>"
+            )
+            if total_chars + len(section) + (1 if sections else 0) > effective_max_chars:
+                break
+            sections.append(section)
+            total_chars += len(section) + 1
+            if len(sections) >= effective_limit:
+                break
+
+        if not sections:
+            return ""
 
         return "<memories>\n" + "\n".join(sections) + "\n</memories>"
 

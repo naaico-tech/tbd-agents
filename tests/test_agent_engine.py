@@ -1,7 +1,7 @@
 """Tests for the agent_engine helper functions."""
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -172,3 +172,26 @@ class TestCavemanWorkflowMode:
         assert "`pytest`" in compressed
         assert "run `pytest` before push main" in compressed
         assert len(compressed) < len(context)
+
+
+class TestPromptBudgeting:
+    @pytest.mark.asyncio
+    async def test_skill_injection_respects_budget(self):
+        agent = MagicMock(spec=Agent)
+        agent.system_prompt = "You are helpful."
+        workflow = MagicMock(spec=Workflow)
+        workflow.auto_memory = False
+        workflow.caveman = False
+        workflow.output_format = "json"
+
+        long_skill = MagicMock()
+        long_skill.name = "big-skill"
+        long_skill.instructions = "X" * 8000
+
+        with patch("app.core.agent_engine.Skill.get", new_callable=AsyncMock, return_value=long_skill):
+            prompt = await _build_system_prompt(agent, ["skill-1"], workflow)
+
+        assert "<skills>" in prompt
+        assert len(prompt) <= 24000
+        assert len(prompt) < len(agent.system_prompt) + len(long_skill.instructions) + 500
+        assert "..." in prompt

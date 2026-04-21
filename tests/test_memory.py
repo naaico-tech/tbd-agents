@@ -400,6 +400,27 @@ class TestMemoryManager:
             assert "<memories>" in result
             assert "important" in result
 
+    @pytest.mark.asyncio
+    async def test_build_memory_context_dedupes_and_respects_budget(self, manager):
+        stm_entries = [
+            {"key": "pref", "scope": "agent", "value": "x" * 2000, "agent_id": "agent-1"},
+            {"key": "pref", "scope": "agent", "value": "duplicate", "agent_id": "agent-1"},
+            {"key": "fact", "scope": "global", "value": "useful", "agent_id": "agent-1"},
+        ]
+
+        with (
+            patch.object(manager, "prune", new_callable=AsyncMock),
+            patch(
+                "app.services.memory_manager.memory_stm.get_recent_memories",
+                new_callable=AsyncMock,
+                return_value=stm_entries,
+            ),
+        ):
+            result = await manager.build_memory_context("agent-1", limit=10, max_chars=250)
+            assert result.count('key="pref"') == 1
+            assert len(result) <= 250
+            assert "..." in result
+
 
 # ── Memory Routes ────────────────────────────────────────────────────────────
 

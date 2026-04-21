@@ -11,9 +11,19 @@ from app.models.knowledge_source import (
     KnowledgeSourceStatus,
     KnowledgeSourceType,
 )
+from app.config import settings
 from app.services import token_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _clip_text(text: str, max_chars: int) -> str:
+    """Trim text to a soft character budget while preserving useful prefix context."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3].rstrip() + "..."
 
 
 class KnowledgeManager:
@@ -182,7 +192,12 @@ class KnowledgeManager:
             client.close()
 
     async def build_knowledge_context(
-        self, sources: list[KnowledgeSource], tags: list[str]
+        self,
+        sources: list[KnowledgeSource],
+        tags: list[str],
+        *,
+        max_chars: int | None = None,
+        item_limit: int | None = None,
     ) -> str:
         """Aggregate knowledge text from resolved sources for system prompt injection.
 
@@ -191,30 +206,77 @@ class KnowledgeManager:
         if not sources and not tags:
             return ""
 
+        effective_max_chars = max_chars or settings.prompt_knowledge_char_budget
+        effective_item_limit = item_limit or settings.prompt_context_max_items
+        item_char_limit = settings.prompt_context_item_char_limit
+
         sections: list[str] = []
+        seen_payloads: set[str] = set()
+        total_chars = len("<knowledge>\n\n</knowledge>")
+
+        def _append_section(section: str, dedupe_key: str) -> bool:
+            nonlocal total_chars
+            if dedupe_key in seen_payloads:
+                return False
+            if total_chars + len(section) + (1 if sections else 0) > effective_max_chars:
+                return False
+            seen_payloads.add(dedupe_key)
+            sections.append(section)
+            total_chars += len(section) + 1
+            return True
 
         # Gather text from MongoDB-backed items by tags
         if tags:
-            items = await self.get_items_by_tags(tags, limit=50)
+            items = await self.get_items_by_tags(tags, limit=effective_item_limit * 2)
             for item in items:
                 if item.content_type == KnowledgeContentType.TEXT and item.text_content:
-                    sections.append(
+                    section_prefix = (
                         f'<item name={quoteattr(item.name)} tags={quoteattr(",".join(item.tags))}>\n'
-                        f"{escape(item.text_content)}\n"
-                        f"</item>"
                     )
+                    section_suffix = "\n</item>"
+                    remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
+                    text_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                    if text_budget <= 0:
+                        break
+                    clipped_text = _clip_text(
+                        item.text_content,
+                        min(item_char_limit, text_budget),
+                    )
+                    if _append_section(
+                        section_prefix
+                        + f"{escape(clipped_text)}\n"
+                        + "</item>",
+                        dedupe_key=f"tag:{item.name}:{clipped_text}",
+                    ) and len(sections) >= effective_item_limit:
+                        break
 
         # Gather text from vector DB sources
         for source in sources:
+            if len(sections) >= effective_item_limit:
+                break
             if source.source_type == KnowledgeSourceType.VECTOR_DB:
                 try:
-                    results = await self.query_vector_db(source, limit=20)
+                    remaining = max(1, effective_item_limit - len(sections))
+                    results = await self.query_vector_db(source, limit=remaining)
                     for r in results:
                         text = r.get("text", "")
                         if text:
-                            sections.append(
-                                f'<item source={quoteattr(source.name)}>\n{escape(text)}\n</item>'
+                            section_prefix = f'<item source={quoteattr(source.name)}>\n'
+                            section_suffix = "\n</item>"
+                            remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
+                            text_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                            if text_budget <= 0:
+                                break
+                            clipped_text = _clip_text(
+                                text,
+                                min(item_char_limit, text_budget),
                             )
+                            appended = _append_section(
+                                f'{section_prefix}{escape(clipped_text)}\n</item>',
+                                dedupe_key=f"vector:{source.name}:{clipped_text}",
+                            )
+                            if not appended or len(sections) >= effective_item_limit:
+                                break
                 except Exception as exc:
                     logger.warning(
                         "Failed to query vector DB '%s': %s", source.name, exc

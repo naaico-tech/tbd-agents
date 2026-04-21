@@ -236,6 +236,19 @@ def _compress_caveman_context(text: str) -> str:
     compressed = "".join(compressed_parts)
     return compressed if len(compressed) < len(text) else text
 
+def _clip_prompt_text(text: str, max_chars: int) -> str:
+    """Trim prompt section text to a soft character budget."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """Approximate token count from plain text using a 4-char heuristic."""
+    return max(1, len(text) // 4) if text else 0
+
 
 async def _update_progress(
     workflow: Workflow,
@@ -270,12 +283,27 @@ async def _build_system_prompt(
     # Skills
     if skill_ids:
         skill_sections: list[str] = []
+        total_skill_chars = 0
         for sid in skill_ids:
             skill = await Skill.get(sid)
             if skill:
-                skill_sections.append(
-                    f'<skill name="{skill.name}">\n{skill.instructions}\n</skill>'
+                remaining_budget = settings.prompt_skills_char_budget - total_skill_chars
+                if remaining_budget <= 0:
+                    break
+                section_prefix = f'<skill name="{skill.name}">\n'
+                section_suffix = "\n</skill>"
+                instruction_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                if instruction_budget <= 0:
+                    break
+                section = (
+                    section_prefix
+                    + f'{_clip_prompt_text(skill.instructions, instruction_budget)}\n'
+                    + '</skill>'
                 )
+                if total_skill_chars + len(section) > settings.prompt_skills_char_budget:
+                    break
+                skill_sections.append(section)
+                total_skill_chars += len(section) + 1
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
 
@@ -334,6 +362,9 @@ async def _build_system_prompt(
             "\n- If there are no meaningful new learnings, do not call store_memory"
             "\n</auto_memory_policy>"
         )
+
+    if len(system_prompt) > settings.prompt_context_char_budget:
+        system_prompt = _clip_prompt_text(system_prompt, settings.prompt_context_char_budget)
 
     return system_prompt
 
@@ -2053,13 +2084,17 @@ async def run_agent(
     knowledge_sources_list = list(knowledge_sources_map.values())
     if knowledge_sources_list or agent.knowledge_tags:
         knowledge_context = await knowledge_manager.build_knowledge_context(
-            knowledge_sources_list, agent.knowledge_tags
+            knowledge_sources_list,
+            agent.knowledge_tags,
+            max_chars=settings.prompt_knowledge_char_budget,
+            item_limit=settings.prompt_context_max_items,
         )
         if knowledge_context:
             await _log(
                 workflow,
                 "knowledge_loaded",
-                f"{len(knowledge_sources_list)} knowledge source(s) resolved",
+                f"{len(knowledge_sources_list)} knowledge source(s) resolved "
+                f"({len(knowledge_context)} chars, ~{_estimate_text_tokens(knowledge_context)} tokens)",
                 task_exec,
             )
             if workflow.caveman:
@@ -2087,12 +2122,15 @@ async def run_agent(
             memory_context = await memory_manager.build_memory_context(
                 agent_id=str(agent.id),
                 workflow_id=str(workflow.id),
+                limit=settings.prompt_context_max_items,
+                max_chars=settings.prompt_memory_char_budget,
             )
             if memory_context:
                 await _log(
                     workflow,
                     "memories_loaded",
-                    "Agent memories injected into context",
+                    f"Agent memories injected into context ({len(memory_context)} chars, "
+                    f"~{_estimate_text_tokens(memory_context)} tokens)",
                     task_exec,
                 )
                 if workflow.caveman:
@@ -2110,6 +2148,15 @@ async def run_agent(
 
     system_prompt = await _build_system_prompt(
         agent, workflow.skill_ids, workflow, knowledge_context, memory_context
+    )
+    await _log(
+        workflow,
+        "context_budget",
+        "Prompt context assembled "
+        f"(system={len(agent.system_prompt)} chars, "
+        f"knowledge={len(knowledge_context)} chars, memory={len(memory_context)} chars, "
+        f"total={len(system_prompt)} chars, ~{_estimate_text_tokens(system_prompt)} tokens)",
+        task_exec,
     )
 
     # Sync repository if configured
