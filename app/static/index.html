@@ -1731,7 +1731,14 @@ function openWorkflowModal() {
     <div class="form-group"><label>Max Turns</label><input id="f-wf-turns" type="number" value="5"></div>
     <div class="form-group"><label>Output Format</label>
       <select id="f-wf-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
-    <div class="form-group"><label>Skills</label><div id="f-wf-skills">${skillOpts}</div></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Skills <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — injected into system prompt)</span></label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-skills">${skillOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated — selects all matching skills)</span></label>
+        <input id="f-wf-skill-tags" placeholder="e.g. sre, debugging">
+        <div class="hint">Any skill that has at least one of these tags will be injected.</div>
+      </div>
+    </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Guardrails <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — validate inputs before running)</span></label>
       <div class="form-group"><label>Select by ID</label><div id="f-wf-guardrails">${guardrailOpts}</div></div>
@@ -1890,6 +1897,8 @@ function updateModelInfo(models, modelId, infoEl) {
 
 async function saveWorkflow() {
   const skillIds = [...document.querySelectorAll('#f-wf-skills input:checked')].map(c => c.value);
+  const skillTags = (document.getElementById('f-wf-skill-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
   const guardrailIds = [...document.querySelectorAll('#f-wf-guardrails .gr-id-check:checked')].map(c => c.value);
   const guardrailTags = (document.getElementById('f-wf-guardrail-tags')?.value || '')
     .split(',').map(t=>t.trim()).filter(Boolean);
@@ -1900,6 +1909,7 @@ async function saveWorkflow() {
     max_turns: parseInt(document.getElementById('f-wf-turns').value) || 5,
     output_format: document.getElementById('f-wf-format').value,
     skill_ids: skillIds,
+    skill_tags: skillTags,
     guardrail_ids: guardrailIds,
     guardrail_tags: guardrailTags,
     infinite_session: document.getElementById('f-wf-infinite').checked,
@@ -1923,6 +1933,12 @@ function openEditWorkflowModal(id) {
   if (!w) return;
   const agentEditOpts = agents.map(a =>
     `<option value="${a.id}" ${a.id === w.agent_id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  const skillEditOpts = skills.map(s =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
+      <input type="checkbox" class="sk-id-check" value="${s.id}" ${(w.skill_ids||[]).includes(s.id) ? 'checked' : ''}>
+      ${esc(s.name)}
+      ${(s.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No skills available</span>';
   const guardrailEditOpts = guardrails.map(g =>
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" class="gr-id-check" value="${g.id}" ${(w.guardrail_ids||[]).includes(g.id) ? 'checked' : ''}>
@@ -1975,6 +1991,14 @@ function openEditWorkflowModal(id) {
       <div class="hint">Automatically extract and store key learnings after each task completion.</div>
     </div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Skills</label>
+      <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-skills">${skillEditOpts}</div></div>
+      <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated)</span></label>
+        <input id="f-wf-edit-skill-tags" value="${esc((w.skill_tags||[]).join(', '))}">
+        <div class="hint">Any skill that has at least one of these tags will be injected.</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Guardrails</label>
       <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-guardrails">${guardrailEditOpts}</div></div>
       <div class="form-group"><label>Select by Tags <span style="font-weight:400;font-size:11px;color:var(--muted)">(comma-separated)</span></label>
@@ -2015,6 +2039,9 @@ function openEditWorkflowModal(id) {
 }
 
 async function updateWorkflow(id) {
+  const skillIds = [...document.querySelectorAll('#f-wf-edit-skills .sk-id-check:checked')].map(c => c.value);
+  const skillTags = (document.getElementById('f-wf-edit-skill-tags')?.value || '')
+    .split(',').map(t=>t.trim()).filter(Boolean);
   const guardrailIds = [...document.querySelectorAll('#f-wf-edit-guardrails .gr-id-check:checked')].map(c => c.value);
   const guardrailTags = (document.getElementById('f-wf-edit-guardrail-tags')?.value || '')
     .split(',').map(t=>t.trim()).filter(Boolean);
@@ -2029,6 +2056,8 @@ async function updateWorkflow(id) {
     bypass_memory: document.getElementById('f-wf-edit-bypass-memory').checked,
     auto_memory: document.getElementById('f-wf-edit-auto-memory').checked,
     reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
+    skill_ids: skillIds,
+    skill_tags: skillTags,
     guardrail_ids: guardrailIds,
     guardrail_tags: guardrailTags,
     repo_url: document.getElementById('f-wf-edit-repo-url').value || null,

@@ -280,30 +280,51 @@ async def _build_system_prompt(
     """Assemble the system prompt from agent config + skills + knowledge + memories."""
     system_prompt = agent.system_prompt
 
-    # Skills
-    if skill_ids:
+    # Skills — resolve by explicit ID first, then by tag (union, deduplicated)
+    skill_tags = getattr(workflow, "skill_tags", []) or []
+    if skill_ids or skill_tags:
         skill_sections: list[str] = []
+        seen_ids: set[str] = set()
         total_skill_chars = 0
+
+        def _add_skill_section(skill) -> bool:
+            nonlocal total_skill_chars
+            remaining_budget = settings.prompt_skills_char_budget - total_skill_chars
+            if remaining_budget <= 0:
+                return False
+            section_prefix = f'<skill name="{skill.name}">\n'
+            section_suffix = "\n</skill>"
+            instruction_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+            if instruction_budget <= 0:
+                return False
+            section = (
+                section_prefix
+                + f'{_clip_prompt_text(skill.instructions, instruction_budget)}\n'
+                + '</skill>'
+            )
+            if total_skill_chars + len(section) > settings.prompt_skills_char_budget:
+                return False
+            skill_sections.append(section)
+            total_skill_chars += len(section) + 1
+            return True
+
         for sid in skill_ids:
             skill = await Skill.get(sid)
             if skill:
-                remaining_budget = settings.prompt_skills_char_budget - total_skill_chars
-                if remaining_budget <= 0:
+                seen_ids.add(str(skill.id))
+                if not _add_skill_section(skill):
                     break
-                section_prefix = f'<skill name="{skill.name}">\n'
-                section_suffix = "\n</skill>"
-                instruction_budget = remaining_budget - len(section_prefix) - len(section_suffix)
-                if instruction_budget <= 0:
-                    break
-                section = (
-                    section_prefix
-                    + f'{_clip_prompt_text(skill.instructions, instruction_budget)}\n'
-                    + '</skill>'
-                )
-                if total_skill_chars + len(section) > settings.prompt_skills_char_budget:
-                    break
-                skill_sections.append(section)
-                total_skill_chars += len(section) + 1
+
+        for tag in skill_tags:
+            if total_skill_chars >= settings.prompt_skills_char_budget:
+                break
+            tag_skills = await Skill.find({"tags": tag}).to_list()
+            for skill in tag_skills:
+                sid = str(skill.id)
+                if sid not in seen_ids:
+                    seen_ids.add(sid)
+                    if not _add_skill_section(skill):
+                        break
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
 

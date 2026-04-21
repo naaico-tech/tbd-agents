@@ -20,6 +20,7 @@ class WorkflowCreate(BaseModel):
     output_format: str = "json"  # json | markdown
     model: str | None = None
     skill_ids: list[str] = []
+    skill_tags: list[str] = []  # Tag-based skill selection (union)
     infinite_session: bool = True
     caveman: bool = False
     bypass_memory: bool = False  # Skip memory injection during task runs
@@ -39,6 +40,7 @@ class WorkflowUpdate(BaseModel):
     output_format: str | None = None
     model: str | None = None
     skill_ids: list[str] | None = None
+    skill_tags: list[str] | None = None  # Tag-based skill selection (union)
     infinite_session: bool | None = None
     caveman: bool | None = None
     bypass_memory: bool | None = None
@@ -96,6 +98,7 @@ class WorkflowResponse(BaseModel):
     current_turn: int
     session_id: str | None = None
     skill_ids: list[str]
+    skill_tags: list[str] = []
     status: str
     output_format: str
     infinite_session: bool = True

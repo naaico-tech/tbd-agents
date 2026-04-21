@@ -56,6 +56,7 @@ class Workflow(Document):
     current_turn: int = 0
     session_id: str | None = None  # Copilot SDK session ID
     skill_ids: list[str] = Field(default_factory=list)
+    skill_tags: list[str] = Field(default_factory=list)  # Tag-based skill selection (union)
     messages: list[Message] = Field(default_factory=list)
     logs: list[LogEntry] = Field(default_factory=list)
     status: WorkflowStatus = WorkflowStatus.ACTIVE
