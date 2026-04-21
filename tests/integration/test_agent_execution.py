@@ -40,7 +40,7 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
     class _FakeSession:
         session_id = "fake-session-123"
 
-        class _client:  # noqa: N801
+        class _Client:
             @staticmethod
             async def request(*args, **kwargs):
                 if _on_callback is None:
@@ -55,6 +55,8 @@ def _mock_copilot_session(response_text: str = "Hello from Copilot!"):
                     type=SimpleNamespace(value="session.idle"),
                     data=None,
                 ))
+
+        _client = _Client
 
         async def __aenter__(self):
             return self
