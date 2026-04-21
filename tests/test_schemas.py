@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.guardrail import GuardrailType
-from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from app.schemas.agent import AgentCreate, AgentUpdate
 from app.schemas.guardrail import GuardrailCreate, GuardrailUpdate
 from app.schemas.mcp import McpServerCreate, McpServerUpdate, McpTestResponse
 from app.schemas.skill import SkillCreate, SkillUpdate
@@ -14,7 +14,6 @@ from app.schemas.workflow import (
     WorkflowCreate,
     WorkflowUpdate,
 )
-
 
 # ── Agent schemas ────────────────────────────────────────────────────────────
 
@@ -172,6 +171,7 @@ class TestWorkflowSchemas:
         assert w.agent_id == "abc123"
         assert w.output_format == "json"
         assert w.infinite_session is True
+        assert w.caveman is False
         assert w.bypass_memory is False
         assert w.auto_memory is False
 
@@ -188,17 +188,26 @@ class TestWorkflowSchemas:
             guardrail_tags=["safety"],
             repo_url="https://github.com/test/repo",
             repo_branch="develop",
+            caveman=True,
             bypass_memory=True,
             auto_memory=True,
         )
         assert w.model == "gpt-4.1"
+        assert w.caveman is True
         assert w.bypass_memory is True
         assert w.auto_memory is True
 
     def test_update(self):
-        u = WorkflowUpdate(max_turns=20, reasoning_effort="low", bypass_memory=True, auto_memory=True)
+        u = WorkflowUpdate(
+            max_turns=20,
+            reasoning_effort="low",
+            caveman=True,
+            bypass_memory=True,
+            auto_memory=True,
+        )
         assert u.max_turns == 20
         assert u.model is None
+        assert u.caveman is True
         assert u.bypass_memory is True
         assert u.auto_memory is True
 

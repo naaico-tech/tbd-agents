@@ -1629,6 +1629,12 @@ function openWorkflowModal() {
     </div>
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-caveman"> Caveman
+      </label>
+      <div class="hint">Use terse caveman-style responses and compress injected workflow context to save tokens.</div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="f-wf-bypass-memory"> Bypass Memory
       </label>
       <div class="hint">Skip memory (STM/LTM) injection during task runs for this workflow.</div>
@@ -1778,6 +1784,7 @@ async function saveWorkflow() {
     guardrail_ids: guardrailIds,
     guardrail_tags: guardrailTags,
     infinite_session: document.getElementById('f-wf-infinite').checked,
+    caveman: document.getElementById('f-wf-caveman').checked,
     bypass_memory: document.getElementById('f-wf-bypass-memory').checked,
     auto_memory: document.getElementById('f-wf-auto-memory').checked,
     reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
@@ -1829,6 +1836,12 @@ function openEditWorkflowModal(id) {
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="f-wf-edit-infinite" ${w.infinite_session?'checked':''}> Infinite Session
       </label>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-edit-caveman" ${w.caveman?'checked':''}> Caveman
+      </label>
+      <div class="hint">Use terse caveman-style responses and compress injected workflow context to save tokens.</div>
     </div>
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -1893,6 +1906,7 @@ async function updateWorkflow(id) {
     max_turns: parseInt(document.getElementById('f-wf-edit-turns').value) || undefined,
     output_format: document.getElementById('f-wf-edit-format').value,
     infinite_session: document.getElementById('f-wf-edit-infinite').checked,
+    caveman: document.getElementById('f-wf-edit-caveman').checked,
     bypass_memory: document.getElementById('f-wf-edit-bypass-memory').checked,
     auto_memory: document.getElementById('f-wf-edit-auto-memory').checked,
     reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,

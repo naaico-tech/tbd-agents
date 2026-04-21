@@ -27,7 +27,8 @@ POST /api/workflows
   "model": "gpt-4.1",
   "max_turns": 10,
   "output_format": "markdown",
-  "infinite_session": true
+  "infinite_session": true,
+  "caveman": true
 }
 ```
 

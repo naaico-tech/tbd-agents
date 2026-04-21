@@ -1,11 +1,18 @@
 """Tests for the agent_engine helper functions."""
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.agent_engine import _parse_todo_list
-from app.models.task_execution import TaskProgress, TodoItemStatus
+from app.core.agent_engine import (
+    _build_system_prompt,
+    _compress_caveman_context,
+    _parse_todo_list,
+)
+from app.models.agent import Agent
+from app.models.task_execution import TodoItemStatus
+from app.models.workflow import Workflow
 
 
 class TestParseTodoList:
@@ -44,11 +51,9 @@ class TestParseTodoList:
         assert result is None
 
     def test_string_input(self):
-        args_str = json.dumps({
-            "todoList": [
-                {"id": 1, "title": "Task", "status": "not-started"},
-            ]
-        })
+        args_str = json.dumps(
+            {"todoList": [{"id": 1, "title": "Task", "status": "not-started"}]}
+        )
         result = _parse_todo_list(args_str)
         assert result is not None
         assert len(result.todos) == 1
@@ -58,37 +63,19 @@ class TestParseTodoList:
         assert result is None
 
     def test_invalid_status_defaults(self):
-        args = {
-            "todoList": [
-                {"id": 1, "title": "Task", "status": "unknown-status"},
-            ]
-        }
+        args = {"todoList": [{"id": 1, "title": "Task", "status": "unknown-status"}]}
         result = _parse_todo_list(args)
         assert result is not None
         assert result.todos[0].status == TodoItemStatus.NOT_STARTED
 
     def test_missing_fields_use_defaults(self):
-        args = {
-            "todoList": [
-                {"id": 1, "title": "Task"},
-            ]
-        }
-        result = _parse_todo_list(args)
+        result = _parse_todo_list({"todoList": [{"id": 1, "title": "Task"}]})
         assert result is not None
         assert result.todos[0].status == TodoItemStatus.NOT_STARTED
 
     def test_list_input_ignored(self):
         result = _parse_todo_list([1, 2, 3])
         assert result is None
-
-
-# ── Auto-memory system prompt injection tests ────────────────────────────────
-
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from app.core.agent_engine import _build_system_prompt
-from app.models.agent import Agent
-from app.models.workflow import Workflow
 
 
 class TestAutoMemoryPromptInjection:
@@ -104,16 +91,22 @@ class TestAutoMemoryPromptInjection:
     def mock_workflow_auto_memory_on(self):
         wf = MagicMock(spec=Workflow)
         wf.auto_memory = True
+        wf.caveman = False
+        wf.output_format = "json"
         return wf
 
     @pytest.fixture
     def mock_workflow_auto_memory_off(self):
         wf = MagicMock(spec=Workflow)
         wf.auto_memory = False
+        wf.caveman = False
+        wf.output_format = "json"
         return wf
 
     @pytest.mark.asyncio
-    async def test_auto_memory_enabled_injects_policy(self, mock_agent, mock_workflow_auto_memory_on):
+    async def test_auto_memory_enabled_injects_policy(
+        self, mock_agent, mock_workflow_auto_memory_on
+    ):
         """Should include auto_memory_policy when workflow.auto_memory is True."""
         prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         assert "<auto_memory_policy>" in prompt
@@ -121,22 +114,61 @@ class TestAutoMemoryPromptInjection:
         assert "snake_case" in prompt
 
     @pytest.mark.asyncio
-    async def test_auto_memory_disabled_no_policy(self, mock_agent, mock_workflow_auto_memory_off):
+    async def test_auto_memory_disabled_no_policy(
+        self, mock_agent, mock_workflow_auto_memory_off
+    ):
         """Should NOT include auto_memory_policy when workflow.auto_memory is False."""
         prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_off)
         assert "<auto_memory_policy>" not in prompt
 
     @pytest.mark.asyncio
-    async def test_auto_memory_preserves_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+    async def test_auto_memory_preserves_execution_policy(
+        self, mock_agent, mock_workflow_auto_memory_on
+    ):
         """Auto-memory policy should appear alongside the execution policy."""
         prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         assert "<execution_policy>" in prompt
         assert "<auto_memory_policy>" in prompt
 
     @pytest.mark.asyncio
-    async def test_auto_memory_after_execution_policy(self, mock_agent, mock_workflow_auto_memory_on):
+    async def test_auto_memory_after_execution_policy(
+        self, mock_agent, mock_workflow_auto_memory_on
+    ):
         """Auto-memory policy should come after execution policy."""
         prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         exec_pos = prompt.index("<execution_policy>")
         auto_pos = prompt.index("<auto_memory_policy>")
         assert auto_pos > exec_pos
+
+
+class TestCavemanWorkflowMode:
+    @pytest.mark.asyncio
+    async def test_caveman_policy_added_to_system_prompt(self):
+        agent = MagicMock(spec=Agent)
+        agent.system_prompt = "You are helpful."
+        workflow = MagicMock(spec=Workflow)
+        workflow.auto_memory = False
+        workflow.caveman = True
+        workflow.output_format = "markdown"
+
+        prompt = await _build_system_prompt(agent, [], workflow)
+
+        assert "<caveman_policy>" in prompt
+        assert "workflow output obligation (markdown)" in prompt
+
+    def test_caveman_context_compression_preserves_tags_and_code(self):
+        context = (
+            "<memories>\n"
+            "<memory key=\"prefs\" scope=\"agent\">"
+            "It is important to make sure you always run `pytest` before push to main."
+            "</memory>\n"
+            "</memories>"
+        )
+
+        compressed = _compress_caveman_context(context)
+
+        assert "<memories>" in compressed
+        assert "<memory key=\"prefs\" scope=\"agent\">" in compressed
+        assert "`pytest`" in compressed
+        assert "run `pytest` before push main" in compressed
+        assert len(compressed) < len(context)

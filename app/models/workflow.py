@@ -70,6 +70,7 @@ class Workflow(Document):
         return v
     usage: UsageStats | None = None
     infinite_session: bool = True
+    caveman: bool = False  # Enable terse caveman mode + context compression
     bypass_memory: bool = False  # Skip memory injection during task runs
     auto_memory: bool = False  # Auto-extract memories after task completion
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)

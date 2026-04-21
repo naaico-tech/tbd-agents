@@ -15,9 +15,11 @@ Capabilities wired:
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
+import re
 import sys
 from datetime import UTC, datetime
 
@@ -55,7 +57,6 @@ from app.observability import (
     cost_per_task_dollars,
     mcp_connections_total,
     premium_requests_total,
-    repo_sync_duration_seconds,
     repo_sync_total,
     tokens_total,
     tool_calls_per_task,
@@ -67,6 +68,34 @@ from app.services.knowledge_manager import knowledge_manager
 from app.services.memory_manager import memory_manager
 
 logger = logging.getLogger(__name__)
+
+_CAVEMAN_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_CAVEMAN_TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
+_CAVEMAN_PROTECTED_RE = re.compile(
+    r"(```.*?```|`[^`]+`|https?://\S+|(?:\./|/)?[\w./-]+\.[A-Za-z0-9_-]+|&[a-zA-Z#0-9]+;)",
+    re.DOTALL,
+)
+_CAVEMAN_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "been", "being", "for", "from",
+    "has", "have", "in", "into", "is", "it", "of", "on", "or", "that", "the",
+    "their", "there", "this", "to", "was", "were", "will", "with", "you", "your",
+}
+_CAVEMAN_REPLACEMENTS = (
+    (re.compile(r"\bplease\b", re.IGNORECASE), ""),
+    (re.compile(r"\bkindly\b", re.IGNORECASE), ""),
+    (re.compile(r"\b(make sure|ensure) to\b", re.IGNORECASE), ""),
+    (re.compile(r"\bit is important to\b", re.IGNORECASE), ""),
+    (re.compile(r"\bin order to\b", re.IGNORECASE), "to"),
+    (re.compile(r"\byou should\b", re.IGNORECASE), ""),
+    (re.compile(r"\bi would recommend\b", re.IGNORECASE), "use"),
+    (
+        re.compile(
+            r"\b(however|furthermore|additionally|basically|actually|simply)\b",
+            re.IGNORECASE,
+        ),
+        "",
+    ),
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -144,6 +173,69 @@ def _parse_todo_list(args: dict | list | str) -> TaskProgress | None:
         return None
 
 
+def _cavemanize_sentence(text: str) -> str:
+    """Compress a prose sentence while preserving protected technical fragments."""
+    if not text or not text.strip():
+        return ""
+
+    protected: list[str] = []
+
+    def _stash(match: re.Match[str]) -> str:
+        protected.append(match.group(0))
+        return f"__CAVEMAN_{len(protected) - 1}__"
+
+    working = _CAVEMAN_PROTECTED_RE.sub(_stash, text)
+    for pattern, replacement in _CAVEMAN_REPLACEMENTS:
+        working = pattern.sub(replacement, working)
+    working = re.sub(r"\s+", " ", working).strip(" \t\r\n-:;,.")
+    if not working:
+        return text.strip()
+
+    words = re.findall(r"__CAVEMAN_\d+__|[A-Za-z0-9_./:+-]+|[^\w\s]", working)
+    compacted: list[str] = []
+    for word in words:
+        if word.startswith("__CAVEMAN_"):
+            compacted.append(word)
+            continue
+        lowered = word.lower()
+        if re.fullmatch(r"[A-Za-z]+", word) and lowered in _CAVEMAN_STOPWORDS:
+            continue
+        compacted.append(word)
+
+    result = " ".join(compacted)
+    result = re.sub(r"\s+([,.;:!?])", r"\1", result)
+    result = re.sub(r"\s+", " ", result).strip()
+    for idx, token in enumerate(protected):
+        result = result.replace(f"__CAVEMAN_{idx}__", token)
+    return result or text.strip()
+
+
+def _compress_caveman_context(text: str) -> str:
+    """Compress XML-ish workflow context text without breaking tags."""
+    if not text or not text.strip():
+        return text
+
+    parts = _CAVEMAN_TAG_SPLIT_RE.split(text)
+    compressed_parts: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("<") and part.endswith(">"):
+            compressed_parts.append(part)
+            continue
+
+        sentences = [
+            _cavemanize_sentence(html.unescape(sentence))
+            for sentence in _CAVEMAN_SENTENCE_SPLIT_RE.split(part)
+            if sentence.strip()
+        ]
+        rebuilt = "\n".join(html.escape(sentence, quote=False) for sentence in sentences)
+        compressed_parts.append(rebuilt)
+
+    compressed = "".join(compressed_parts)
+    return compressed if len(compressed) < len(text) else text
+
+
 async def _update_progress(
     workflow: Workflow,
     task_exec: TaskExecution | None,
@@ -193,6 +285,24 @@ async def _build_system_prompt(
     # Memories
     if memory_context:
         system_prompt += "\n\n" + memory_context
+
+    if getattr(workflow, "caveman", False):
+        target_format = (
+            "JSON payload"
+            if workflow.output_format == OutputFormat.JSON
+            else "markdown"
+        )
+        system_prompt += (
+            "\n\n<caveman_policy>"
+            "\nUse caveman mode for final responses: terse, direct, technically exact."
+            "\nDrop filler, pleasantries, and hedging. Fragments OK."
+            "\nKeep code, commands, file paths, URLs, versions, and identifiers exact."
+            "\nEven in caveman mode, still satisfy full user intent and the "
+            f"workflow output obligation ({target_format})."
+            "\nIf safety or irreversible-action clarity matters, be explicit first,"
+            " then resume terse style."
+            "\n</caveman_policy>"
+        )
 
     # Autonomous execution directive
     system_prompt += (
@@ -1834,9 +1944,19 @@ async def run_agent(
             await _log(
                 workflow,
                 "knowledge_loaded",
-                f"{len(knowledge_sources_list)} knowledge source(s) resolved",
-                task_exec,
-            )
+                    f"{len(knowledge_sources_list)} knowledge source(s) resolved",
+                    task_exec,
+                )
+            if workflow.caveman:
+                compressed = _compress_caveman_context(knowledge_context)
+                if compressed != knowledge_context:
+                    await _log(
+                        workflow,
+                        "caveman_context",
+                        f"Compressed knowledge context {len(knowledge_context)}→{len(compressed)} chars",
+                        task_exec,
+                    )
+                    knowledge_context = compressed
 
     # ── Memory context ───────────────────────────────────────────────────────
     memory_context = ""
@@ -1860,6 +1980,16 @@ async def run_agent(
                     "Agent memories injected into context",
                     task_exec,
                 )
+                if workflow.caveman:
+                    compressed = _compress_caveman_context(memory_context)
+                    if compressed != memory_context:
+                        await _log(
+                            workflow,
+                            "caveman_context",
+                            f"Compressed memory context {len(memory_context)}→{len(compressed)} chars",
+                            task_exec,
+                        )
+                        memory_context = compressed
         except Exception as exc:
             logger.warning("Failed to load memories for agent %s: %s", agent.id, exc)
 
@@ -2221,10 +2351,10 @@ async def run_agent(
                     while not done.is_set():
                         remaining = deadline - asyncio.get_event_loop().time()
                         if remaining <= 0:
-                            raise asyncio.TimeoutError()
+                            raise TimeoutError()
                         try:
                             await asyncio.wait_for(done.wait(), timeout=min(2.0, remaining))
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             if done.is_set():
                                 break
                             # Check if user requested halt
@@ -2244,7 +2374,7 @@ async def run_agent(
                             # Not halted yet and not timed out — keep waiting
                             if remaining <= 2.0:
                                 raise
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     workflow.current_turn = tool_call_count
                     await _log(
                         workflow,

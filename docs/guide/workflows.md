@@ -15,6 +15,7 @@ A workflow combines:
 | **Max turns** | Limit on tool-call rounds (prevents runaway loops) |
 | **Output format** | `json` or `markdown` |
 | **Infinite session** | Enable/disable automatic context compaction |
+| **Caveman** | Enable terse responses + compressed injected context |
 | **Skills** | Installed instruction modules |
 
 Workflows persist their full state: messages, logs, usage stats, and status.
@@ -31,7 +32,8 @@ curl -X POST http://localhost:8000/api/workflows \
     "agent_id": "<AGENT_ID>",
     "max_turns": 10,
     "output_format": "markdown",
-    "infinite_session": true
+    "infinite_session": true,
+    "caveman": true
   }'
 ```
 
@@ -86,3 +88,14 @@ Long-running agents can exhaust a model's context window. TBD Agents uses the Co
 - The agent continues working without interruption
 
 This is enabled by default and can be toggled per workflow.
+
+## Caveman Workflows
+
+Enable `caveman` on a workflow to apply a native caveman mode inspired by
+JuliusBrussee/caveman:
+
+- final responses become terser to reduce output tokens
+- injected memory/knowledge context is compressed before prompt assembly
+- code, commands, paths, URLs, and identifiers are preserved verbatim
+
+The workflow still keeps its normal output contract (`json` or `markdown`).

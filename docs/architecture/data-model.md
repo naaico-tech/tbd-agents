@@ -44,6 +44,7 @@ erDiagram
         string status
         string output_format
         bool infinite_session
+        bool caveman
         dict usage
         list skill_ids
         list messages
@@ -132,6 +133,7 @@ An execution context that ties an agent to a conversation session.
 | `status` | enum | `active` / `running` / `completed` / `failed` / `max_turns` |
 | `output_format` | string | `json` or `markdown` |
 | `infinite_session` | bool | Enable context compaction |
+| `caveman` | bool | Enable terse output + compressed injected context |
 | `usage` | object | `{premium_req, in_tok, out_tok, cache_read, cache_write, cost}` |
 | `skill_ids` | string[] | Installed skills |
 | `messages` | array | `{role, content, tool_calls}` |

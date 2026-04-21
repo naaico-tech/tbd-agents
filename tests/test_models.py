@@ -1,42 +1,37 @@
 """Tests for Pydantic models (validation, defaults, enums)."""
 
-from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
+# ── Agent ────────────────────────────────────────────────────────────────────
+# Beanie Document classes require init_beanie to be called before instantiation.
+# We use model_construct() to test field defaults without hitting MongoDB.
+from app.models.agent import Agent
 from app.models.guardrail import (
+    Guardrail,
     GuardrailType,
     PromptGuardrailConfig,
     RequestGuardrailConfig,
 )
-from app.models.mcp_server import McpServerStatus, TransportType
+from app.models.mcp_server import McpServer, McpServerStatus, TransportType
+from app.models.skill import Skill
 from app.models.task_execution import (
+    TaskExecution,
     TaskProgress,
     TaskStatus,
     TodoItem,
     TodoItemStatus,
 )
+from app.models.token import Token
 from app.models.workflow import (
     LogEntry,
     Message,
     OutputFormat,
     UsageStats,
+    Workflow,
     WorkflowStatus,
 )
-
-
-# ── Agent ────────────────────────────────────────────────────────────────────
-# Beanie Document classes require init_beanie to be called before instantiation.
-# We use model_construct() to test field defaults without hitting MongoDB.
-
-from app.models.agent import Agent
-from app.models.guardrail import Guardrail
-from app.models.mcp_server import McpServer
-from app.models.skill import Skill
-from app.models.task_execution import TaskExecution
-from app.models.token import Token
-from app.models.workflow import Workflow
 
 
 class TestAgentModel:
@@ -181,6 +176,7 @@ class TestWorkflowModel:
         assert Workflow.model_fields["status"].default == WorkflowStatus.ACTIVE
         assert Workflow.model_fields["output_format"].default == OutputFormat.JSON
         assert Workflow.model_fields["infinite_session"].default is True
+        assert Workflow.model_fields["caveman"].default is False
         assert Workflow.model_fields["bypass_memory"].default is False
         assert Workflow.model_fields["auto_memory"].default is False
 
