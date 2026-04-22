@@ -12,7 +12,9 @@ from app.models.knowledge_source import (
     KnowledgeSourceType,
 )
 from app.config import settings
+from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import token_manager
+from app.services.embeddings import embeddings_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,25 @@ def _clip_text(text: str, max_chars: int) -> str:
     if max_chars <= 3:
         return text[:max_chars]
     return text[: max_chars - 3].rstrip() + "..."
+
+
+def _chunk_text(text: str, chunk_chars: int, overlap_chars: int) -> list[str]:
+    """Split *text* into overlapping character-based chunks.
+
+    Returns a list of non-empty chunks.  The last chunk may be shorter than
+    *chunk_chars*.  When *text* fits in a single chunk it is returned as-is.
+    """
+    if len(text) <= chunk_chars:
+        return [text]
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_chars, len(text))
+        chunks.append(text[start:end])
+        if end == len(text):
+            break
+        start += chunk_chars - overlap_chars
+    return [c for c in chunks if c.strip()]
 
 
 class KnowledgeManager:
@@ -74,12 +95,16 @@ class KnowledgeManager:
             return {"success": False, "error": str(exc)[:500]}
 
     async def query_vector_db(
-        self, source: KnowledgeSource, limit: int = 10
+        self,
+        source: KnowledgeSource,
+        limit: int = 10,
+        query: str | None = None,
     ) -> list[dict]:
-        """Retrieve documents from a Qdrant vector DB source via scroll.
+        """Retrieve documents from a Qdrant vector DB source.
 
-        Phase 1 uses scroll to retrieve documents. Semantic search with
-        embeddings is deferred to Phase 2.
+        When *query* is provided and embeddings are available, uses semantic
+        similarity search via ``query_points``.  Otherwise falls back to
+        ``scroll`` for recency-based retrieval.
         """
         from qdrant_client import AsyncQdrantClient
 
@@ -93,7 +118,32 @@ class KnowledgeManager:
 
         client = AsyncQdrantClient(url=url, api_key=api_key)
         try:
-            results, _ = await client.scroll(
+            # ── Semantic search ──────────────────────────────────────────
+            if query and settings.embeddings_enabled:
+                query_vec = await embeddings_service.embed_one(query)
+                if query_vec is not None:
+                    results = await client.query_points(
+                        collection_name=collection,
+                        query=query_vec,
+                        limit=limit,
+                        with_payload=True,
+                    )
+                    hits = [
+                        {
+                            "id": str(point.id),
+                            "text": point.payload.get("text", "") if point.payload else "",
+                            "metadata": point.payload or {},
+                            "score": point.score,
+                        }
+                        for point in results.points
+                    ]
+                    semantic_retrieval_results.labels(type="knowledge").observe(len(hits))
+                    if hits:
+                        semantic_retrieval_hits_total.labels(type="knowledge").inc()
+                    return hits
+
+            # ── Scroll fallback ──────────────────────────────────────────
+            scroll_results, _ = await client.scroll(
                 collection_name=collection,
                 limit=limit,
                 with_payload=True,
@@ -104,10 +154,53 @@ class KnowledgeManager:
                     "text": point.payload.get("text", "") if point.payload else "",
                     "metadata": point.payload or {},
                 }
-                for point in results
+                for point in scroll_results
             ]
         finally:
             await client.close()
+
+    async def store_text_item(
+        self,
+        source_id: str,
+        name: str,
+        text: str,
+        tags: list[str],
+        metadata: dict | None = None,
+    ) -> list[KnowledgeItem]:
+        """Store a text knowledge item, chunking it and embedding each chunk.
+
+        Each chunk is saved as a separate KnowledgeItem with the chunk index
+        in its metadata.  Embeddings are stored in the item's ``metadata``
+        field (as the full float list is too large for MongoDB indexing) and
+        NOT pushed to Qdrant here — Qdrant is queried via the external vector
+        DB source.  The embedding is stored on the item so callers that have
+        a Qdrant client can upsert them separately if needed.
+        """
+        chunk_chars = settings.knowledge_chunk_chars
+        overlap_chars = settings.knowledge_chunk_overlap_chars
+        chunks = _chunk_text(text, chunk_chars, overlap_chars)
+
+        items: list[KnowledgeItem] = []
+        for idx, chunk in enumerate(chunks):
+            embed = await embeddings_service.embed_one(chunk) if settings.embeddings_enabled else None
+            item_meta = dict(metadata or {})
+            item_meta["chunk_index"] = idx
+            item_meta["chunk_total"] = len(chunks)
+            if embed:
+                item_meta["embedding"] = embed
+
+            item = KnowledgeItem(
+                source_id=source_id,
+                name=f"{name}[{idx}]" if len(chunks) > 1 else name,
+                content_type=KnowledgeContentType.TEXT,
+                text_content=chunk,
+                tags=tags,
+                metadata=item_meta,
+            )
+            await item.insert()
+            items.append(item)
+
+        return items
 
     async def get_items_by_tags(
         self, tags: list[str], limit: int = 10
@@ -198,10 +291,12 @@ class KnowledgeManager:
         *,
         max_chars: int | None = None,
         item_limit: int | None = None,
+        query: str | None = None,
     ) -> str:
         """Aggregate knowledge text from resolved sources for system prompt injection.
 
-        Returns an XML-formatted string with knowledge content from all sources.
+        When *query* is provided, vector DB sources use semantic search;
+        otherwise scroll is used.  Returns an XML-formatted string.
         """
         if not sources and not tags:
             return ""
@@ -257,7 +352,7 @@ class KnowledgeManager:
             if source.source_type == KnowledgeSourceType.VECTOR_DB:
                 try:
                     remaining = max(1, effective_item_limit - len(sections))
-                    results = await self.query_vector_db(source, limit=remaining)
+                    results = await self.query_vector_db(source, limit=remaining, query=query)
                     for r in results:
                         text = r.get("text", "")
                         if text:

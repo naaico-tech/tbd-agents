@@ -13,11 +13,15 @@ import pytest
 
 from app.core.agent_engine import (
     _build_provider_headers,
+    _clear_old_tool_results,
     _compact_messages,
+    _estimate_request_tokens,
+    _estimate_tools_tokens,
     _compute_retry_delay,
     _http_post_with_retry,
     _resolve_provider_url,
     _stream_chat_completion,
+    _truncate_tool_result,
 )
 from app.models.provider import Provider, ProviderType
 
@@ -188,6 +192,44 @@ class TestCompactMessages:
         note = [m for m in result if "compacted" in m.get("content", "").lower()]
         assert len(note) == 1
         assert "4" in note[0]["content"]
+
+
+class TestRequestTokenEstimation:
+    def test_tools_are_counted_in_request_estimate(self):
+        messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "huge_tool",
+                "description": "X" * 500,
+                "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+            },
+        }]
+
+        assert _estimate_tools_tokens(tools) > 0
+        assert _estimate_request_tokens(messages, tools) > _estimate_request_tokens(messages)
+
+    def test_truncate_tool_result_adds_marker(self):
+        original = "A" * 500
+        truncated = _truncate_tool_result(original, 120)
+
+        assert len(truncated) <= 120
+        assert "truncated for context efficiency" in truncated
+
+    def test_clear_old_tool_results_preserves_recent_tail(self):
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1"}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "old"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c2"}]},
+            {"role": "tool", "tool_call_id": "c2", "content": "new"},
+        ]
+
+        result, cleared = _clear_old_tool_results(messages, keep_recent=1)
+
+        assert cleared == 1
+        assert result[2]["content"] == "[tool result cleared for context efficiency]"
+        assert result[4]["content"] == "new"
 
 
 # ── _http_post_with_retry ───────────────────────────────────────────────────

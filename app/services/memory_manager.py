@@ -4,9 +4,14 @@ from xml.sax.saxutils import escape, quoteattr
 
 from app.config import settings
 from app.models.memory import Memory, MemoryScope
+from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import memory_stm
+from app.services.embeddings import embeddings_service
 
 logger = logging.getLogger(__name__)
+
+# Qdrant collection used for agent memory vectors
+_MEMORY_COLLECTION = "agent_memories"
 
 
 def _clip_text(text: str, max_chars: int) -> str:
@@ -40,9 +45,15 @@ class MemoryManager:
     ) -> Memory:
         """Store a memory, upserting by (agent_id, scope, key).
 
-        Writes to both MongoDB (LTM) and Redis (STM) and enforces the
-        per-agent LTM cap configured via ``ltm_max_entries``.
+        Writes to both MongoDB (LTM) and Redis (STM), enforces the per-agent
+        LTM cap, and upserts the embedding vector to Qdrant when embeddings
+        are enabled.
         """
+        # ── Generate embedding if not supplied ──────────────────────────
+        if embedding is None and settings.embeddings_enabled:
+            embed_text = f"{key}: {value}"
+            embedding = await embeddings_service.embed_one(embed_text)
+
         existing = await Memory.find_one(
             {"agent_id": agent_id, "scope": scope, "key": key}
         )
@@ -74,6 +85,10 @@ class MemoryManager:
         # ── Enforce LTM cap ──────────────────────────────────────────────
         await self._enforce_ltm_cap(agent_id)
 
+        # ── Upsert vector to Qdrant ──────────────────────────────────────
+        if embedding:
+            await self._upsert_qdrant(agent_id, mem, embedding)
+
         # ── Push to Redis STM ────────────────────────────────────────────
         try:
             await memory_stm.push_memory(agent_id, {
@@ -87,6 +102,61 @@ class MemoryManager:
             logger.warning("STM push failed for agent %s: %s", agent_id, exc)
 
         return mem
+
+    async def _upsert_qdrant(
+        self, agent_id: str, mem: Memory, embedding: list[float]
+    ) -> None:
+        """Upsert a memory vector to the shared Qdrant collection.
+
+        Creates the collection if it does not exist yet.  Failures are
+        non-fatal — logged as warnings only.
+        """
+        qdrant_url = settings.qdrant_url
+        if not qdrant_url:
+            return
+        try:
+            from qdrant_client import AsyncQdrantClient
+            from qdrant_client.models import (
+                Distance,
+                PointStruct,
+                VectorParams,
+            )
+
+            client = AsyncQdrantClient(
+                url=qdrant_url,
+                api_key=settings.qdrant_api_key or None,
+            )
+            try:
+                collections = await client.get_collections()
+                existing_names = {c.name for c in collections.collections}
+                if _MEMORY_COLLECTION not in existing_names:
+                    await client.create_collection(
+                        _MEMORY_COLLECTION,
+                        vectors_config=VectorParams(
+                            size=settings.embeddings_dim,
+                            distance=Distance.COSINE,
+                        ),
+                    )
+                point_id = abs(hash(f"{agent_id}:{mem.scope}:{mem.key}")) % (2**63)
+                await client.upsert(
+                    collection_name=_MEMORY_COLLECTION,
+                    points=[
+                        PointStruct(
+                            id=point_id,
+                            vector=embedding,
+                            payload={
+                                "agent_id": agent_id,
+                                "scope": str(mem.scope),
+                                "key": mem.key,
+                                "value": mem.value,
+                            },
+                        )
+                    ],
+                )
+            finally:
+                await client.close()
+        except Exception as exc:
+            logger.warning("Qdrant upsert failed for memory '%s': %s", mem.key, exc)
 
     async def _enforce_ltm_cap(self, agent_id: str) -> None:
         """Remove oldest memories when the per-agent LTM cap is exceeded."""
@@ -140,6 +210,67 @@ class MemoryManager:
 
         return await Memory.find(filter_query).sort("-updated_at").limit(limit).to_list()
 
+    async def search_semantic(
+        self,
+        agent_id: str,
+        query: str,
+        scope: MemoryScope | None = None,
+        top_k: int | None = None,
+    ) -> list[dict]:
+        """Semantic similarity search over Qdrant agent_memories collection.
+
+        Returns a list of payload dicts sorted by relevance.  Falls back to
+        an empty list when embeddings are unavailable or Qdrant is not
+        configured.
+        """
+        qdrant_url = settings.qdrant_url
+        if not qdrant_url or not settings.embeddings_enabled:
+            return []
+
+        query_vec = await embeddings_service.embed_one(query)
+        if query_vec is None:
+            return []
+
+        k = top_k or settings.memory_retrieval_top_k
+
+        try:
+            from qdrant_client import AsyncQdrantClient
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+            client = AsyncQdrantClient(
+                url=qdrant_url,
+                api_key=settings.qdrant_api_key or None,
+            )
+            try:
+                query_filter = Filter(
+                    must=[FieldCondition(key="agent_id", match=MatchValue(value=agent_id))]
+                )
+                if scope:
+                    query_filter.must.append(  # type: ignore[union-attr]
+                        FieldCondition(key="scope", match=MatchValue(value=str(scope)))
+                    )
+                results = await client.query_points(
+                    collection_name=_MEMORY_COLLECTION,
+                    query=query_vec,
+                    query_filter=query_filter,
+                    limit=k,
+                    with_payload=True,
+                )
+                hits = [
+                    point.payload
+                    for point in results.points
+                    if point.payload
+                ]
+                semantic_retrieval_results.labels(type="memory").observe(len(hits))
+                if hits:
+                    semantic_retrieval_hits_total.labels(type="memory").inc()
+                return hits
+            finally:
+                await client.close()
+        except Exception as exc:
+            logger.warning("Qdrant semantic memory search failed: %s", exc)
+            return []
+
     async def prune(self) -> int:
         """Remove expired memories (where ttl < now)."""
         now = datetime.now(UTC)
@@ -172,11 +303,14 @@ class MemoryManager:
         workflow_id: str | None = None,
         limit: int = 50,
         max_chars: int | None = None,
+        query: str | None = None,
     ) -> str:
         """Build a <memories> XML context block for system prompt injection.
 
-        Reads from Redis STM first for speed.  Falls back to MongoDB LTM
-        if the STM cache is empty or unavailable.
+        When *query* is provided and embeddings are available, performs
+        semantic retrieval via Qdrant to surface the most relevant memories.
+        Otherwise reads from Redis STM first for speed and falls back to
+        MongoDB LTM.
         """
         await self.prune()
 
@@ -186,13 +320,22 @@ class MemoryManager:
 
         memories_dicts: list[dict] = []
 
-        # ── Try Redis STM first ──────────────────────────────────────────
-        try:
-            stm_entries = await memory_stm.get_recent_memories(agent_id, limit=effective_limit)
-            if stm_entries:
-                memories_dicts = stm_entries
-        except Exception as exc:
-            logger.warning("STM read failed for agent %s, falling back to LTM: %s", agent_id, exc)
+        # ── Semantic retrieval (if query provided) ───────────────────────
+        if query and settings.embeddings_enabled:
+            semantic_hits = await self.search_semantic(
+                agent_id, query, top_k=settings.memory_retrieval_top_k
+            )
+            if semantic_hits:
+                memories_dicts = semantic_hits
+
+        # ── Try Redis STM next ───────────────────────────────────────────
+        if not memories_dicts:
+            try:
+                stm_entries = await memory_stm.get_recent_memories(agent_id, limit=effective_limit)
+                if stm_entries:
+                    memories_dicts = stm_entries
+            except Exception as exc:
+                logger.warning("STM read failed for agent %s, falling back to LTM: %s", agent_id, exc)
 
         # ── Fallback to MongoDB LTM ──────────────────────────────────────
         if not memories_dicts:
