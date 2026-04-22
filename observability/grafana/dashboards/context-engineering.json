@@ -38,7 +38,7 @@
       "description": "Rate of context compaction triggers. Spikes indicate sessions approaching their context window limit.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -63,7 +63,7 @@
       "description": "How aggressively compaction is trimming context. High p95 means sessions are running very long.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -92,7 +92,7 @@
       "description": "Cumulative compaction count since last restart.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 4, "x": 16, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -124,7 +124,7 @@
       "description": "Average trimming depth across all models.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 4, "x": 20, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -164,7 +164,7 @@
       "description": "Rate of successful semantic retrievals (Qdrant returned results). Separated by memory vs knowledge.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -188,7 +188,7 @@
       "description": "How many chunks/memories are returned per retrieval. Low p50 may indicate Qdrant is empty or misconfigured.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -217,7 +217,7 @@
       "description": "Fraction of retrieval calls that returned at least one result (memory + knowledge combined).",
       "type": "gauge",
       "gridPos": { "h": 8, "w": 4, "x": 16, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -250,7 +250,7 @@
       "description": "Cumulative semantic retrieval hits (memory + knowledge) since last restart.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 4, "x": 20, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -287,7 +287,7 @@
       "description": "Success = model ran; failure = exception; disabled = embeddings_enabled=false or model not loaded.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -316,7 +316,7 @@
       "description": "Fraction of embedding calls that failed (exceptions). >5% warrants investigation.",
       "type": "gauge",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -349,7 +349,7 @@
       "description": "green = embeddings active, red = all calls disabled/failing.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -390,7 +390,7 @@
       "description": "Currently running agent tasks across all workers.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -421,7 +421,7 @@
       "description": "Fraction of tasks completing successfully in the last 5 minutes.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -454,7 +454,7 @@
       "description": "Ratio of compaction events to task completions. High ratio = tasks regularly exhaust their context window.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -487,7 +487,7 @@
       "description": "Fraction of memory retrievals that used semantic (Qdrant) vs zero results returned.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -518,7 +518,7 @@
       "description": "Fraction of KB retrievals that used semantic (Qdrant) vs scroll fallback.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -549,7 +549,7 @@
       "description": "How many embedding calls are made per task on average (memory + knowledge combined).",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 28 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -579,7 +579,7 @@
       "description": "End-to-end agent task execution time by model.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -608,7 +608,7 @@
       "description": "Distribution of tool invocations per completed agent task.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },

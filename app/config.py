@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     compaction_summary_max_chars: int = 1500
     tool_result_clearing_enabled: bool = True
     tool_result_clearing_keep_recent: int = 4
+    tool_result_context_max_chars: int = 4000
+    tool_definition_description_max_chars: int = 240
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None

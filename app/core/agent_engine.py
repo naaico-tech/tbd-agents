@@ -253,6 +253,73 @@ def _estimate_text_tokens(text: str, model: str = "") -> int:
     return count_tokens(text, model) if text else 0
 
 
+def _clip_tool_description(text: str | None) -> str:
+    """Keep repeated tool descriptions within a predictable budget."""
+    if not text:
+        return ""
+    return _clip_prompt_text(str(text).strip(), settings.tool_definition_description_max_chars)
+
+
+def _sanitize_json_schema(obj):
+    """Strip schema noise that inflates repeated tool definitions."""
+    if isinstance(obj, dict):
+        sanitized: dict = {}
+        for key, value in obj.items():
+            if key not in _ALLOWED_SCHEMA_KEYS:
+                continue
+            if key == "description":
+                clipped = _clip_tool_description(str(value))
+                if clipped:
+                    sanitized[key] = clipped
+                continue
+            if key == "additionalProperties" and isinstance(value, bool):
+                sanitized[key] = value
+                continue
+            cleaned = _sanitize_json_schema(value)
+            if cleaned in ({}, [], ""):
+                if key in {"properties", "required"}:
+                    sanitized[key] = cleaned
+                continue
+            sanitized[key] = cleaned
+        return sanitized
+    if isinstance(obj, list):
+        return [item for item in (_sanitize_json_schema(item) for item in obj) if item not in ({}, [], "")]
+    return obj
+
+
+def _estimate_tools_tokens(tools: list[dict]) -> int:
+    """Estimate token count for serialized tool definitions."""
+    if not tools:
+        return 0
+    return count_tokens(json.dumps(tools, ensure_ascii=False, separators=(",", ":")))
+
+
+def _estimate_request_tokens(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    model: str = "",
+) -> int:
+    """Estimate token count for the full chat-completions request payload."""
+    body: dict = {"messages": messages}
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    return count_tokens(json.dumps(body, ensure_ascii=False, separators=(",", ":")), model)
+
+
+def _truncate_tool_result(text: str, max_chars: int) -> str:
+    """Bound tool result size before feeding it back into the next model turn."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    note = (
+        f"\n\n[tool result truncated for context efficiency; original_length={len(text)} chars]"
+    )
+    content_budget = max_chars - len(note)
+    if content_budget <= 0:
+        return note.lstrip()
+    return _clip_prompt_text(text, content_budget) + note
+
+
 async def _update_progress(
     workflow: Workflow,
     task_exec: TaskExecution | None,
@@ -745,14 +812,17 @@ def _resolve_provider_url(provider: Provider, model: str = "") -> str:
 def _mcp_tool_to_openai(tool) -> dict:
     """Convert an MCP Tool object to OpenAI function-calling tool format."""
     schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
-    # Ensure the schema has type: object at the top level
+    defs = schema.get("$defs", {})
+    if defs:
+        schema = _resolve_refs(schema, defs)
+    schema = _sanitize_json_schema(schema)
     schema.setdefault("type", "object")
     schema.setdefault("properties", {})
     return {
         "type": "function",
         "function": {
             "name": tool.name,
-            "description": tool.description or "",
+            "description": _clip_tool_description(tool.description),
             "parameters": schema,
         },
     }
@@ -781,6 +851,9 @@ async def _connect_mcp_and_list_tools(
 
     for server_name, server_cfg in mcp_config.items():
         transport_type = server_cfg.get("type", "")
+        configured_tools = server_cfg.get("tools") or ["*"]
+        allow_all_tools = "*" in configured_tools
+        configured_tool_names = set(configured_tools) if not allow_all_tools else set()
 
         try:
             if transport_type == "stdio":
@@ -821,6 +894,8 @@ async def _connect_mcp_and_list_tools(
             result = await session.list_tools()
 
             for tool in result.tools:
+                if not allow_all_tools and tool.name not in configured_tool_names:
+                    continue
                 # Respect allowed_tools filter
                 if allowed_tools_set is not None and tool.name not in allowed_tools_set:
                     continue
@@ -866,8 +941,8 @@ async def _build_custom_tools_config(
             "type": "function",
             "function": {
                 "name": tool.name,
-                "description": tool.description or "",
-                "parameters": schema,
+                "description": _clip_tool_description(tool.description),
+                "parameters": _sanitize_json_schema(schema),
             },
         })
         # Claude requires only the allowed keys in input_schema
@@ -878,7 +953,7 @@ async def _build_custom_tools_config(
         claude_defs.append({
             "type": "custom",
             "name": tool.name,
-            "description": tool.description or "",
+            "description": _clip_tool_description(tool.description),
             "input_schema": claude_schema,
         })
         fn_map[tool.name] = tool
@@ -1052,7 +1127,25 @@ def _resolve_refs(obj, defs: dict):
     return obj
 
 
-_ALLOWED_SCHEMA_KEYS = {"type", "properties", "required", "description", "additionalProperties"}
+_ALLOWED_SCHEMA_KEYS = {
+    "type",
+    "properties",
+    "required",
+    "description",
+    "additionalProperties",
+    "enum",
+    "items",
+    "oneOf",
+    "anyOf",
+    "allOf",
+    "format",
+    "minimum",
+    "maximum",
+    "minItems",
+    "maxItems",
+    "pattern",
+    "nullable",
+}
 
 
 def _mcp_tool_to_claude_custom(tool) -> dict:
@@ -1068,12 +1161,13 @@ def _mcp_tool_to_claude_custom(tool) -> dict:
     defs = schema.get("$defs", {})
     if defs:
         schema = _resolve_refs(schema, defs)
+    schema = _sanitize_json_schema(schema)
     # Keep only the keys the API accepts.
     schema = {k: v for k, v in schema.items() if k in _ALLOWED_SCHEMA_KEYS}
     return {
         "type": "custom",
         "name": tool.name,
-        "description": tool.description or "",
+        "description": _clip_tool_description(tool.description),
         "input_schema": schema,
     }
 
@@ -1098,6 +1192,9 @@ async def _connect_local_mcp_and_list_tools(
     for server_name, server_cfg in mcp_config.items():
         if server_cfg.get("type") != "stdio":
             continue
+        configured_tools = server_cfg.get("tools") or ["*"]
+        allow_all_tools = "*" in configured_tools
+        configured_tool_names = set(configured_tools) if not allow_all_tools else set()
 
         try:
             server_params = StdioServerParameters(
@@ -1119,6 +1216,8 @@ async def _connect_local_mcp_and_list_tools(
             result = await session.list_tools()
 
             for tool in result.tools:
+                if not allow_all_tools and tool.name not in configured_tool_names:
+                    continue
                 if allowed_tools_set is not None and tool.name not in allowed_tools_set:
                     continue
                 custom_tools.append(_mcp_tool_to_claude_custom(tool))
@@ -1654,10 +1753,13 @@ async def _run_with_custom_provider(
                 mcp_config, allowed_tools_set, mcp_exit_stack
             )
             if openai_tools:
+                tools_chars = len(json.dumps(openai_tools, ensure_ascii=False, separators=(",", ":")))
+                tools_tokens = _estimate_tools_tokens(openai_tools)
                 await _log(
                     workflow,
                     "tools_discovered",
-                    f"{len(openai_tools)} tool(s) available: {[t['function']['name'] for t in openai_tools]}"[:200],
+                    f"{len(openai_tools)} tool(s) available (~{tools_tokens} tokens, {tools_chars} chars): "
+                    f"{[t['function']['name'] for t in openai_tools][:12]}",
                     task_exec,
                 )
 
@@ -1700,11 +1802,23 @@ async def _run_with_custom_provider(
 
         # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
+            iteration = 0
             while True:
+                iteration += 1
                 # ── Context compaction ───────────────────────────────────
                 # If the current request context exceeds the compaction threshold,
                 # prune older intermediate messages to free context space.
-                current_prompt_tokens = estimate_messages_tokens(messages, model)
+                current_prompt_tokens = _estimate_request_tokens(messages, openai_tools, model)
+                if iteration == 1 or current_prompt_tokens > context_window * compaction_threshold:
+                    await _log(
+                        workflow,
+                        "request_context",
+                        f"Turn {iteration}: messages={len(messages)}, tools={len(openai_tools)}, "
+                        f"estimated_request_tokens={current_prompt_tokens}, "
+                        f"estimated_message_tokens={estimate_messages_tokens(messages, model)}, "
+                        f"estimated_tool_tokens={_estimate_tools_tokens(openai_tools)}",
+                        task_exec,
+                    )
                 if (
                     settings.compaction_enabled
                     and current_prompt_tokens > context_window * compaction_threshold
@@ -1712,8 +1826,8 @@ async def _run_with_custom_provider(
                 ):
                     await _log(
                         workflow, "compaction_start",
-                        f"Compacting context ({current_prompt_tokens} estimated input tokens, "
-                        f"{len(messages)} messages)",
+                        f"Compacting context (request≈{current_prompt_tokens} tokens, "
+                        f"messages={len(messages)}, tools={len(openai_tools)})",
                         task_exec,
                     )
                     _msgs_before = len(messages)
@@ -1724,7 +1838,8 @@ async def _run_with_custom_provider(
                     context_compaction_messages_dropped.labels(model=model).observe(max(0, _dropped))
                     await _log(
                         workflow, "compaction_complete",
-                        f"Compacted to {compacted_count} messages",
+                        f"Compacted to {compacted_count} messages "
+                        f"(request≈{_estimate_request_tokens(messages, openai_tools, model)} tokens)",
                         task_exec,
                     )
 
@@ -1833,7 +1948,10 @@ async def _run_with_custom_provider(
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id", ""),
-                            "content": tool_result,
+                            "content": _truncate_tool_result(
+                                tool_result,
+                                settings.tool_result_context_max_chars,
+                            ),
                         })
 
                     # Check max turns
@@ -2233,22 +2351,15 @@ async def run_agent(
     system_prompt = await _build_system_prompt(
         agent, workflow.skill_ids, workflow, knowledge_context, memory_context
     )
-    await _log(
-        workflow,
-        "context_budget",
-        "Prompt context assembled "
-        f"(system={len(agent.system_prompt)} chars, "
-        f"knowledge={len(knowledge_context)} chars, memory={len(memory_context)} chars, "
-        f"total={len(system_prompt)} chars, ~{_estimate_text_tokens(system_prompt)} tokens)",
-        task_exec,
-    )
+    assembled_system_chars = len(system_prompt)
 
     # Sync repository if configured
     repo_path = await _sync_repo(workflow)
+    repo_context = ""
     if repo_path:
         repo_sync_total.labels(status="success").inc()
         await _log(workflow, "repo_synced", f"Repository synced to {repo_path}", task_exec)
-        system_prompt += (
+        repo_context = (
             f"\n\n<repository>\n"
             f"A git repository has been cloned and is available at: {repo_path}\n"
             f"URL: {workflow.repo_url}\n"
@@ -2256,9 +2367,21 @@ async def run_agent(
             f"You can read files from this path to understand the codebase.\n"
             f"</repository>"
         )
+        system_prompt += repo_context
     elif workflow.repo_url:
         repo_sync_total.labels(status="failure").inc()
         await _log(workflow, "repo_sync_failed", f"Failed to sync {workflow.repo_url}", task_exec)
+
+    await _log(
+        workflow,
+        "context_budget",
+        "Prompt context assembled "
+        f"(base_system={len(agent.system_prompt)} chars, assembled_system={assembled_system_chars} chars, "
+        f"knowledge={len(knowledge_context)} chars, memory={len(memory_context)} chars, "
+        f"repo={len(repo_context)} chars, total={len(system_prompt)} chars, "
+        f"~{_estimate_text_tokens(system_prompt, workflow.model)} tokens)",
+        task_exec,
+    )
 
     # ── Route to custom provider if set ──────────────────────────────────────
     if custom_provider and custom_provider_key:
