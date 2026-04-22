@@ -7,6 +7,7 @@ import pytest
 
 from app.core.agent_engine import (
     _build_system_prompt,
+    _copilot_tool_uses_mcp_allowlist,
     _compress_caveman_context,
     _parse_todo_list,
 )
@@ -195,3 +196,13 @@ class TestPromptBudgeting:
         assert len(prompt) <= 24000
         assert len(prompt) < len(agent.system_prompt) + len(long_skill.instructions) + 500
         assert "..." in prompt
+
+
+class TestCopilotToolFiltering:
+    def test_builtin_and_internal_tools_skip_mcp_allowlist(self):
+        assert _copilot_tool_uses_mcp_allowlist("view") is False
+        assert _copilot_tool_uses_mcp_allowlist("glob") is False
+        assert _copilot_tool_uses_mcp_allowlist("store_memory") is False
+
+    def test_mcp_tools_still_use_mcp_allowlist(self):
+        assert _copilot_tool_uses_mcp_allowlist("fetch_jira_issue") is True

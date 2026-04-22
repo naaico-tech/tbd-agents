@@ -25,6 +25,7 @@ class WorkflowCreate(BaseModel):
     caveman: bool = False
     bypass_memory: bool = False  # Skip memory injection during task runs
     auto_memory: bool = False  # Auto-extract memories after task completion
+    tsv_tool_results: bool = False
     reasoning_effort: str | None = None  # low | medium | high
     guardrail_ids: list[str] = []  # Explicitly selected guardrail IDs
     guardrail_tags: list[str] = []  # Tag-based guardrail selection
@@ -45,6 +46,7 @@ class WorkflowUpdate(BaseModel):
     caveman: bool | None = None
     bypass_memory: bool | None = None
     auto_memory: bool | None = None
+    tsv_tool_results: bool | None = None
     reasoning_effort: str | None = None
     guardrail_ids: list[str] | None = None
     guardrail_tags: list[str] | None = None
@@ -83,6 +85,7 @@ class PromptResponse(BaseModel):
     output_format: str
     infinite_session: bool = True
     caveman: bool = False
+    tsv_tool_results: bool = False
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse] = []
@@ -105,6 +108,7 @@ class WorkflowResponse(BaseModel):
     caveman: bool = False
     bypass_memory: bool = False
     auto_memory: bool = False
+    tsv_tool_results: bool = False
     reasoning_effort: str | None = None
     guardrail_ids: list[str] = []
     guardrail_tags: list[str] = []

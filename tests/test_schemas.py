@@ -174,6 +174,7 @@ class TestWorkflowSchemas:
         assert w.caveman is False
         assert w.bypass_memory is False
         assert w.auto_memory is False
+        assert w.tsv_tool_results is False
 
     def test_create_full(self):
         w = WorkflowCreate(
@@ -191,11 +192,13 @@ class TestWorkflowSchemas:
             caveman=True,
             bypass_memory=True,
             auto_memory=True,
+            tsv_tool_results=True,
         )
         assert w.model == "gpt-4.1"
         assert w.caveman is True
         assert w.bypass_memory is True
         assert w.auto_memory is True
+        assert w.tsv_tool_results is True
 
     def test_update(self):
         u = WorkflowUpdate(
@@ -204,12 +207,14 @@ class TestWorkflowSchemas:
             caveman=True,
             bypass_memory=True,
             auto_memory=True,
+            tsv_tool_results=True,
         )
         assert u.max_turns == 20
         assert u.model is None
         assert u.caveman is True
         assert u.bypass_memory is True
         assert u.auto_memory is True
+        assert u.tsv_tool_results is True
 
     def test_prompt_request_prompt_only(self):
         p = PromptRequest(prompt="Hello")

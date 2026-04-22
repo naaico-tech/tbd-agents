@@ -74,6 +74,7 @@ class Workflow(Document):
     caveman: bool = False  # Enable terse caveman mode + context compression
     bypass_memory: bool = False  # Skip memory injection during task runs
     auto_memory: bool = False  # Auto-extract memories after task completion
+    tsv_tool_results: bool = False  # Render tabular tool results as TSV before adding them to context
     reasoning_effort: str | None = None  # low | medium | high (model-dependent)
     guardrail_ids: list[str] = Field(default_factory=list)  # Explicitly selected guardrail IDs
     guardrail_tags: list[str] = Field(default_factory=list)  # Tag-based guardrail selection (union)

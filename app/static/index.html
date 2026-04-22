@@ -1771,6 +1771,12 @@ function openWorkflowModal() {
       </label>
       <div class="hint">Automatically extract and store key learnings after each task completion.</div>
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-tsv-tool-results"> TSV Tool Results
+      </label>
+      <div class="hint">When supported, convert tabular tool output into TSV before it is added back into model context.</div>
+    </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Repository <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — cloned fresh each run)</span></label>
       <div class="form-group"><label>Repo URL</label>
@@ -1916,6 +1922,7 @@ async function saveWorkflow() {
     caveman: document.getElementById('f-wf-caveman').checked,
     bypass_memory: document.getElementById('f-wf-bypass-memory').checked,
     auto_memory: document.getElementById('f-wf-auto-memory').checked,
+    tsv_tool_results: document.getElementById('f-wf-tsv-tool-results').checked,
     reasoning_effort: document.getElementById('f-wf-reasoning')?.value || null,
     repo_url: document.getElementById('f-wf-repo-url').value || null,
     repo_branch: document.getElementById('f-wf-repo-branch').value || null,
@@ -1990,6 +1997,12 @@ function openEditWorkflowModal(id) {
       </label>
       <div class="hint">Automatically extract and store key learnings after each task completion.</div>
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="f-wf-edit-tsv-tool-results" ${w.tsv_tool_results?'checked':''}> TSV Tool Results
+      </label>
+      <div class="hint">When supported, convert tabular tool output into TSV before it is added back into model context.</div>
+    </div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
       <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Skills</label>
       <div class="form-group"><label>Select by ID</label><div id="f-wf-edit-skills">${skillEditOpts}</div></div>
@@ -2055,6 +2068,7 @@ async function updateWorkflow(id) {
     caveman: document.getElementById('f-wf-edit-caveman').checked,
     bypass_memory: document.getElementById('f-wf-edit-bypass-memory').checked,
     auto_memory: document.getElementById('f-wf-edit-auto-memory').checked,
+    tsv_tool_results: document.getElementById('f-wf-edit-tsv-tool-results').checked,
     reasoning_effort: document.getElementById('f-wf-edit-reasoning')?.value || null,
     skill_ids: skillIds,
     skill_tags: skillTags,

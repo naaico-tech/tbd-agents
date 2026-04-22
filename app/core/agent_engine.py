@@ -15,12 +15,14 @@ Capabilities wired:
 """
 
 import asyncio
+import csv
 import html
 import json
 import logging
 import os
 import re
 import sys
+from io import StringIO
 from datetime import UTC, datetime
 
 import httpx
@@ -329,6 +331,148 @@ def _truncate_tool_result(text: str, max_chars: int) -> str:
     if content_budget <= 0:
         return note.lstrip()
     return _clip_prompt_text(text, content_budget) + note
+
+
+def _format_tool_result_for_context(text: str, *, prefer_tsv: bool = False) -> str:
+    """Render tabular JSON tool results as plain TSV when it is smaller."""
+    if not text or not prefer_tsv:
+        return text
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+
+    candidate = _render_payload_as_tsv(payload)
+    if not candidate or len(candidate) >= len(text):
+        return text
+    return candidate
+
+
+def _render_payload_as_tsv(payload) -> str | None:
+    """Convert a tabular JSON payload into TSV-oriented plain text."""
+    if isinstance(payload, list):
+        return _render_rows_as_tsv(payload)
+
+    if not isinstance(payload, dict):
+        return None
+
+    preferred_keys = ("results", "rows", "items", "matches", "entries")
+    table_key = next(
+        (
+            key
+            for key in preferred_keys
+            if key in payload and _looks_like_table(payload.get(key))
+        ),
+        None,
+    )
+    if table_key is None:
+        return None
+
+    table_text = _render_rows_as_tsv(payload.get(table_key))
+    if not table_text:
+        return None
+
+    metadata_lines = []
+    for key, value in payload.items():
+        if key == table_key:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            metadata_lines.append(f"{key}: {_stringify_table_value(value)}")
+
+    if metadata_lines:
+        return "\n".join([*metadata_lines, "", table_text])
+    return table_text
+
+
+def _looks_like_table(value) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(row, dict) for row in value)
+    )
+
+
+def _render_rows_as_tsv(rows) -> str | None:
+    if not _looks_like_table(rows):
+        return None
+
+    headers: list[str] = []
+    seen = set()
+    for row in rows:
+        for key in row:
+            key_str = str(key)
+            if key_str not in seen:
+                headers.append(key_str)
+                seen.add(key_str)
+    if not headers:
+        return None
+
+    output = StringIO()
+    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([_stringify_table_value(row.get(header)) for header in headers])
+    return output.getvalue().rstrip("\n")
+
+
+def _stringify_table_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+async def _log_store_memory_result(
+    workflow: Workflow,
+    task_exec: TaskExecution | None,
+    tool_result: str,
+) -> None:
+    """Emit a dedicated log entry for store_memory outcomes across runtimes."""
+    try:
+        parsed = json.loads(tool_result)
+    except (TypeError, json.JSONDecodeError):
+        await _log(
+            workflow,
+            "memory_store_failed",
+            "store_memory returned non-JSON output",
+            task_exec,
+            tool_output=str(tool_result)[:500],
+        )
+        return
+
+    if not isinstance(parsed, dict):
+        await _log(
+            workflow,
+            "memory_store_failed",
+            "store_memory returned unexpected payload",
+            task_exec,
+            tool_output=json.dumps(parsed, default=str)[:500],
+        )
+        return
+
+    if parsed.get("status") == "stored":
+        key = parsed.get("key", "")
+        scope = parsed.get("scope", "")
+        await _log(
+            workflow,
+            "memory_stored",
+            f"key={key} scope={scope}",
+            task_exec,
+            tool_output=json.dumps(parsed, ensure_ascii=False)[:500],
+        )
+        return
+
+    error = parsed.get("error") or "store_memory failed"
+    await _log(
+        workflow,
+        "memory_store_failed",
+        str(error),
+        task_exec,
+        tool_output=json.dumps(parsed, ensure_ascii=False)[:500],
+    )
 
 
 async def _update_progress(
@@ -1324,6 +1468,32 @@ CLAUDE_AGENT_TOOLSET_TOOLS = [
     "bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search",
 ]
 
+# Copilot SDK hook events use runtime tool names that do not always match the
+# agent configuration names exactly (for example, "view" instead of "read").
+# These tools are not sourced from MCP servers and must not be filtered by
+# MCP allowlists.
+COPILOT_NON_MCP_TOOL_NAMES = {
+    "bash",
+    "read",
+    "view",
+    "write",
+    "create",
+    "edit",
+    "str_replace",
+    "insert",
+    "delete",
+    "glob",
+    "grep",
+    "web_fetch",
+    "web_search",
+    "store_memory",
+}
+
+
+def _copilot_tool_uses_mcp_allowlist(tool_name: str) -> bool:
+    """Return whether a Copilot SDK tool should be filtered by MCP allowlists."""
+    return tool_name not in COPILOT_NON_MCP_TOOL_NAMES
+
 
 def _build_claude_agent_tools(
     native_mcp_servers: list[dict],
@@ -1587,10 +1757,16 @@ async def _run_with_claude_sdk(
                         tool_result = await _execute_mcp_tool(
                             tool_name, tool_args, tool_server_map,
                         )
+                    tool_result_for_model = _format_tool_result_for_context(
+                        tool_result,
+                        prefer_tsv=workflow.tsv_tool_results,
+                    )
                     await _log(
                         workflow, "tool_result", f"{tool_name} completed", task_exec,
-                        tool_output=tool_result[:500],
+                        tool_output=tool_result_for_model[:500],
                     )
+                    if tool_name == "store_memory":
+                        await _log_store_memory_result(workflow, task_exec, tool_result)
 
                     # Send result back to the Claude Agent SDK session
                     await client.beta.sessions.events.send(
@@ -1598,7 +1774,7 @@ async def _run_with_claude_sdk(
                         events=[{
                             "type": "user.custom_tool_result",
                             "custom_tool_use_id": tool_use_id,
-                            "content": [{"type": "text", "text": tool_result}],
+                            "content": [{"type": "text", "text": tool_result_for_model}],
                         }],
                     )
 
@@ -2054,17 +2230,24 @@ async def _run_with_custom_provider(
                                 "Tool '%s' raised an exception: %s", tool_name, tool_exc
                             )
 
+                        tool_result_for_model = _format_tool_result_for_context(
+                            tool_result,
+                            prefer_tsv=workflow.tsv_tool_results,
+                        )
+
                         await _log(
                             workflow, "tool_result", f"{tool_name} completed", task_exec,
-                            tool_output=tool_result[:500],
+                            tool_output=tool_result_for_model[:500],
                         )
+                        if tool_name == "store_memory":
+                            await _log_store_memory_result(workflow, task_exec, tool_result)
 
                         # Append tool result to conversation
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id", ""),
                             "content": _truncate_tool_result(
-                                tool_result,
+                                tool_result_for_model,
                                 settings.tool_result_context_max_chars,
                             ),
                         })
@@ -2352,9 +2535,9 @@ async def run_agent(
     for server_name in mcp_config:
         mcp_connections_total.labels(server_name=server_name).inc()
 
-    # Build allowed-tools set for filtering in hooks.
-    # If a server has a non-empty allowed_tools list, only those tools are permitted.
-    # Tools from MCPs with no restrictions (empty list) are always allowed.
+    # Build allowed-tools set for filtering in BYOK/MCP discovery paths.
+    # The Copilot SDK path must not reuse this blindly inside the pre-tool hook,
+    # because SDK built-ins like `view` / `glob` are not MCP tools.
     allowed_tools_set: set[str] | None = None  # None = no filtering
     has_restrictions = any(s.allowed_tools for s in mcp_servers_db)
     if has_restrictions:
@@ -2570,11 +2753,16 @@ async def run_agent(
 
     # ── Hooks ──
     def on_pre_tool_use(input_data, context):
-        """Log tool invocation; deny if max turns exceeded or tool not allowed."""
+        """Log tool invocation; deny if max turns exceeded or blocked MCP tool."""
         nonlocal tool_call_count
         tool_name = input_data.get("toolName", "unknown")
-        # Enforce allowed-tools filter
-        if allowed_tools_set is not None and tool_name not in allowed_tools_set:
+        # Only MCP-sourced tools should be checked against MCP allowlists here.
+        # The SDK already receives the filtered MCP config at session creation.
+        if (
+            allowed_tools_set is not None
+            and _copilot_tool_uses_mcp_allowlist(tool_name)
+            and tool_name not in allowed_tools_set
+        ):
             asyncio.create_task(
                 _log(workflow, "tool_denied", f"{tool_name} — not in allowed tools", task_exec)
             )
@@ -2791,6 +2979,10 @@ async def run_agent(
                         asyncio.create_task(
                             _log(workflow, "tool_result", f"{tool_name} {status_tag}", task_exec, tool_output=tool_output_str)
                         )
+                        if str(tool_name) == "store_memory" and tool_output_str is not None:
+                            asyncio.create_task(
+                                _log_store_memory_result(workflow, task_exec, tool_output_str)
+                            )
 
                     elif ev_type == "session.idle":
                         done.set()

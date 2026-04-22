@@ -760,6 +760,61 @@ class TestStoreMemoryHandler:
             assert call_kwargs[1]["scope"].value == "agent" or str(call_kwargs[1]["scope"]) == "agent"
 
 
+class TestStoreMemoryLogging:
+    @pytest.mark.asyncio
+    async def test_log_store_memory_result_success(self):
+        from app.core.agent_engine import _log_store_memory_result
+
+        workflow = MagicMock()
+        task_exec = MagicMock()
+
+        with patch("app.core.agent_engine._log", new_callable=AsyncMock) as mock_log:
+            await _log_store_memory_result(
+                workflow,
+                task_exec,
+                json.dumps({"status": "stored", "key": "fact", "scope": "agent"}),
+            )
+
+        mock_log.assert_awaited_once()
+        args = mock_log.await_args.args
+        assert args[1] == "memory_stored"
+        assert args[2] == "key=fact scope=agent"
+
+    @pytest.mark.asyncio
+    async def test_log_store_memory_result_failure(self):
+        from app.core.agent_engine import _log_store_memory_result
+
+        workflow = MagicMock()
+        task_exec = MagicMock()
+
+        with patch("app.core.agent_engine._log", new_callable=AsyncMock) as mock_log:
+            await _log_store_memory_result(
+                workflow,
+                task_exec,
+                json.dumps({"error": "Both 'key' and 'value' are required"}),
+            )
+
+        mock_log.assert_awaited_once()
+        args = mock_log.await_args.args
+        assert args[1] == "memory_store_failed"
+        assert "required" in args[2]
+
+    @pytest.mark.asyncio
+    async def test_log_store_memory_result_invalid_payload(self):
+        from app.core.agent_engine import _log_store_memory_result
+
+        workflow = MagicMock()
+        task_exec = MagicMock()
+
+        with patch("app.core.agent_engine._log", new_callable=AsyncMock) as mock_log:
+            await _log_store_memory_result(workflow, task_exec, "not-json")
+
+        mock_log.assert_awaited_once()
+        args = mock_log.await_args.args
+        assert args[1] == "memory_store_failed"
+        assert "non-JSON" in args[2]
+
+
 # ── STM (Short-Term Memory) ─────────────────────────────────────────────────
 
 

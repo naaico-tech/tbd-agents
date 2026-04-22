@@ -18,6 +18,7 @@ from app.core.agent_engine import (
     _estimate_request_tokens,
     _estimate_tools_tokens,
     _compute_retry_delay,
+    _format_tool_result_for_context,
     _http_post_with_retry,
     _resolve_provider_url,
     _stream_chat_completion,
@@ -230,6 +231,39 @@ class TestRequestTokenEstimation:
         assert cleared == 1
         assert result[2]["content"] == "[tool result cleared for context efficiency]"
         assert result[4]["content"] == "new"
+
+    def test_format_tool_result_for_context_keeps_json_when_flag_disabled(self):
+        original = json.dumps([
+            {"name": "alice", "score": 10},
+            {"name": "bob", "score": 7},
+        ])
+
+        formatted = _format_tool_result_for_context(original, prefer_tsv=False)
+
+        assert formatted == original
+
+    def test_format_tool_result_for_context_converts_list_of_dicts_to_tsv(self):
+        original = json.dumps([
+            {"name": "alice", "score": 10},
+            {"name": "bob", "score": 7},
+        ])
+
+        formatted = _format_tool_result_for_context(original, prefer_tsv=True)
+
+        assert formatted == "name\tscore\nalice\t10\nbob\t7"
+
+    def test_format_tool_result_for_context_converts_results_wrapper_to_tsv(self):
+        original = json.dumps({
+            "row_count": 2,
+            "results": [
+                {"id": 1, "name": "alice"},
+                {"id": 2, "name": "bob"},
+            ],
+        })
+
+        formatted = _format_tool_result_for_context(original, prefer_tsv=True)
+
+        assert formatted == "row_count: 2\n\nid\tname\n1\talice\n2\tbob"
 
 
 # ── _http_post_with_retry ───────────────────────────────────────────────────
