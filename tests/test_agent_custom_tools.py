@@ -202,6 +202,37 @@ async def test_execute_custom_tool_success():
 
 
 @pytest.mark.asyncio
+async def test_execute_custom_tool_merges_runtime_env():
+    mock_tool = MagicMock()
+    mock_tool.name = "echo"
+    mock_tool.source_code = ECHO_SOURCE
+    mock_tool.env_config = {"TOKEN": "secret"}
+    fn_map = {"echo": mock_tool}
+
+    with (
+        patch("app.services.token_manager.resolve_config", new_callable=AsyncMock, return_value={"TOKEN": "resolved"}),
+        patch(
+            "app.core.agent_engine.custom_tool_runner.run_tool",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"echo": "hi"}),
+        ) as mock_run_tool,
+    ):
+        from app.core.agent_engine import _execute_custom_tool
+        await _execute_custom_tool(
+            "echo",
+            {"message": "hi"},
+            fn_map,
+            runtime_env={"TBD_AGENTS_REPO_ROOT": "/tmp/repo"},
+        )
+
+    assert mock_run_tool.await_count == 1
+    assert mock_run_tool.await_args.kwargs["env"] == {
+        "TOKEN": "resolved",
+        "TBD_AGENTS_REPO_ROOT": "/tmp/repo",
+    }
+
+
+@pytest.mark.asyncio
 async def test_execute_custom_tool_not_found():
     from app.core.agent_engine import _execute_custom_tool
     result = await _execute_custom_tool("nonexistent", {}, {})

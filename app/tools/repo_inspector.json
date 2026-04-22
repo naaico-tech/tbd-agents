@@ -1,0 +1,6 @@
+{
+  "description": "Read-only repository inspection for synced workflow clones. Supports bounded tree listing, file reads, filename matching, and text search without shell access.",
+  "tags": ["auto-loaded", "repo", "byok", "read-only"],
+  "env_config": {},
+  "is_enabled": true
+}

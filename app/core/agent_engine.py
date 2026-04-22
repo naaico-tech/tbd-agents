@@ -265,6 +265,17 @@ def _sanitize_json_schema(obj):
     if isinstance(obj, dict):
         sanitized: dict = {}
         for key, value in obj.items():
+            if key == "properties" and isinstance(value, dict):
+                property_map = {
+                    prop_name: _sanitize_json_schema(prop_schema)
+                    for prop_name, prop_schema in value.items()
+                }
+                sanitized["properties"] = {
+                    prop_name: prop_schema
+                    for prop_name, prop_schema in property_map.items()
+                    if prop_schema not in ({}, [], "")
+                }
+                continue
             if key not in _ALLOWED_SCHEMA_KEYS:
                 continue
             if key == "description":
@@ -953,36 +964,71 @@ async def _build_custom_tools_config(
         except Exception:
             logger.warning("Skipping invalid custom_tool_id: %s", tid)
             continue
-        if not tool or not tool.is_enabled:
-            continue
-
-        schema = tool.parameters_schema or {"type": "object", "properties": {}}
-
-        openai_defs.append({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": _clip_tool_description(tool.description),
-                "parameters": _sanitize_json_schema(schema),
-            },
-        })
-        # Claude requires only the allowed keys in input_schema
-        allowed_keys = {"type", "properties", "required", "description", "additionalProperties"}
-        claude_schema = {k: v for k, v in schema.items() if k in allowed_keys}
-        claude_schema.setdefault("type", "object")
-        claude_schema.setdefault("properties", {})
-        claude_defs.append({
-            "type": "custom",
-            "name": tool.name,
-            "description": _clip_tool_description(tool.description),
-            "input_schema": claude_schema,
-        })
-        fn_map[tool.name] = tool
+        _append_custom_tool_definition(tool, openai_defs, claude_defs, fn_map)
 
     return openai_defs, claude_defs, fn_map
 
 
-async def _execute_custom_tool(tool_name: str, arguments: dict, fn_map: dict) -> str:
+def _append_custom_tool_definition(
+    tool: CustomTool | None,
+    openai_defs: list[dict],
+    claude_defs: list[dict],
+    fn_map: dict[str, CustomTool],
+) -> bool:
+    """Append a single enabled custom tool to the target definition lists."""
+    if not tool or not tool.is_enabled or tool.name in fn_map:
+        return False
+
+    schema = tool.parameters_schema or {"type": "object", "properties": {}}
+
+    openai_defs.append({
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": _clip_tool_description(tool.description),
+            "parameters": _sanitize_json_schema(schema),
+        },
+    })
+    allowed_keys = {"type", "properties", "required", "description", "additionalProperties"}
+    claude_schema = {k: v for k, v in schema.items() if k in allowed_keys}
+    claude_schema.setdefault("type", "object")
+    claude_schema.setdefault("properties", {})
+    claude_defs.append({
+        "type": "custom",
+        "name": tool.name,
+        "description": _clip_tool_description(tool.description),
+        "input_schema": claude_schema,
+    })
+    fn_map[tool.name] = tool
+    return True
+
+
+async def _load_builtin_repo_inspector_tool() -> CustomTool | None:
+    """Load the repo inspection tool that is auto-loaded from disk, if present."""
+    try:
+        tool = await CustomTool.find_one({"name": "repo_inspector"})
+    except Exception as exc:
+        logger.debug("Repo inspector lookup skipped: %s", exc)
+        return None
+    if not tool or not tool.is_enabled:
+        return None
+    return tool
+
+
+def _build_custom_tool_runtime_env(repo_path: str | None = None) -> dict[str, str]:
+    """Build per-workflow environment variables for custom tool execution."""
+    runtime_env: dict[str, str] = {}
+    if repo_path:
+        runtime_env["TBD_AGENTS_REPO_ROOT"] = repo_path
+    return runtime_env
+
+
+async def _execute_custom_tool(
+    tool_name: str,
+    arguments: dict,
+    fn_map: dict,
+    runtime_env: dict[str, str] | None = None,
+) -> str:
     """Execute a custom Python tool from *fn_map* via the subprocess runner."""
     tool = fn_map.get(tool_name)
     if not tool:
@@ -993,8 +1039,12 @@ async def _execute_custom_tool(tool_name: str, arguments: dict, fn_map: dict) ->
         from app.services import token_manager
         resolved_env = await token_manager.resolve_config(tool.env_config)
 
+    merged_env = dict(resolved_env or {})
+    if runtime_env:
+        merged_env.update(runtime_env)
+
     return await custom_tool_runner.run_tool(
-        tool.source_code, tool.name, arguments, env=resolved_env
+        tool.source_code, tool.name, arguments, env=merged_env or None
     )
 
 
@@ -1317,6 +1367,7 @@ async def _run_with_claude_sdk(
     api_key: str,
     task_exec: TaskExecution | None,
     *,
+    repo_path: str | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
     builtin_tools: list[str] | None = None,
@@ -1378,6 +1429,7 @@ async def _run_with_claude_sdk(
 
         # ── Custom Python tools (user-supplied, Claude format) ────────────────
         custom_python_tool_map_claude: dict[str, CustomTool] = {}
+        custom_tool_runtime_env = _build_custom_tool_runtime_env(repo_path)
         try:
             _agent_for_claude = await Agent.get(workflow.agent_id)
             if _agent_for_claude and _agent_for_claude.custom_tool_ids:
@@ -1393,6 +1445,22 @@ async def _run_with_claude_sdk(
                     )
         except Exception as _ct_exc:
             logger.debug("Custom tool lookup skipped: %s", _ct_exc)
+
+        if repo_path:
+            repo_tool = await _load_builtin_repo_inspector_tool()
+            repo_tool_added = _append_custom_tool_definition(
+                repo_tool,
+                [],
+                custom_tools,
+                custom_python_tool_map_claude,
+            )
+            if repo_tool_added:
+                await _log(
+                    workflow,
+                    "repo_tool_loaded",
+                    "repo_inspector exposed for repository-aware file inspection",
+                    task_exec,
+                )
 
         # ── Build native MCP servers for URL-based transports ────────────────
         native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
@@ -1510,7 +1578,10 @@ async def _run_with_claude_sdk(
                         )
                     elif tool_name in custom_python_tool_map_claude:
                         tool_result = await _execute_custom_tool(
-                            tool_name, tool_args, custom_python_tool_map_claude
+                            tool_name,
+                            tool_args,
+                            custom_python_tool_map_claude,
+                            runtime_env=custom_tool_runtime_env,
                         )
                     else:
                         tool_result = await _execute_mcp_tool(
@@ -1728,6 +1799,7 @@ async def _run_with_custom_provider(
     api_key: str,
     task_exec: TaskExecution | None,
     *,
+    repo_path: str | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
 ) -> str | None:
@@ -1786,6 +1858,7 @@ async def _run_with_custom_provider(
 
         # ── Custom Python tools (user-supplied) ──────────────────────────────
         custom_python_tool_map: dict[str, CustomTool] = {}
+        custom_tool_runtime_env = _build_custom_tool_runtime_env(repo_path)
         try:
             _agent_for_custom = await Agent.get(workflow.agent_id)
             if _agent_for_custom and _agent_for_custom.custom_tool_ids:
@@ -1801,6 +1874,24 @@ async def _run_with_custom_provider(
                     )
         except Exception as _ct_exc:
             logger.debug("Custom tool lookup skipped: %s", _ct_exc)
+
+        if repo_path:
+            repo_tool = await _load_builtin_repo_inspector_tool()
+            repo_tool_openai_defs: list[dict] = []
+            repo_tool_added = _append_custom_tool_definition(
+                repo_tool,
+                repo_tool_openai_defs,
+                [],
+                custom_python_tool_map,
+            )
+            if repo_tool_added:
+                openai_tools.extend(repo_tool_openai_defs)
+                await _log(
+                    workflow,
+                    "repo_tool_loaded",
+                    "repo_inspector exposed for repository-aware file inspection",
+                    task_exec,
+                )
 
         # Always add the store_memory built-in tool
         openai_tools.append(STORE_MEMORY_TOOL_OPENAI)
@@ -1948,7 +2039,10 @@ async def _run_with_custom_provider(
                                 )
                             elif tool_name in custom_python_tool_map:
                                 tool_result = await _execute_custom_tool(
-                                    tool_name, tool_args, custom_python_tool_map
+                                    tool_name,
+                                    tool_args,
+                                    custom_python_tool_map,
+                                    runtime_env=custom_tool_runtime_env,
                                 )
                             else:
                                 tool_result = await _execute_mcp_tool(
@@ -2385,7 +2479,8 @@ async def run_agent(
             f"A git repository has been cloned and is available at: {repo_path}\n"
             f"URL: {workflow.repo_url}\n"
             f"Branch: {workflow.repo_branch or 'main'}\n"
-            f"You can read files from this path to understand the codebase.\n"
+            f"Use repository-aware tools to inspect this path when available. "
+            f"If the repo_inspector tool is exposed, prefer it for listing, searching, and reading files instead of attempting shell access.\n"
             f"</repository>"
         )
         system_prompt += repo_context
@@ -2415,6 +2510,7 @@ async def run_agent(
                 custom_provider,
                 custom_provider_key,
                 task_exec,
+                    repo_path=repo_path,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
                 builtin_tools=agent.builtin_tools or None,
@@ -2426,6 +2522,7 @@ async def run_agent(
             custom_provider,
             custom_provider_key,
             task_exec,
+            repo_path=repo_path,
             mcp_config=mcp_config,
             allowed_tools_set=allowed_tools_set,
         )
