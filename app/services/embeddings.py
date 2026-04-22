@@ -11,6 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
+from app.observability import embeddings_requests_total
 
 logger = logging.getLogger(__name__)
 
@@ -91,14 +92,18 @@ class EmbeddingsService:
         if not texts:
             return []
         if not await self._ensure_loaded():
+            embeddings_requests_total.labels(status="disabled").inc()
             return None
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 _executor, self._run_embed, self._model, texts
             )
+            embeddings_requests_total.labels(status="success").inc()
+            return result
         except Exception as exc:
             logger.warning("embed_many failed: %s", exc)
+            embeddings_requests_total.labels(status="failure").inc()
             return None
 
     async def embed_one(self, text: str) -> list[float] | None:

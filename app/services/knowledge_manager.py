@@ -12,6 +12,7 @@ from app.models.knowledge_source import (
     KnowledgeSourceType,
 )
 from app.config import settings
+from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import token_manager
 from app.services.embeddings import embeddings_service
 
@@ -127,7 +128,7 @@ class KnowledgeManager:
                         limit=limit,
                         with_payload=True,
                     )
-                    return [
+                    hits = [
                         {
                             "id": str(point.id),
                             "text": point.payload.get("text", "") if point.payload else "",
@@ -136,6 +137,10 @@ class KnowledgeManager:
                         }
                         for point in results.points
                     ]
+                    semantic_retrieval_results.labels(type="knowledge").observe(len(hits))
+                    if hits:
+                        semantic_retrieval_hits_total.labels(type="knowledge").inc()
+                    return hits
 
             # ── Scroll fallback ──────────────────────────────────────────
             scroll_results, _ = await client.scroll(

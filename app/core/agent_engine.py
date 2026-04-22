@@ -54,6 +54,8 @@ from app.observability import (
     agent_task_duration_seconds,
     agent_tasks_active,
     agent_tasks_total,
+    context_compaction_messages_dropped,
+    context_compactions_total,
     cost_dollars_total,
     cost_per_task_dollars,
     mcp_connections_total,
@@ -1714,10 +1716,15 @@ async def _run_with_custom_provider(
                         f"{len(messages)} messages)",
                         task_exec,
                     )
+                    _msgs_before = len(messages)
                     messages = _compact_messages(messages, model=model, context_window=context_window)
+                    compacted_count = len(messages)
+                    _dropped = _msgs_before - compacted_count + 1  # +1 for injected compaction note
+                    context_compactions_total.labels(model=model).inc()
+                    context_compaction_messages_dropped.labels(model=model).observe(max(0, _dropped))
                     await _log(
                         workflow, "compaction_complete",
-                        f"Compacted to {len(messages)} messages",
+                        f"Compacted to {compacted_count} messages",
                         task_exec,
                     )
 

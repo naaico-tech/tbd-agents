@@ -117,6 +117,40 @@ celery_queue_length = Gauge(
     multiprocess_mode="liveall",
 )
 
+# ── Context engineering metrics ──────────────────────────────────────────────
+
+context_compactions_total = Counter(
+    "copilot_hub_context_compactions_total",
+    "Total context compaction events triggered",
+    ["model"],
+)
+
+context_compaction_messages_dropped = Histogram(
+    "copilot_hub_context_compaction_messages_dropped",
+    "Number of messages dropped per compaction event",
+    ["model"],
+    buckets=(1, 2, 5, 10, 20, 50, 100, 200),
+)
+
+semantic_retrieval_hits_total = Counter(
+    "copilot_hub_semantic_retrieval_hits_total",
+    "Total semantic retrieval calls that returned results",
+    ["type"],  # type: memory | knowledge
+)
+
+semantic_retrieval_results = Histogram(
+    "copilot_hub_semantic_retrieval_results",
+    "Number of results returned per semantic retrieval call",
+    ["type"],  # type: memory | knowledge
+    buckets=(0, 1, 2, 3, 5, 8, 10, 15, 20),
+)
+
+embeddings_requests_total = Counter(
+    "copilot_hub_embeddings_requests_total",
+    "Total embedding generation requests",
+    ["status"],  # status: success | failure | disabled
+)
+
 
 # ── Telemetry initialisation ────────────────────────────────────────────────
 

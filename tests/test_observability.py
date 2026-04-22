@@ -34,12 +34,17 @@ class TestMetricDefinitions:
             agent_tasks_active,
             agent_tasks_total,
             celery_queue_length,
+            context_compaction_messages_dropped,
+            context_compactions_total,
             cost_dollars_total,
             cost_per_task_dollars,
+            embeddings_requests_total,
             mcp_connections_total,
             premium_requests_total,
             repo_sync_duration_seconds,
             repo_sync_total,
+            semantic_retrieval_hits_total,
+            semantic_retrieval_results,
             sse_connections_active,
             tokens_total,
             tool_calls_per_task,
@@ -52,18 +57,38 @@ class TestMetricDefinitions:
             agent_tasks_active,
             agent_tasks_total,
             celery_queue_length,
+            context_compaction_messages_dropped,
+            context_compactions_total,
             cost_dollars_total,
             cost_per_task_dollars,
+            embeddings_requests_total,
             mcp_connections_total,
             premium_requests_total,
             repo_sync_duration_seconds,
             repo_sync_total,
+            semantic_retrieval_hits_total,
+            semantic_retrieval_results,
             sse_connections_active,
             tokens_total,
             tool_calls_per_task,
             tool_calls_total,
         ]
         assert all(m is not None for m in metrics)
+
+    def test_context_engineering_metrics_have_correct_names(self):
+        from app.observability import (
+            context_compaction_messages_dropped,
+            context_compactions_total,
+            embeddings_requests_total,
+            semantic_retrieval_hits_total,
+            semantic_retrieval_results,
+        )
+
+        assert context_compactions_total._name == "copilot_hub_context_compactions"
+        assert context_compaction_messages_dropped._name == "copilot_hub_context_compaction_messages_dropped"
+        assert semantic_retrieval_hits_total._name == "copilot_hub_semantic_retrieval_hits"
+        assert semantic_retrieval_results._name == "copilot_hub_semantic_retrieval_results"
+        assert embeddings_requests_total._name == "copilot_hub_embeddings_requests"
 
 
 class TestSSEConnectionGauge:

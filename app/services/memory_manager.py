@@ -4,6 +4,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from app.config import settings
 from app.models.memory import Memory, MemoryScope
+from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import memory_stm
 from app.services.embeddings import embeddings_service
 
@@ -255,11 +256,15 @@ class MemoryManager:
                     limit=k,
                     with_payload=True,
                 )
-                return [
+                hits = [
                     point.payload
                     for point in results.points
                     if point.payload
                 ]
+                semantic_retrieval_results.labels(type="memory").observe(len(hits))
+                if hits:
+                    semantic_retrieval_hits_total.labels(type="memory").inc()
+                return hits
             finally:
                 await client.close()
         except Exception as exc:
