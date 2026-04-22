@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     knowledge_retrieval_top_k: int = 8
     knowledge_chunk_chars: int = 1200
     knowledge_chunk_overlap_chars: int = 150
+    # Qdrant vector database (required for semantic memory + knowledge retrieval)
+    # Set QDRANT_URL to enable; semantic features silently degrade without it.
+    qdrant_url: str | None = None
+    qdrant_api_key: str | None = None
     # Conversation compaction
     compaction_enabled: bool = True
     compaction_token_threshold_pct: float = 0.75  # compact at 75% of context window

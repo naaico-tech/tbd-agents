@@ -110,7 +110,7 @@ class MemoryManager:
         Creates the collection if it does not exist yet.  Failures are
         non-fatal — logged as warnings only.
         """
-        qdrant_url = getattr(settings, "qdrant_url", None)
+        qdrant_url = settings.qdrant_url
         if not qdrant_url:
             return
         try:
@@ -121,7 +121,10 @@ class MemoryManager:
                 VectorParams,
             )
 
-            client = AsyncQdrantClient(url=qdrant_url)
+            client = AsyncQdrantClient(
+                url=qdrant_url,
+                api_key=settings.qdrant_api_key or None,
+            )
             try:
                 collections = await client.get_collections()
                 existing_names = {c.name for c in collections.collections}
@@ -219,7 +222,7 @@ class MemoryManager:
         an empty list when embeddings are unavailable or Qdrant is not
         configured.
         """
-        qdrant_url = getattr(settings, "qdrant_url", None)
+        qdrant_url = settings.qdrant_url
         if not qdrant_url or not settings.embeddings_enabled:
             return []
 
@@ -233,7 +236,10 @@ class MemoryManager:
             from qdrant_client import AsyncQdrantClient
             from qdrant_client.models import Filter, FieldCondition, MatchValue
 
-            client = AsyncQdrantClient(url=qdrant_url)
+            client = AsyncQdrantClient(
+                url=qdrant_url,
+                api_key=settings.qdrant_api_key or None,
+            )
             try:
                 query_filter = Filter(
                     must=[FieldCondition(key="agent_id", match=MatchValue(value=agent_id))]
