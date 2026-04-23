@@ -204,5 +204,6 @@ class TestCopilotToolFiltering:
         assert _copilot_tool_uses_mcp_allowlist("glob") is False
         assert _copilot_tool_uses_mcp_allowlist("store_memory") is False
 
-    def test_mcp_tools_still_use_mcp_allowlist(self):
-        assert _copilot_tool_uses_mcp_allowlist("fetch_jira_issue") is True
+    def test_mcp_tools_also_skip_hook_level_allowlist(self):
+        assert _copilot_tool_uses_mcp_allowlist("fetch_jira_issue") is False
+        assert _copilot_tool_uses_mcp_allowlist("sql") is False

@@ -6,14 +6,25 @@ from app.config import settings
 from app.services.auth import validate_github_token
 
 
-def _resolve_token(authorization: str | None) -> str:
-    """Return the token from the header, or fall back to the env var."""
+LOCAL_USER = {"login": "local", "id": 0, "name": "Local User"}
+
+
+def _resolve_optional_token(authorization: str | None) -> str | None:
+    """Return the token from the header or env var, if one is available."""
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
         if token:
             return token
     if settings.github_token:
         return settings.github_token
+    return None
+
+
+def _resolve_token(authorization: str | None) -> str:
+    """Return the token from the header, or fall back to the env var."""
+    token = _resolve_optional_token(authorization)
+    if token:
+        return token
     raise HTTPException(
         status_code=401,
         detail="Provide an Authorization: Bearer <token> header or set GITHUB_TOKEN env var",
@@ -22,7 +33,9 @@ def _resolve_token(authorization: str | None) -> str:
 
 async def get_current_user(authorization: str | None = Header(None)) -> dict[str, Any]:
     """Validate GitHub token from header (or env fallback) and return user info."""
-    token = _resolve_token(authorization)
+    token = _resolve_optional_token(authorization)
+    if token is None:
+        return dict(LOCAL_USER)
     # If the token came from the server-level env var (no Authorization header
     # provided, or the header matched the env var exactly), skip the remote
     # GitHub API call — the token is already trusted by the operator.
@@ -35,3 +48,8 @@ async def get_current_user(authorization: str | None = Header(None)) -> dict[str
 def extract_token(authorization: str | None) -> str:
     """Return raw token string from header or env fallback."""
     return _resolve_token(authorization)
+
+
+def extract_optional_token(authorization: str | None) -> str | None:
+    """Return raw token string from header or env fallback, if configured."""
+    return _resolve_optional_token(authorization)

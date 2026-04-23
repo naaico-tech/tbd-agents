@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery.task(name="run_agent_task", bind=True, max_retries=1)
-def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str, task_execution_id: str | None = None, reasoning_effort: str | None = None):
+def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str | None, task_execution_id: str | None = None, reasoning_effort: str | None = None):
     """Execute the agent engine inside an asyncio event loop.
 
     Each invocation creates a fresh event loop via asyncio.run(), initialises
@@ -28,7 +28,7 @@ def run_agent_task(self, workflow_id: str, user_prompt: str, github_token: str, 
         raise
 
 
-async def _execute(workflow_id: str, user_prompt: str, github_token: str, task_execution_id: str | None = None, worker: str | None = None, reasoning_effort: str | None = None):
+async def _execute(workflow_id: str, user_prompt: str, github_token: str | None, task_execution_id: str | None = None, worker: str | None = None, reasoning_effort: str | None = None):
     """Async entry point — initialises DB and runs the agent."""
     from beanie import PydanticObjectId
 

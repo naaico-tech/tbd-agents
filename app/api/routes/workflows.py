@@ -4,7 +4,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import extract_token, get_current_user
+from app.api.deps import extract_optional_token, get_current_user
 from app.config import settings
 from app.core import event_bus
 from app.core.guardrails import enforce_guardrails
@@ -143,7 +143,7 @@ async def send_prompt(
     wf.current_turn = 0
     await wf.save()
 
-    token = extract_token(authorization)
+    token = extract_optional_token(authorization)
 
     # ── Guardrail enforcement ─────────────────────────────────────────────────
     effective_prompt = await enforce_guardrails(wf, body.prompt, body.request)

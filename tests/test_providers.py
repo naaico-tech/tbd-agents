@@ -565,6 +565,54 @@ class TestRunAgentProviderRouting:
         assert captured_token.get("token") == "ghp_stored_token"
 
     @pytest.mark.asyncio
+    async def test_github_copilot_provider_does_not_require_base_token(self):
+        """Stored github_copilot token should be enough when no base token is provided."""
+        from app.core import agent_engine
+
+        workflow = self._make_workflow()
+        agent = self._make_agent(provider_id="6601a1b2c3d4e5f607890ab1")
+        provider = Provider.model_construct(
+            name="my-copilot",
+            provider_type=ProviderType.GITHUB_COPILOT,
+            api_key_token_name="my-github-pat",
+        )
+
+        _am = AsyncMock
+        with (
+            patch.object(agent_engine, "Agent") as mock_agent_cls,
+            patch.object(agent_engine, "Provider") as mock_prov_cls,
+            patch.object(agent_engine, "token_manager") as mock_tm,
+            patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
+            patch.object(agent_engine, "_build_system_prompt", new_callable=_am, return_value="sys"),
+            patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
+            patch.object(agent_engine, "_log", new_callable=_am),
+            patch.object(agent_engine, "_publish_status", new_callable=_am),
+            patch.object(agent_engine, "build_client") as mock_build_client,
+            patch.object(agent_engine, "agent_tasks_active"),
+            patch.object(agent_engine, "agent_tasks_total"),
+            patch.object(agent_engine, "agent_task_duration_seconds"),
+            patch.object(agent_engine, "mcp_connections_total"),
+            patch.object(agent_engine, "tool_calls_per_task"),
+        ):
+            mock_agent_cls.get = AsyncMock(return_value=agent)
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="ghp_stored_token")
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
+
+            captured_token = {}
+
+            def capture_token(token):
+                captured_token["token"] = token
+                raise RuntimeError("stop-here")
+
+            mock_build_client.side_effect = capture_token
+
+            await agent_engine.run_agent(workflow, "hello", None)
+
+        assert captured_token.get("token") == "ghp_stored_token"
+
+    @pytest.mark.asyncio
     async def test_custom_provider_routes_to_http_path(self):
         """Non-copilot providers should call _run_with_custom_provider."""
         from app.core import agent_engine

@@ -14,7 +14,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def build_client(github_token: str) -> CopilotClient:
+def build_client(github_token: str | None) -> CopilotClient:
     """Create a CopilotClient that authenticates with the given GitHub token.
 
     The returned client should be used as an async context manager::
@@ -23,6 +23,11 @@ def build_client(github_token: str) -> CopilotClient:
             async with await client.create_session(...) as session:
                 ...
     """
+    if not github_token:
+        raise ValueError(
+            "GitHub token is required for default Copilot execution; configure GITHUB_TOKEN or attach a github_copilot provider with a stored token"
+        )
+
     env = dict(os.environ)
 
     # TelemetryConfig is a TypedDict on SubprocessConfig

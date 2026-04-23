@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app.api.deps import _resolve_token, extract_token
+from app.api.deps import _resolve_optional_token, _resolve_token, extract_optional_token, extract_token, get_current_user
 
 
 class TestResolveToken:
@@ -43,6 +43,15 @@ class TestResolveToken:
         token = extract_token("Bearer ghp_test")
         assert token == "ghp_test"
 
+    def test_optional_token_returns_none_when_unset(self):
+        with patch("app.api.deps.settings") as mock_settings:
+            mock_settings.github_token = None
+            assert _resolve_optional_token(None) is None
+
+    def test_extract_optional_token_function(self):
+        token = extract_optional_token("Bearer ghp_test")
+        assert token == "ghp_test"
+
 
 class TestResolveTokenEdgeCases:
     def test_bearer_with_extra_spaces(self):
@@ -56,3 +65,26 @@ class TestResolveTokenEdgeCases:
             mock_settings.github_token = None
             with pytest.raises(HTTPException):
                 _resolve_token("BearerXYZ")
+
+
+class TestGetCurrentUser:
+    @pytest.mark.asyncio
+    async def test_returns_local_user_when_no_token_is_configured(self):
+        with patch("app.api.deps.settings") as mock_settings:
+            mock_settings.github_token = None
+            user = await get_current_user(None)
+
+        assert user["login"] == "local"
+
+    @pytest.mark.asyncio
+    async def test_validates_remote_user_when_bearer_token_is_present(self):
+        with patch("app.api.deps.settings") as mock_settings, patch(
+            "app.api.deps.validate_github_token",
+            new_callable=AsyncMock,
+            return_value={"login": "octocat"},
+        ) as mock_validate:
+            mock_settings.github_token = None
+            user = await get_current_user("Bearer ghp_test")
+
+        assert user == {"login": "octocat"}
+        mock_validate.assert_awaited_once_with("ghp_test", skip_remote=False)

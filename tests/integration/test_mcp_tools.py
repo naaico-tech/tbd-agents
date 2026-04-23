@@ -240,6 +240,84 @@ class TestMCPToolInvocation:
         assert captured_mcp["filtered-server"]["tools"] == ["approved_tool"]
 
     @pytest.mark.asyncio
+    async def test_copilot_pre_tool_hook_does_not_reapply_global_allowlist(self, mock_event_bus):
+        """Copilot SDK should rely on session MCP config instead of a second allowlist gate."""
+        server = await create_mcp_server(
+            name="filtered-server",
+            transport_type=TransportType.STDIO,
+            connection_config={"command": "echo", "args": []},
+            allowed_tools=["approved_tool"],
+        )
+        agent = await create_agent(mcp_server_ids=[str(server.id)])
+        wf = await create_workflow(agent)
+        task = TaskExecution(
+            workflow_id=str(wf.id), prompt="Filter test", status=TaskStatus.PENDING,
+        )
+        await task.insert()
+
+        captured_hooks: dict = {}
+
+        class _FakeSession:
+            session_id = "test-session-mcp-hooks"
+
+            class _client:
+                @staticmethod
+                async def request(*args, **kwargs):
+                    pre_tool = captured_hooks["hooks"]["on_pre_tool_use"]
+                    decision = pre_tool({"toolName": "unlisted_runtime_tool"}, None)
+                    assert decision["permissionDecision"] == "allow"
+                    on_event = captured_hooks["on_event"]
+                    on_event(SimpleNamespace(
+                        type=SimpleNamespace(value="assistant.message"),
+                        data=SimpleNamespace(content="OK"),
+                    ))
+                    on_event(SimpleNamespace(
+                        type=SimpleNamespace(value="session.idle"),
+                        data=None,
+                    ))
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            def on(self, callback):
+                captured_hooks["on_event"] = callback
+
+        def capture_create_session(**kwargs):
+            captured_hooks["hooks"] = kwargs.get("hooks", {})
+            return _FakeSession()
+
+        fake_mcp_config = {
+            "filtered-server": {
+                "type": "stdio",
+                "command": "echo",
+                "args": [],
+                "env": {},
+                "tools": ["approved_tool"],
+            }
+        }
+
+        with (
+            patch("app.core.agent_engine.memory_manager") as mock_mm,
+            patch("app.core.agent_engine._sync_repo", new_callable=AsyncMock, return_value=None),
+            patch("app.core.agent_engine.build_mcp_servers_config", new_callable=AsyncMock, return_value=fake_mcp_config),
+            patch("app.core.agent_engine.build_client") as mock_build,
+        ):
+            mock_mm.build_memory_context = AsyncMock(return_value="")
+
+            mock_client = MagicMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.create_session = AsyncMock(side_effect=capture_create_session)
+            mock_build.return_value = mock_client
+
+            result = await run_agent(wf, "Filter test", "ghp_token", task_execution_id=str(task.id))
+
+        assert result is not None
+
+    @pytest.mark.asyncio
     async def test_mcp_tool_execution_via_byok(self, mock_event_bus):
         """BYOK path: model requests a tool call → tool executed → result returned."""
         server = await create_mcp_server(

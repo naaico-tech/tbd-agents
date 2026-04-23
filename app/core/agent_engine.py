@@ -1468,32 +1468,15 @@ CLAUDE_AGENT_TOOLSET_TOOLS = [
     "bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search",
 ]
 
-# Copilot SDK hook events use runtime tool names that do not always match the
-# agent configuration names exactly (for example, "view" instead of "read").
-# These tools are not sourced from MCP servers and must not be filtered by
-# MCP allowlists.
-COPILOT_NON_MCP_TOOL_NAMES = {
-    "bash",
-    "read",
-    "view",
-    "write",
-    "create",
-    "edit",
-    "str_replace",
-    "insert",
-    "delete",
-    "glob",
-    "grep",
-    "web_fetch",
-    "web_search",
-    "store_memory",
-}
-
 
 def _copilot_tool_uses_mcp_allowlist(tool_name: str) -> bool:
-    """Return whether a Copilot SDK tool should be filtered by MCP allowlists."""
-    return tool_name not in COPILOT_NON_MCP_TOOL_NAMES
+    """Return whether Copilot SDK hooks should re-check MCP allowlists.
 
+    The Copilot SDK already enforces MCP tool restrictions from the per-server
+    ``tools`` lists passed at session creation, so the hook layer should never
+    apply a second global allowlist check.
+    """
+    return False
 
 def _build_claude_agent_tools(
     native_mcp_servers: list[dict],
@@ -2409,7 +2392,7 @@ async def _run_with_custom_provider(
 async def run_agent(
     workflow: Workflow,
     user_prompt: str,
-    github_token: str,
+    github_token: str | None,
     task_execution_id: str | None = None,
     reasoning_effort: str | None = None,
 ) -> str | None:
@@ -2753,20 +2736,16 @@ async def run_agent(
 
     # ── Hooks ──
     def on_pre_tool_use(input_data, context):
-        """Log tool invocation; deny if max turns exceeded or blocked MCP tool."""
+        """Log tool invocation; deny only if max turns are exceeded.
+
+        MCP tool restrictions are already enforced by the per-server ``tools``
+        lists passed into the Copilot SDK session config. Re-checking them here
+        with a flattened global allowlist causes false denials when runtime tool
+        names or server-local catalogs do not line up exactly with the stored
+        DB allowlists.
+        """
         nonlocal tool_call_count
         tool_name = input_data.get("toolName", "unknown")
-        # Only MCP-sourced tools should be checked against MCP allowlists here.
-        # The SDK already receives the filtered MCP config at session creation.
-        if (
-            allowed_tools_set is not None
-            and _copilot_tool_uses_mcp_allowlist(tool_name)
-            and tool_name not in allowed_tools_set
-        ):
-            asyncio.create_task(
-                _log(workflow, "tool_denied", f"{tool_name} — not in allowed tools", task_exec)
-            )
-            return {"permissionDecision": "deny", "permissionDecisionReason": "Tool not in allowed list"}
         tool_call_count += 1
         if tool_call_count > max_turns:
             asyncio.create_task(

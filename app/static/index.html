@@ -784,7 +784,7 @@ function openAgentModal(id) {
     `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:4px">
       <input type="checkbox" value="${k.id}" ${a?.knowledge_source_ids?.includes(k.id)?'checked':''}> ${esc(k.name)} <span class="badge badge-blue" style="font-size:10px">${k.source_type}</span>
     </label>`).join('') || '<span style="color:var(--muted);font-size:13px">No knowledge sources created</span>';
-  const providerOpts = `<option value="">(Default — use GITHUB_TOKEN)</option>` +
+  const providerOpts = `<option value="">(Default shared credentials)</option>` +
     providers.map(p => `<option value="${p.id}" ${a?.provider_id===p.id?'selected':''}>${esc(p.name)} (${p.provider_type})</option>`).join('');
 
   // Determine if current provider is Anthropic (for showing builtin tools)
@@ -815,7 +815,7 @@ function openAgentModal(id) {
     <div class="form-group"><label>Model</label><input id="f-agent-model" value="${esc(a?.model||'')}" placeholder="gpt-4.1"></div>
     <div class="form-group"><label>Provider <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional — BYOK)</span></label>
       <select id="f-agent-provider" onchange="toggleBuiltinTools()">${providerOpts}</select>
-      <div class="hint">Leave as default to use the server GITHUB_TOKEN. Select a provider to route execution through its API key.</div></div>
+      <div class="hint">Leave as default to use shared server credentials when available. Select a provider to route execution through its stored token.</div></div>
     <div class="form-group" id="f-agent-builtin-tools-group" style="display:${isAnthropic?'block':'none'}">
       <label>Built-in Agent Tools <span style="font-weight:400;font-size:11px;color:var(--muted)">(Claude Agent SDK)</span></label>
       <div id="f-agent-builtin-tools">${builtinToolsHtml}</div>
@@ -1807,13 +1807,37 @@ function openWorkflowModal() {
   _swapModelField('f-wf', '');
 }
 
-let _cachedModels = null;
+let _cachedModels = new Map();
+
+function _getAgentProvider(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a || !a.provider_id) return null;
+  return providers.find(x => x.id === a.provider_id) || null;
+}
+
+function _copilotProviderIdForAgent(agentId) {
+  const provider = _getAgentProvider(agentId);
+  return provider?.provider_type === 'github_copilot' ? provider.id : null;
+}
+
+function _modelsCacheKey(providerId) {
+  return providerId || '__default__';
+}
+
+async function _fetchModels(providerId = null) {
+  const cacheKey = _modelsCacheKey(providerId);
+  if (!_cachedModels.has(cacheKey)) {
+    const path = providerId
+      ? `/api/models?provider_id=${encodeURIComponent(providerId)}`
+      : '/api/models';
+    _cachedModels.set(cacheKey, await api(path));
+  }
+  return _cachedModels.get(cacheKey);
+}
 
 function _agentHasCustomProvider(agentId) {
-  const a = agents.find(x => x.id === agentId);
-  if (!a || !a.provider_id) return false;
-  const p = providers.find(x => x.id === a.provider_id);
-  return p && p.provider_type !== 'github_copilot';
+  const provider = _getAgentProvider(agentId);
+  return provider && provider.provider_type !== 'github_copilot';
 }
 
 function _swapModelField(prefix, currentModel) {
@@ -1831,16 +1855,15 @@ function _swapModelField(prefix, currentModel) {
     container.innerHTML = `
       <select id="${prefix}-model"><option value="">Loading models…</option></select>
       <div id="${prefix}-model-info" class="hint"></div>`;
-    _loadModelsIntoSelect(prefix, currentModel);
+    _loadModelsIntoSelect(prefix, currentModel, _copilotProviderIdForAgent(agentId));
   }
 }
 
-async function _loadModelsIntoSelect(prefix, selectedModel) {
+async function _loadModelsIntoSelect(prefix, selectedModel, providerId = null) {
   const sel = document.getElementById(prefix + '-model');
   const info = document.getElementById(prefix + '-model-info');
   try {
-    if (!_cachedModels) _cachedModels = await api('/api/models');
-    const models = _cachedModels;
+    const models = await _fetchModels(providerId);
     sel.innerHTML = models.map(m => {
       const mult = m.billing?.multiplier;
       const badge = mult != null ? ` (${mult}x)` : '';
@@ -1859,30 +1882,6 @@ async function _loadModelsIntoSelect(prefix, selectedModel) {
   }
 }
 
-async function loadModelOptions() {
-  const sel = document.getElementById('f-wf-model');
-  const info = document.getElementById('f-wf-model-info');
-  try {
-    if (!_cachedModels) {
-      _cachedModels = await api('/api/models');
-    }
-    const models = _cachedModels;
-    sel.innerHTML = models.map(m => {
-      const mult = m.billing?.multiplier;
-      const badge = mult != null ? ` (${mult}x)` : '';
-      const policy = m.policy?.state;
-      const disabled = policy === 'disabled' ? ' disabled' : '';
-      return `<option value="${esc(m.id)}"${disabled}>${esc(m.name)}${badge}</option>`;
-    }).join('');
-    sel.addEventListener('change', () => updateModelInfo(models, sel.value, info, 'f-wf-reasoning'));
-    updateModelInfo(models, sel.value, info, 'f-wf-reasoning');
-  } catch(e) {
-    sel.innerHTML = '<option value="">Failed to load models</option>';
-    info.textContent = e.message;
-  }
-}
-
-// loadModelOptions kept for backward compat — delegates to shared helper
 async function loadModelOptions() {
   await _loadModelsIntoSelect('f-wf', '');
 }
@@ -2127,8 +2126,7 @@ async function loadWorkflowDetail(id) {
 
     // Reasoning dropdown
     try {
-      if (!_cachedModels) _cachedModels = await api('/api/models');
-      const m = _cachedModels.find(x => x.id === w.model);
+      const m = (await _fetchModels(_copilotProviderIdForAgent(w.agent_id))).find(x => x.id === w.model);
       const rGroup = document.getElementById('wf-detail-reasoning-group');
       const rSel = document.getElementById('wf-detail-reasoning');
       if (m?.supportedReasoningEfforts?.length) {
@@ -2492,8 +2490,7 @@ async function updateTaskReasoningDropdown() {
   const sel = document.getElementById('task-reasoning');
   if (!w || !sel || !group) return;
   try {
-    if (!_cachedModels) _cachedModels = await api('/api/models');
-    const m = _cachedModels.find(x => x.id === w.model);
+    const m = (await _fetchModels(_copilotProviderIdForAgent(w.agent_id))).find(x => x.id === w.model);
     if (m?.supportedReasoningEfforts?.length) {
       sel.innerHTML = '<option value="">Use workflow default' + (w.reasoning_effort ? ` (${w.reasoning_effort})` : '') + '</option>' +
         m.supportedReasoningEfforts.map(e => `<option value="${esc(e)}">${esc(e.charAt(0).toUpperCase()+e.slice(1))}</option>`).join('');
