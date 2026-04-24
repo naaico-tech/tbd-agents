@@ -13,7 +13,7 @@ chat is a **pure conversational interface**:
 
 - ✅ Answers questions about what the agent can do
 - ✅ Describes its skills, tools, and memory
-- ✅ Summarises its recent task history
+- ✅ Summarizes its recent task history
 - ✅ Streams responses token-by-token via SSE
 - ❌ Does **not** execute tools or trigger workflows
 

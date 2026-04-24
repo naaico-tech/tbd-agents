@@ -15,7 +15,6 @@ The handler:
 
 import json
 import logging
-from asyncio import timeout as async_timeout
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
@@ -227,34 +226,33 @@ async def handle_chat(
 
     try:
         async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-            async with async_timeout(_CHAT_TIMEOUT):
-                async with client.stream(
-                    "POST", url, headers=headers, json=body
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[len("data:"):].lstrip()
-                        if payload == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
+            async with client.stream(
+                "POST", url, headers=headers, json=body
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:"):].lstrip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
 
-                        if "usage" in chunk and chunk["usage"]:
-                            usage_data = chunk["usage"]
+                    if "usage" in chunk and chunk["usage"]:
+                        usage_data = chunk["usage"]
 
-                        choices = chunk.get("choices") or []
-                        if not choices:
-                            continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
 
-                        delta = choices[0].get("delta", {})
-                        content_delta = delta.get("content")
-                        if content_delta:
-                            response_parts.append(content_delta)
-                            yield _delta_event(content_delta)
+                    delta = choices[0].get("delta", {})
+                    content_delta = delta.get("content")
+                    if content_delta:
+                        response_parts.append(content_delta)
+                        yield _delta_event(content_delta)
 
     except Exception:
         logger.exception("chat: LLM call failed for session %s", session_id)
