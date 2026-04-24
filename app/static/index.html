@@ -269,18 +269,18 @@
   .chat-msg-assistant { background: var(--surface2); border: 1px solid var(--border);
     margin-right: 40px; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 10px;
     font-size: 14px; line-height: 1.6; word-break: break-word; }
-  .chat-msg-user .chat-role-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+  .chat-msg-user .chat-role-label { font-weight: 700; text-transform: uppercase;
     letter-spacing: 1px; margin-bottom: 5px; color: var(--accent); font-family: 'VT323', monospace; font-size: 14px; }
-  .chat-msg-assistant .chat-role-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+  .chat-msg-assistant .chat-role-label { font-weight: 700; text-transform: uppercase;
     letter-spacing: 1px; margin-bottom: 5px; color: var(--text); font-family: 'VT323', monospace; font-size: 14px; }
   .chat-msg-content { white-space: pre-wrap; }
   .chat-msg-content code { background: var(--bg); padding: 1px 5px; border-radius: 2px;
-    font-size: 13px; font-family: 'VT323', monospace; font-size: 15px; }
+    font-family: 'VT323', monospace; font-size: 15px; }
   .chat-msg-content pre { background: var(--bg); padding: 10px 14px; border-radius: var(--radius);
     overflow-x: auto; font-size: 13px; font-family: 'VT323', monospace; margin: 8px 0;
     line-height: 1.4; border: 1px solid var(--border); }
   .chat-msg-content pre code { background: none; padding: 0; font-size: inherit; }
-  .chat-usage-bar { font-size: 11px; color: var(--muted); padding: 4px 14px 8px;
+  .chat-usage-bar { color: var(--muted); padding: 4px 14px 8px;
     font-family: 'VT323', monospace; font-size: 13px; }
   @media (max-width: 800px) { .chat-layout { grid-template-columns: 1fr; } .chat-sessions-panel { max-height: 260px; } }
 </style>
@@ -3047,11 +3047,11 @@ async function loadAgentMemory(agentId) {
 }
 
 // ── Chat ──
-let chatAgentId = null;        // currently selected agent id
-let chatSessionId = null;      // currently open session id
-let chatSessions = [];         // sessions list for this agent
-let chatSse = null;            // active EventSource for chat SSE
-let chatStreamEl = null;       // DOM element being streamed into
+let chatAgentId = null;          // currently selected agent id
+let chatSessionId = null;        // currently open session id
+let chatSessions = [];           // sessions list for this agent
+let chatStreamReader = null;     // active ReadableStreamDefaultReader for the current response
+let chatStreamEl = null;         // DOM element being streamed into
 
 async function loadChatPage() {
   // Populate agent selector
@@ -3070,7 +3070,7 @@ async function loadChatPage() {
 async function onChatAgentChange() {
   chatAgentId = document.getElementById('chat-agent-select').value;
   chatSessionId = null;
-  disconnectChatSse();
+  disconnectChatStream();
   clearChatMessages();
   document.getElementById('chat-session-title').textContent = 'Select a session or start a new chat';
   await loadChatSessions();
@@ -3101,7 +3101,7 @@ function renderChatSessionsList() {
 }
 
 async function openChatSession(sessionId) {
-  disconnectChatSse();
+  disconnectChatStream();
   chatSessionId = sessionId;
   renderChatSessionsList();
   clearChatMessages();
@@ -3116,7 +3116,7 @@ async function openChatSession(sessionId) {
 
 async function startNewChatSession() {
   if (!chatAgentId) { toast('Select an agent first', 'error'); return; }
-  disconnectChatSse();
+  disconnectChatStream();
   chatSessionId = null;
   renderChatSessionsList();
   clearChatMessages();
@@ -3159,7 +3159,7 @@ async function sendChatMessage() {
   sendBtn.disabled = true;
   sendBtn.textContent = '…';
 
-  disconnectChatSse();
+  disconnectChatStream();
   chatStreamEl = null;
 
   const body = JSON.stringify({ message, session_id: chatSessionId || undefined });
@@ -3176,6 +3176,7 @@ async function sendChatMessage() {
     }
 
     const reader = response.body.getReader();
+    chatStreamReader = reader;
     const decoder = new TextDecoder();
     let buf = '';
 
@@ -3198,6 +3199,7 @@ async function sendChatMessage() {
         try { const ev = JSON.parse(buf.slice(6)); handleChatSseEvent(ev); } catch {}
       }
       finishChatStream();
+      chatStreamReader = null;
       sendBtn.disabled = false;
       sendBtn.textContent = 'Send';
     };
@@ -3284,8 +3286,11 @@ function scrollChatToBottom() {
   area.scrollTop = area.scrollHeight;
 }
 
-function disconnectChatSse() {
-  if (chatSse) { chatSse.close(); chatSse = null; }
+function disconnectChatStream() {
+  if (chatStreamReader) {
+    try { chatStreamReader.cancel(); } catch {}
+    chatStreamReader = null;
+  }
   finishChatStream();
 }
 
