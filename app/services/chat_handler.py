@@ -256,9 +256,9 @@ async def handle_chat(
                             response_parts.append(content_delta)
                             yield _delta_event(content_delta)
 
-    except Exception as exc:
+    except Exception:
         logger.exception("chat: LLM call failed for session %s", session_id)
-        yield _error_event(str(exc))
+        yield _error_event("LLM request failed. Please try again.")
         return
 
     # ── Record duration metric ────────────────────────────────────────────

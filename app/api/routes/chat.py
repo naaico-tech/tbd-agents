@@ -126,12 +126,12 @@ async def chat(
                     break
                 event_id += 1
                 yield f"id: {event_id}\ndata: {json.dumps(event)}\n\n"
-        except Exception as exc:
+        except Exception:
             logger.exception("chat SSE generator error for agent %s", agent_id)
             event_id += 1
             yield (
                 f"id: {event_id}\ndata: "
-                + json.dumps({"type": "error", "message": str(exc)})
+                + json.dumps({"type": "error", "message": "An internal error occurred."})
                 + "\n\n"
             )
         finally:
