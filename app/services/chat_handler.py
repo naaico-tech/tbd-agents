@@ -87,6 +87,17 @@ def _resolve_url(provider: Provider | None, model: str) -> str:
             return f"{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
         return f"{base.rstrip('/')}/chat/completions?api-version={api_version}"
 
+    if provider_type == ProviderType.ANTHROPIC:
+        # Anthropic uses the native Messages API, not an OpenAI-compatible
+        # /chat/completions endpoint. The httpx path in handle_chat() only
+        # supports OpenAI-style streaming, so reject Anthropic providers here
+        # with a clear error rather than silently calling an invalid URL.
+        raise ValueError(
+            f"Provider '{provider.name}' uses Anthropic, which is not supported "
+            "in chat mode (no OpenAI-compatible endpoint). Attach an OpenAI, "
+            "Azure OpenAI, or Custom provider instead."
+        )
+
     raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type)
     if not raw_url:
         raise ValueError(
@@ -191,11 +202,15 @@ async def handle_chat(
     system_prompt = "\n\n".join(system_parts)
 
     # ── Load conversation history ─────────────────────────────────────────
-    history: list[ChatMessage] = (
-        await ChatMessage.find({"session_id": session.id})
-        .sort("created_at")
-        .limit(_CONVERSATION_WINDOW)
-        .to_list()
+    # Sort descending so we get the *most recent* _CONVERSATION_WINDOW messages,
+    # then reverse to restore chronological order for the messages array.
+    history: list[ChatMessage] = list(
+        reversed(
+            await ChatMessage.find({"session_id": session.id})
+            .sort("-created_at")
+            .limit(_CONVERSATION_WINDOW)
+            .to_list()
+        )
     )
 
     # ── Persist user message ──────────────────────────────────────────────
@@ -207,6 +222,15 @@ async def handle_chat(
     await user_msg.insert()
     chat_messages_total.labels(role="user").inc()
 
+    # Update session metadata right after persisting the user message so that
+    # session counts and the auto-title remain consistent even if the LLM call
+    # fails before the assistant reply is written.
+    session.message_count = (session.message_count or 0) + 1
+    session.updated_at = datetime.now(UTC)
+    if not (session.title or "").strip():
+        session.title = user_message.strip()[:80] or "New Chat"
+    await session.save()
+
     # ── Assemble messages array for LLM ──────────────────────────────────
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     for h in history:
@@ -215,8 +239,13 @@ async def handle_chat(
 
     # ── LLM streaming call ────────────────────────────────────────────────
     model = agent.model or settings.default_model
-    url = _resolve_url(provider, model)
-    headers = _build_headers(provider, api_key)
+    try:
+        url = _resolve_url(provider, model)
+        headers = _build_headers(provider, api_key)
+    except ValueError as exc:
+        logger.warning("chat: provider configuration error for session %s: %s", session_id, exc)
+        yield _error_event(str(exc))
+        return
     body = {
         "model": model,
         "messages": messages,
@@ -279,11 +308,8 @@ async def handle_chat(
     chat_messages_total.labels(role="assistant").inc()
 
     # ── Update session metadata ───────────────────────────────────────────
-    session.message_count += 2  # user + assistant
+    session.message_count += 1  # assistant message (user was already counted above)
     session.updated_at = datetime.now(UTC)
-    if not session.title:
-        # Auto-generate title from first message (truncate to 60 chars)
-        session.title = user_message[:60] + ("…" if len(user_message) > 60 else "")
     await session.save()
 
     yield _done_event(usage_data, str(assistant_msg.id))

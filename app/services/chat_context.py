@@ -58,14 +58,31 @@ async def build_chat_context(agent: Agent, github_user: str) -> str:
     # ── 2. Skills ────────────────────────────────────────────────────────────
     try:
         skill_lines: list[str] = []
-        if agent.skill_ids:
-            for sid in agent.skill_ids:
+        skill_ids: list[str] = list(getattr(agent, "skill_ids", []) or [])
+
+        # Skills are primarily attached to workflows in the current data model.
+        # Fall back to collecting workflow skill IDs for this user/agent when
+        # the agent record does not expose skill_ids directly.
+        if not skill_ids:
+            wf_skill_filter = {
+                "github_user": github_user,
+                "agent_id": str(getattr(agent, "id", None)),
+            }
+            wf_for_skills = await Workflow.find(wf_skill_filter).to_list()
+            for wf in wf_for_skills:
+                for sid in getattr(wf, "skill_ids", []) or []:
+                    skill_ids.append(sid)
+
+        for sid in dict.fromkeys(skill_ids):
+            try:
                 skill = await Skill.get(PydanticObjectId(sid))
-                if skill:
-                    skill_lines.append(
-                        f"    <skill><name>{escape(skill.name)}</name>"
-                        f"<description>{escape(skill.description)}</description></skill>"
-                    )
+            except Exception:
+                continue
+            if skill:
+                skill_lines.append(
+                    f"    <skill><name>{escape(skill.name)}</name>"
+                    f"<description>{escape(skill.description)}</description></skill>"
+                )
         if skill_lines:
             parts.append("  <skills>\n" + "\n".join(skill_lines) + "\n  </skills>")
     except Exception as exc:
@@ -126,14 +143,11 @@ async def build_chat_context(agent: Agent, github_user: str) -> str:
 
         if wf_ids:
             recent_tasks = (
-                await TaskExecution.find_all()
+                await TaskExecution.find({"workflow_id": {"$in": list(wf_ids)}})
                 .sort("-created_at")
-                .limit(_TASK_HISTORY_LIMIT * 3)
+                .limit(_TASK_HISTORY_LIMIT)
                 .to_list()
             )
-            # filter to this agent's workflows
-            recent_tasks = [t for t in recent_tasks if t.workflow_id in wf_ids]
-            recent_tasks = recent_tasks[:_TASK_HISTORY_LIMIT]
 
             if recent_tasks:
                 task_lines = []
