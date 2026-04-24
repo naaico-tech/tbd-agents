@@ -23,7 +23,10 @@ import os
 import re
 import sys
 from io import StringIO
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+# Compatibility: UTC alias for Python 3.9-3.10 support
+UTC = timezone.utc
 
 import httpx
 
@@ -501,8 +504,12 @@ async def _build_system_prompt(
     workflow: Workflow,
     knowledge_context: str = "",
     memory_context: str = "",
-) -> str:
-    """Assemble the system prompt from agent config + skills + knowledge + memories."""
+) -> tuple[str, int]:
+    """Assemble the system prompt from agent config + skills + knowledge + memories.
+
+    Returns a tuple of (full_system_prompt, static_prefix_len) where static_prefix_len
+    is the length of the static prefix (everything before knowledge/memory context).
+    """
     system_prompt = agent.system_prompt
 
     # Skills — resolve by explicit ID first, then by tag (union, deduplicated)
@@ -553,14 +560,6 @@ async def _build_system_prompt(
         if skill_sections:
             system_prompt += "\n\n<skills>\n" + "\n".join(skill_sections) + "\n</skills>"
 
-    # Knowledge
-    if knowledge_context:
-        system_prompt += "\n\n" + knowledge_context
-
-    # Memories
-    if memory_context:
-        system_prompt += "\n\n" + memory_context
-
     if getattr(workflow, "caveman", False):
         target_format = (
             "JSON payload"
@@ -609,10 +608,47 @@ async def _build_system_prompt(
             "\n</auto_memory_policy>"
         )
 
+    # Track the split: everything up to here is "static"; knowledge/memory are "dynamic"
+    static_end = len(system_prompt)
+
+    # Knowledge
+    if knowledge_context:
+        system_prompt += "\n\n" + knowledge_context
+
+    # Memories
+    if memory_context:
+        system_prompt += "\n\n" + memory_context
+
     if len(system_prompt) > settings.prompt_context_char_budget:
         system_prompt = _clip_prompt_text(system_prompt, settings.prompt_context_char_budget)
 
-    return system_prompt
+    return system_prompt, static_end
+
+
+def _build_anthropic_system_blocks(system_prompt: str, static_prefix_len: int) -> list[dict]:
+    """Split system_prompt into Anthropic content blocks with cache_control on the static prefix.
+
+    Anthropic requires >=1024 tokens (~4096 chars) for a cache breakpoint to be effective.
+    If the static prefix is too short, return a single block without cache_control.
+    """
+    _ANTHROPIC_CACHE_MIN_CHARS = 4096  # ~1024 tokens, Anthropic's minimum cacheable size
+    static_text = system_prompt[:static_prefix_len]
+    dynamic_text = system_prompt[static_prefix_len:]
+
+    if len(static_text) >= _ANTHROPIC_CACHE_MIN_CHARS:
+        blocks: list[dict] = [
+            {
+                "type": "text",
+                "text": static_text,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if dynamic_text:
+            blocks.append({"type": "text", "text": dynamic_text})
+        return blocks
+    else:
+        # Prefix too short to benefit from caching — single block, no cache_control
+        return [{"type": "text", "text": system_prompt}]
 
 
 REPOS_BASE = "/repos"
@@ -847,6 +883,7 @@ def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
         return {
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
+            "anthropic-beta": "prompt-caching-2024-07-31",
             "content-type": "application/json",
         }
     elif provider_type == ProviderType.AZURE_OPENAI:
@@ -1516,6 +1553,7 @@ async def _run_with_claude_sdk(
     workflow: Workflow,
     user_prompt: str,
     system_prompt: str,
+    static_prefix_len: int,
     provider: Provider,
     api_key: str,
     task_exec: TaskExecution | None,
@@ -1651,7 +1689,7 @@ async def _run_with_claude_sdk(
         agent_kwargs: dict = {
             "model": model,
             "name": f"tbd-agent-{workflow.agent_id}",
-            "system": system_prompt,
+            "system": _build_anthropic_system_blocks(system_prompt, static_prefix_len),
         }
         if native_mcp_servers:
             agent_kwargs["mcp_servers"] = native_mcp_servers
@@ -2629,7 +2667,7 @@ async def run_agent(
         except Exception as exc:
             logger.warning("Failed to load memories for agent %s: %s", agent.id, exc)
 
-    system_prompt = await _build_system_prompt(
+    system_prompt, _static_prefix_len = await _build_system_prompt(
         agent, workflow.skill_ids, workflow, knowledge_context, memory_context
     )
     assembled_system_chars = len(system_prompt)
@@ -2673,6 +2711,7 @@ async def run_agent(
                 workflow,
                 user_prompt,
                 system_prompt,
+                _static_prefix_len,
                 custom_provider,
                 custom_provider_key,
                 task_exec,
