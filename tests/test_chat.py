@@ -1,0 +1,510 @@
+"""Unit tests for the Agent Chat feature (M7).
+
+Tests cover:
+- ChatSession / ChatMessage model construction
+- Chat schemas
+- Chat API endpoints (via FastAPI test client)
+- handle_chat() async generator
+- build_chat_context() context builder
+"""
+
+import json
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.models.chat_message import ChatMessage
+from app.models.chat_session import ChatSession
+from app.schemas.chat import (
+    ChatMessageResponse,
+    ChatRequest,
+    ChatSessionDetail,
+    ChatSessionResponse,
+)
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+FAKE_ID = "6601a1b2c3d4e5f607890abc"
+FAKE_SESSION_ID = "6601a1b2c3d4e5f607890abd"
+FAKE_MSG_ID = "6601a1b2c3d4e5f607890abe"
+
+
+def _fake_agent():
+    return SimpleNamespace(
+        id=FAKE_ID,
+        name="Deploy Bot",
+        description="Handles deployments",
+        system_prompt="You are a deployment assistant.",
+        model="gpt-4.1",
+        mcp_server_ids=[],
+        mcp_server_tags=[],
+        tool_definitions=[],
+        builtin_tools=["bash"],
+        custom_tool_ids=[],
+        skill_ids=[],
+        provider_id=None,
+    )
+
+
+def _fake_session(github_user="testuser"):
+    from beanie import PydanticObjectId
+    s = MagicMock(spec=ChatSession)
+    s.id = PydanticObjectId(FAKE_SESSION_ID)
+    s.agent_id = PydanticObjectId(FAKE_ID)
+    s.github_user = github_user
+    s.title = None
+    s.message_count = 0
+    s.created_at = datetime.now(UTC)
+    s.updated_at = datetime.now(UTC)
+    s.save = AsyncMock()
+    s.insert = AsyncMock()
+    s.delete = AsyncMock()
+    return s
+
+
+def _fake_message(role="user", content="Hello"):
+    from beanie import PydanticObjectId
+    m = MagicMock(spec=ChatMessage)
+    m.id = PydanticObjectId(FAKE_MSG_ID)
+    m.session_id = PydanticObjectId(FAKE_SESSION_ID)
+    m.role = role
+    m.content = content
+    m.usage = None
+    m.created_at = datetime.now(UTC)
+    m.insert = AsyncMock()
+    return m
+
+
+# ── Model tests ───────────────────────────────────────────────────────────────
+
+
+class TestChatSessionModel:
+    def test_defaults(self):
+        from beanie import PydanticObjectId
+        s = ChatSession.model_construct(
+            id=PydanticObjectId(FAKE_SESSION_ID),
+            agent_id=PydanticObjectId(FAKE_ID),
+            github_user="testuser",
+        )
+        assert s.message_count == 0
+        assert s.title is None
+
+    def test_settings(self):
+        assert ChatSession.Settings.name == "chat_sessions"
+
+    def test_collection_name(self):
+        assert ChatSession.Settings.name == "chat_sessions"
+
+
+class TestChatMessageModel:
+    def test_user_message(self):
+        from beanie import PydanticObjectId
+        m = ChatMessage.model_construct(
+            id=PydanticObjectId(FAKE_MSG_ID),
+            session_id=PydanticObjectId(FAKE_SESSION_ID),
+            role="user",
+            content="What can you do?",
+        )
+        assert m.role == "user"
+        assert m.content == "What can you do?"
+        assert m.usage is None
+
+    def test_assistant_message_with_usage(self):
+        from beanie import PydanticObjectId
+        usage = {"prompt_tokens": 100, "completion_tokens": 50}
+        m = ChatMessage.model_construct(
+            id=PydanticObjectId(FAKE_MSG_ID),
+            session_id=PydanticObjectId(FAKE_SESSION_ID),
+            role="assistant",
+            content="I can help with deployments.",
+            usage=usage,
+        )
+        assert m.role == "assistant"
+        assert m.usage == usage
+
+    def test_settings(self):
+        assert ChatMessage.Settings.name == "chat_messages"
+
+
+# ── Schema tests ──────────────────────────────────────────────────────────────
+
+
+class TestChatSchemas:
+    def test_chat_request_requires_message(self):
+        req = ChatRequest(message="Hello")
+        assert req.message == "Hello"
+        assert req.session_id is None
+
+    def test_chat_request_with_session_id(self):
+        req = ChatRequest(message="Hello", session_id=FAKE_SESSION_ID)
+        assert req.session_id == FAKE_SESSION_ID
+
+    def test_chat_session_response(self):
+        resp = ChatSessionResponse(
+            id=FAKE_SESSION_ID,
+            agent_id=FAKE_ID,
+            title="First message",
+            message_count=4,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        assert resp.id == FAKE_SESSION_ID
+        assert resp.message_count == 4
+
+    def test_chat_message_response(self):
+        resp = ChatMessageResponse(
+            id=FAKE_MSG_ID,
+            role="user",
+            content="Hello",
+            usage=None,
+            created_at=datetime.now(UTC),
+        )
+        assert resp.role == "user"
+
+    def test_chat_session_detail_inherits_messages(self):
+        detail = ChatSessionDetail(
+            id=FAKE_SESSION_ID,
+            agent_id=FAKE_ID,
+            title=None,
+            message_count=0,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            messages=[],
+        )
+        assert detail.messages == []
+
+
+# ── Chat handler tests ────────────────────────────────────────────────────────
+
+
+class TestHandleChat:
+    @pytest.mark.asyncio
+    async def test_yields_session_event_first(self):
+        """handle_chat always emits a session event as the first thing."""
+        agent = _fake_agent()
+        session = _fake_session()
+
+        async def _fake_stream(*args, **kwargs):
+            yield b"data: [DONE]\n\n"
+
+        mock_response = AsyncMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.aiter_lines = AsyncMock(
+            return_value=aiter_from_list(["data: [DONE]"])
+        )
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "app.services.chat_handler.build_chat_context",
+                new=AsyncMock(return_value=""),
+            ),
+            patch(
+                "app.services.chat_handler.chat_messages_total",
+                MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.chat_response_duration_seconds",
+                MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.httpx.AsyncClient",
+            ) as mock_client_cls,
+        ):
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _make_stream_ctx(["data: [DONE]"])
+            mock_client_cls.return_value = mock_client
+
+            # Patch ChatMessage class: constructor returns fake instance,
+            # find() returns empty history
+            fake_msg_instance = MagicMock()
+            fake_msg_instance.id = FAKE_MSG_ID
+            fake_msg_instance.insert = AsyncMock()
+
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg_instance)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token="ghp_test",
+                ):
+                    events.append(ev)
+
+        assert events[0]["type"] == "session"
+        assert events[0]["session_id"] == str(session.id)
+
+    @pytest.mark.asyncio
+    async def test_yields_error_when_no_api_key(self):
+        """handle_chat yields error event when no token and no provider."""
+        agent = _fake_agent()
+        session = _fake_session()
+
+        from app.services.chat_handler import handle_chat
+
+        events = []
+        async for ev in handle_chat(
+            agent=agent,
+            session=session,
+            user_message="Hello",
+            github_user="testuser",
+            github_token=None,  # no token
+        ):
+            events.append(ev)
+
+        assert events[0]["type"] == "session"
+        assert any(e["type"] == "error" for e in events)
+
+
+# ── Chat context builder tests ────────────────────────────────────────────────
+
+
+class TestBuildChatContext:
+    @pytest.mark.asyncio
+    async def test_includes_agent_profile(self):
+        agent = _fake_agent()
+        with (
+            patch(
+                "app.services.chat_context.Workflow.find",
+                return_value=_fake_query([]),
+            ),
+            patch(
+                "app.services.chat_context._memory_manager.build_memory_context",
+                new=AsyncMock(return_value=""),
+            ),
+        ):
+            from app.services.chat_context import build_chat_context
+            context = await build_chat_context(agent, "testuser")
+
+        assert "<agent_context>" in context
+        assert "Deploy Bot" in context
+        assert "gpt-4.1" in context
+
+    @pytest.mark.asyncio
+    async def test_includes_builtin_tools(self):
+        agent = _fake_agent()
+        with (
+            patch(
+                "app.services.chat_context.Workflow.find",
+                return_value=_fake_query([]),
+            ),
+            patch(
+                "app.services.chat_context._memory_manager.build_memory_context",
+                new=AsyncMock(return_value=""),
+            ),
+        ):
+            from app.services.chat_context import build_chat_context
+            context = await build_chat_context(agent, "testuser")
+
+        assert "bash" in context
+
+    @pytest.mark.asyncio
+    async def test_closes_agent_context_tag(self):
+        agent = _fake_agent()
+        with (
+            patch(
+                "app.services.chat_context.Workflow.find",
+                return_value=_fake_query([]),
+            ),
+            patch(
+                "app.services.chat_context._memory_manager.build_memory_context",
+                new=AsyncMock(return_value=""),
+            ),
+        ):
+            from app.services.chat_context import build_chat_context
+            context = await build_chat_context(agent, "testuser")
+
+        assert context.strip().endswith("</agent_context>")
+
+
+# ── Chat API endpoint tests ───────────────────────────────────────────────────
+
+
+class TestChatEndpoints:
+    @pytest.mark.asyncio
+    async def test_list_sessions_404_for_unknown_agent(self):
+        from app.api.routes.chat import list_chat_sessions
+
+        with patch(
+            "app.api.routes.chat.Agent.get", new=AsyncMock(return_value=None)
+        ):
+            with pytest.raises(Exception) as exc_info:
+                await list_chat_sessions(
+                    agent_id=FAKE_ID,
+                    skip=0,
+                    limit=20,
+                    user={"login": "testuser"},
+                )
+        from fastapi import HTTPException
+        assert isinstance(exc_info.value, HTTPException)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_session_404_for_unknown_session(self):
+        from app.api.routes.chat import get_chat_session
+
+        agent = _fake_agent()
+        with (
+            patch("app.api.routes.chat.Agent.get", new=AsyncMock(return_value=agent)),
+            patch("app.api.routes.chat.ChatSession.get", new=AsyncMock(return_value=None)),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                await get_chat_session(
+                    agent_id=FAKE_ID,
+                    session_id=FAKE_SESSION_ID,
+                    user={"login": "testuser"},
+                )
+        from fastapi import HTTPException
+        assert isinstance(exc_info.value, HTTPException)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_session_enforces_ownership(self):
+        from app.api.routes.chat import delete_chat_session
+
+        agent = _fake_agent()
+        session = _fake_session(github_user="other_user")
+
+        with (
+            patch("app.api.routes.chat.Agent.get", new=AsyncMock(return_value=agent)),
+            patch(
+                "app.api.routes.chat.ChatSession.get",
+                new=AsyncMock(return_value=session),
+            ),
+        ):
+            with pytest.raises(Exception) as exc_info:
+                await delete_chat_session(
+                    agent_id=FAKE_ID,
+                    session_id=FAKE_SESSION_ID,
+                    user={"login": "testuser"},  # different from session owner
+                )
+        from fastapi import HTTPException
+        assert isinstance(exc_info.value, HTTPException)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_returns_empty_list(self):
+        from app.api.routes.chat import list_chat_sessions
+
+        agent = _fake_agent()
+        with (
+            patch("app.api.routes.chat.Agent.get", new=AsyncMock(return_value=agent)),
+            patch(
+                "app.api.routes.chat.ChatSession.find",
+                return_value=_fake_query([]),
+            ),
+        ):
+            result = await list_chat_sessions(
+                agent_id=FAKE_ID,
+                skip=0,
+                limit=20,
+                user={"login": "testuser"},
+            )
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_session_detail_returns_messages(self):
+        from app.api.routes.chat import get_chat_session
+
+        agent = _fake_agent()
+        session = _fake_session()
+
+        msg = _fake_message(role="user", content="What can you do?")
+
+        with (
+            patch("app.api.routes.chat.Agent.get", new=AsyncMock(return_value=agent)),
+            patch(
+                "app.api.routes.chat.ChatSession.get",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "app.api.routes.chat.ChatMessage.find",
+                return_value=_fake_query([msg]),
+            ),
+        ):
+            result = await get_chat_session(
+                agent_id=FAKE_ID,
+                session_id=FAKE_SESSION_ID,
+                user={"login": "testuser"},
+            )
+
+        assert len(result.messages) == 1
+        assert result.messages[0].content == "What can you do?"
+
+
+# ── SSE format tests ──────────────────────────────────────────────────────────
+
+
+class TestChatSSEFormat:
+    def test_session_event_format(self):
+        from app.services.chat_handler import _session_event
+        ev = _session_event("abc123")
+        assert ev["type"] == "session"
+        assert ev["session_id"] == "abc123"
+
+    def test_delta_event_format(self):
+        from app.services.chat_handler import _delta_event
+        ev = _delta_event("hello")
+        assert ev["type"] == "delta"
+        assert ev["content"] == "hello"
+
+    def test_done_event_format(self):
+        from app.services.chat_handler import _done_event
+        usage = {"prompt_tokens": 10, "completion_tokens": 5}
+        ev = _done_event(usage, "msg123")
+        assert ev["type"] == "done"
+        assert ev["usage"] == usage
+        assert ev["message_id"] == "msg123"
+
+    def test_error_event_format(self):
+        from app.services.chat_handler import _error_event
+        ev = _error_event("something went wrong")
+        assert ev["type"] == "error"
+        assert ev["message"] == "something went wrong"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def aiter_from_list(items):
+    """Return an async iterator from a list of items."""
+    async def _iter():
+        for item in items:
+            yield item
+    return _iter()
+
+
+def _fake_query(results):
+    """Return a chainable mock for Beanie find() queries."""
+    q = MagicMock()
+    q.sort = MagicMock(return_value=q)
+    q.skip = MagicMock(return_value=q)
+    q.limit = MagicMock(return_value=q)
+    q.to_list = AsyncMock(return_value=results)
+    q.delete = AsyncMock()
+    return q
+
+
+def _make_stream_ctx(lines):
+    """Return a mock async context manager for httpx client.stream()."""
+    resp = AsyncMock()
+    resp.__aenter__ = AsyncMock(return_value=resp)
+    resp.__aexit__ = AsyncMock(return_value=False)
+    resp.raise_for_status = MagicMock()
+    resp.aiter_lines = MagicMock(return_value=aiter_from_list(lines))
+
+    def _stream(*args, **kwargs):
+        return resp
+
+    return _stream

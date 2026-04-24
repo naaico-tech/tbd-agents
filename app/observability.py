@@ -151,6 +151,21 @@ embeddings_requests_total = Counter(
     ["status"],  # status: success | failure | disabled
 )
 
+# ── Chat metrics ─────────────────────────────────────────────────────────────
+
+chat_messages_total = Counter(
+    "copilot_hub_chat_messages_total",
+    "Total chat messages processed",
+    ["role"],  # role: user | assistant
+)
+
+chat_response_duration_seconds = Histogram(
+    "copilot_hub_chat_response_duration_seconds",
+    "Duration of chat LLM responses",
+    ["model"],
+    buckets=(0.5, 1, 2, 5, 10, 30, 60, 120),
+)
+
 
 # ── Telemetry initialisation ────────────────────────────────────────────────
 
