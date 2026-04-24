@@ -32,8 +32,12 @@ from app.services.chat_context import build_chat_context
 
 logger = logging.getLogger(__name__)
 
-# Default GitHub Models inference endpoint (OpenAI-compatible)
-_GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
+# Default GitHub Copilot chat completions endpoint (OpenAI-compatible).
+# This endpoint accepts GitHub tokens with the `copilot` scope — the same
+# scope required by the Copilot SDK.  The GitHub Models endpoint
+# (models.inference.ai.azure.com) requires a separate `models:read` scope
+# and is NOT accepted by the standard `copilot`-scoped PAT used elsewhere.
+_GITHUB_COPILOT_BASE_URL = "https://api.githubcopilot.com"
 
 # Maximum messages to load from history (older messages are truncated)
 _CONVERSATION_WINDOW = 50
@@ -69,7 +73,7 @@ def _error_event(message: str) -> ChatEvent:
 def _resolve_url(provider: Provider | None, model: str) -> str:
     """Resolve the chat completions URL for a provider or the default path."""
     if provider is None:
-        return f"{_GITHUB_MODELS_BASE_URL}/chat/completions"
+        return f"{_GITHUB_COPILOT_BASE_URL}/chat/completions"
 
     provider_type = provider.provider_type
 

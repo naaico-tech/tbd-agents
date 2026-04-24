@@ -8,7 +8,6 @@ Tests cover:
 - build_chat_context() context builder
 """
 
-import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -186,17 +185,6 @@ class TestHandleChat:
         """handle_chat always emits a session event as the first thing."""
         agent = _fake_agent()
         session = _fake_session()
-
-        async def _fake_stream(*args, **kwargs):
-            yield b"data: [DONE]\n\n"
-
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.aiter_lines = AsyncMock(
-            return_value=aiter_from_list(["data: [DONE]"])
-        )
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch(
@@ -441,6 +429,23 @@ class TestChatEndpoints:
 
         assert len(result.messages) == 1
         assert result.messages[0].content == "What can you do?"
+
+
+# ── URL resolution tests ──────────────────────────────────────────────────────
+
+
+class TestResolveUrl:
+    def test_no_provider_uses_copilot_endpoint(self):
+        """Default path must target api.githubcopilot.com, not GitHub Models.
+
+        The GITHUB_TOKEN has 'copilot' scope, not 'models:read', so calling
+        models.inference.ai.azure.com with it yields 401 Unauthorized.
+        """
+        from app.services.chat_handler import _resolve_url
+
+        url = _resolve_url(None, "gpt-4.1")
+        assert "githubcopilot.com" in url
+        assert "models.inference.ai.azure.com" not in url
 
 
 # ── SSE format tests ──────────────────────────────────────────────────────────
