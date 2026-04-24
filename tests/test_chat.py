@@ -444,7 +444,9 @@ class TestResolveUrl:
         from app.services.chat_handler import _resolve_url
 
         url = _resolve_url(None, "gpt-4.1")
-        assert "githubcopilot.com" in url
+        assert url.startswith("https://api.githubcopilot.com/"), (
+            f"Default chat URL must use api.githubcopilot.com, got: {url}"
+        )
         assert "models.inference.ai.azure.com" not in url
 
 
