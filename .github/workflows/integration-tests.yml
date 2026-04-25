@@ -56,7 +56,7 @@ jobs:
         run: flutter test
 
       - name: Build Flutter web bundle
-        run: flutter build web --release --base-href /dashboard/
+        run: flutter build web --release --base-href /dashboard-new-ui/
 
   docker-build:
     runs-on: ubuntu-latest

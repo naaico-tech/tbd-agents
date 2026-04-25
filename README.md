@@ -81,14 +81,14 @@ Your GitHub PAT needs the `copilot` scope — [create one here](https://github.c
 
 ```
  ┌──────────────────────────────────────────────────┐
- │  ► Dashboard ─── http://localhost:8000/dashboard  │
- │  ► Legacy UI ── http://localhost:8000/dashboard-legacy │
+ │  ► Legacy UI ── http://localhost:8000/dashboard  │
+ │  ► New UI ───── http://localhost:8000/dashboard-new-ui │
  │  ► API docs  ─── http://localhost:8000/docs       │
  │  ► API base  ─── http://localhost:8000/api        │
  └──────────────────────────────────────────────────┘
 ```
 
-`/dashboard` serves the built Flutter web app from the FastAPI container. The full legacy dashboard remains available at `/dashboard-legacy` for parity and deep-link/embed workflows.
+`/dashboard` serves the legacy dashboard. `/dashboard-new-ui` serves the built Flutter web app from the FastAPI container, and `/dashboard-legacy` remains as a compatibility alias for the legacy UI.
 
 See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for detailed local development instructions.
 

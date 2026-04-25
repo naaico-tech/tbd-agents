@@ -45,7 +45,7 @@ docker-compose up --build --scale worker=3
 
 Each worker defaults to `--concurrency=4`, so 3 containers = 12 concurrent agent executions.
 
-The application image builds the Flutter web bundle during `docker-compose up --build`, serves it from FastAPI at `/dashboard`, and keeps the legacy dashboard available at `/dashboard-legacy`.
+The application image builds the Flutter web bundle during `docker-compose up --build`, serves it from FastAPI at `/dashboard-new-ui`, and keeps the legacy dashboard available at `/dashboard` (with `/dashboard-legacy` as a compatibility alias).
 
 ---
 
@@ -102,7 +102,7 @@ flutter config --enable-web
 flutter pub get
 flutter analyze
 flutter test
-flutter build web --release --base-href /dashboard/
+flutter build web --release --base-href /dashboard-new-ui/
 cd ..
 ```
 
@@ -128,11 +128,11 @@ curl -X POST http://localhost:8000/api/agents \
   -H "Content-Type: application/json" \
   -d '{"name": "test", "system_prompt": "You are a helpful assistant."}'
 
-# Check the dashboard
+# Check the legacy dashboard
 open http://localhost:8000/dashboard
 
-# Check the legacy fallback
-open http://localhost:8000/dashboard-legacy
+# Check the Flutter dashboard
+open http://localhost:8000/dashboard-new-ui
 ```
 
 ---
@@ -156,7 +156,7 @@ ruff format app/ tests/
 cd frontend
 flutter analyze
 flutter test
-flutter build web --release --base-href /dashboard/
+flutter build web --release --base-href /dashboard-new-ui/
 ```
 
 !!! note

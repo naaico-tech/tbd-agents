@@ -1,5 +1,5 @@
 class AppLinks {
-  static const String dashboardRoot = '/dashboard';
+  static const String dashboardRoot = '/dashboard-new-ui';
   static const String agents = '$dashboardRoot/agents';
   static const String agentMemoryPattern = '$agents/:agentId/memory';
   static const String mcpServers = '$dashboardRoot/mcp-servers';
@@ -18,7 +18,7 @@ class AppLinks {
   static const String chat = '$dashboardRoot/chat';
 
   static const String apiBasePath = '/api';
-  static const String legacyDashboardBasePath = '/dashboard-legacy';
+  static const String legacyDashboardBasePath = '/dashboard';
 
   /// Remove routes from legacy embed as they gain full Flutter parity.
   static const Set<String> _nativeRoutes = <String>{dashboardRoot};

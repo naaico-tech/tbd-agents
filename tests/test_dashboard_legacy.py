@@ -37,63 +37,70 @@ class TestLegacyDashboardRoutes:
         (assets_dir / "app.js").write_text("console.log('flutter');", encoding="utf-8")
         return flutter_dir
 
-    def test_dashboard_route_serves_flutter_dashboard_when_available(self, client, tmp_path):
+    def test_dashboard_new_ui_route_serves_flutter_dashboard_when_available(self, client, tmp_path):
         import app.main as app_main
 
         flutter_dir = self._create_flutter_build(tmp_path)
 
         with patch.object(app_main, "FLUTTER_STATIC_DIR", flutter_dir):
-            resp = client.get("/dashboard")
+            resp = client.get("/dashboard-new-ui")
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "FLUTTER DASHBOARD" in resp.text
 
-    def test_dashboard_nested_route_falls_back_to_flutter_index(self, client, tmp_path):
+    def test_dashboard_new_ui_nested_route_falls_back_to_flutter_index(self, client, tmp_path):
         import app.main as app_main
 
         flutter_dir = self._create_flutter_build(tmp_path)
 
         with patch.object(app_main, "FLUTTER_STATIC_DIR", flutter_dir):
-            resp = client.get("/dashboard/agents")
+            resp = client.get("/dashboard-new-ui/agents")
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "FLUTTER DASHBOARD" in resp.text
 
-    def test_dashboard_asset_route_serves_built_asset(self, client, tmp_path):
+    def test_dashboard_new_ui_asset_route_serves_built_asset(self, client, tmp_path):
         import app.main as app_main
 
         flutter_dir = self._create_flutter_build(tmp_path)
 
         with patch.object(app_main, "FLUTTER_STATIC_DIR", flutter_dir):
-            resp = client.get("/dashboard/assets/app.js")
+            resp = client.get("/dashboard-new-ui/assets/app.js")
 
         assert resp.status_code == 200
         assert "console.log('flutter');" in resp.text
 
-    def test_dashboard_asset_route_blocks_hidden_files(self, client, tmp_path):
+    def test_dashboard_new_ui_asset_route_blocks_hidden_files(self, client, tmp_path):
         import app.main as app_main
 
         flutter_dir = self._create_flutter_build(tmp_path)
         (flutter_dir / ".env").write_text("SECRET=true", encoding="utf-8")
 
         with patch.object(app_main, "FLUTTER_STATIC_DIR", flutter_dir):
-            resp = client.get("/dashboard/.env")
+            resp = client.get("/dashboard-new-ui/.env")
 
         assert resp.status_code == 404
 
-    def test_dashboard_route_falls_back_to_legacy_when_flutter_missing(self, client):
+    def test_dashboard_route_serves_legacy_ui(self, client):
+        resp = client.get("/dashboard?embed=1&page=agents")
+
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert 'data-page="agents"' in resp.text
+
+    def test_dashboard_new_ui_route_falls_back_to_legacy_when_flutter_missing(self, client):
         import app.main as app_main
 
         with patch.object(app_main, "FLUTTER_STATIC_DIR", None):
-            resp = client.get("/dashboard")
+            resp = client.get("/dashboard-new-ui")
 
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "TBD AGENT" in resp.text
 
-    def test_dashboard_legacy_route_serves_same_dashboard(self, client):
+    def test_dashboard_legacy_alias_route_serves_same_dashboard(self, client):
         resp = client.get("/dashboard-legacy?embed=1&page=agents")
 
         assert resp.status_code == 200

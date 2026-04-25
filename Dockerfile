@@ -6,7 +6,7 @@ COPY frontend/pubspec.yaml frontend/pubspec.lock ./
 RUN flutter config --enable-web && flutter pub get
 
 COPY frontend/ ./
-RUN flutter build web --release --base-href /dashboard/
+RUN flutter build web --release --base-href /dashboard-new-ui/
 
 
 FROM python:3.12-slim AS base

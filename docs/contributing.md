@@ -51,7 +51,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
     flutter pub get
     flutter analyze
     flutter test
-    flutter build web --release --base-href /dashboard/
+    flutter build web --release --base-href /dashboard-new-ui/
     ```
 
 5. **Run the linter:**
@@ -122,7 +122,7 @@ observability/      ← Grafana dashboards, Prometheus, Loki, Tempo
     docker-compose up --build
     ```
 - **MongoDB, Redis, and observability** services are included in the compose file.
-- **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard`; use `/dashboard-legacy` for the legacy fallback.
+- **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard-new-ui`; use `/dashboard` for the legacy UI (`/dashboard-legacy` remains as a compatibility alias).
 - See [Local Setup](getting-started/local-setup.md) for bare-metal setup.
 
 ---

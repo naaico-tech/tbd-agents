@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:naaico_frontend/app/app.dart';
 
 void main() {
-  testWidgets('App mounts and navigates to /dashboard by default', (
+  testWidgets('App mounts and navigates to /dashboard-new-ui by default', (
     tester,
   ) async {
     await tester.pumpWidget(const NaaicoApp());

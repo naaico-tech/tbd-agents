@@ -175,15 +175,16 @@ app.include_router(workflows.router)
 app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 
 
-@app.get("/dashboard", include_in_schema=False)
-@app.get("/dashboard/{asset_path:path}", include_in_schema=False)
-async def dashboard(asset_path: str = ""):
+@app.get("/dashboard-new-ui", include_in_schema=False)
+@app.get("/dashboard-new-ui/{asset_path:path}", include_in_schema=False)
+async def dashboard_new_ui(asset_path: str = ""):
     resolved_path = _resolve_dashboard_path(asset_path)
     if resolved_path is not None:
         return FileResponse(resolved_path)
     return FileResponse(LEGACY_STATIC_DIR / "index.html")
 
 
+@app.get("/dashboard", include_in_schema=False)
 @app.get("/dashboard-legacy", include_in_schema=False)
 async def dashboard_legacy():
     return FileResponse(LEGACY_STATIC_DIR / "index.html")

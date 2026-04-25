@@ -11,11 +11,11 @@ void main() {
     test('builds legacy embed URIs for migrated routes', () {
       expect(
         AppLinks.legacyDashboardUri(route: AppLinks.agents).toString(),
-        '/dashboard-legacy?embed=1&chrome=none&page=agents',
+        '/dashboard?embed=1&chrome=none&page=agents',
       );
       expect(
         AppLinks.legacyDashboardUri(route: AppLinks.runTask).toString(),
-        '/dashboard-legacy?embed=1&chrome=none&page=task',
+        '/dashboard?embed=1&chrome=none&page=task',
       );
     });
 
@@ -33,7 +33,7 @@ void main() {
             queryParameters: {'workflowId': 'wf-456'},
           ),
         ).toString(),
-        '/dashboard-legacy?embed=1&chrome=none&page=tasks#/tasks/task-123/logs?workflowId=wf-456',
+        '/dashboard?embed=1&chrome=none&page=tasks#/tasks/task-123/logs?workflowId=wf-456',
       );
     });
 
@@ -42,12 +42,15 @@ void main() {
       () {
         expect(
           AppLinks.workflowDetail('wf-123'),
-          '/dashboard/workflows/wf-123',
+          '/dashboard-new-ui/workflows/wf-123',
         );
-        expect(AppLinks.taskLogs('task-123'), '/dashboard/tasks/task-123/logs');
+        expect(
+          AppLinks.taskLogs('task-123'),
+          '/dashboard-new-ui/tasks/task-123/logs',
+        );
         expect(
           AppLinks.agentMemory('agent-123'),
-          '/dashboard/agents/agent-123/memory',
+          '/dashboard-new-ui/agents/agent-123/memory',
         );
       },
     );
