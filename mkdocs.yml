@@ -89,6 +89,7 @@ nav:
       - Guardrails: guide/guardrails.md
       - BYOK Providers: guide/byok-providers.md
       - Custom Tools: guide/custom-tools.md
+      - Agent Chat: guide/agent-chat.md
       - Observability: guide/observability.md
   - Architecture:
       - architecture/index.md
@@ -98,6 +99,7 @@ nav:
   - API Reference:
       - api/index.md
       - Agents: api/agents.md
+      - Chat: api/chat.md
       - Skills: api/skills.md
       - MCP Servers: api/mcp-servers.md
       - Workflows: api/workflows.md
