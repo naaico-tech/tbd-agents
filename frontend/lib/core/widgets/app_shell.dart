@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../config/app_links.dart';
+import '../platform/browser_navigation.dart';
+import 'retro_card.dart';
 import '../theme/design_tokens.dart';
 
 // ---------------------------------------------------------------------------
@@ -30,85 +33,85 @@ class AppShell extends StatelessWidget {
 
   static const List<NavDestination> _destinations = [
     NavDestination(
-      route: '/dashboard',
+      route: AppLinks.dashboardRoot,
       label: 'Dashboard',
       icon: Icons.bar_chart,
       accentColor: accentPrimary,
     ),
     NavDestination(
-      route: '/agents',
+      route: AppLinks.agents,
       label: 'Agents',
       icon: Icons.smart_toy_outlined,
       accentColor: accentTeal,
     ),
     NavDestination(
-      route: '/mcp-servers',
+      route: AppLinks.mcpServers,
       label: 'MCP Servers',
       icon: Icons.power_outlined,
       accentColor: accentAmber,
     ),
     NavDestination(
-      route: '/custom-tools',
+      route: AppLinks.customTools,
       label: 'Custom Tools',
       icon: Icons.build_outlined,
       accentColor: accentSlate,
     ),
     NavDestination(
-      route: '/skills',
+      route: AppLinks.skills,
       label: 'Skills',
       icon: Icons.bolt_outlined,
       accentColor: accentLavender,
     ),
     NavDestination(
-      route: '/knowledge',
+      route: AppLinks.knowledge,
       label: 'Knowledge',
       icon: Icons.library_books_outlined,
       accentColor: accentTeal,
     ),
     NavDestination(
-      route: '/guardrails',
+      route: AppLinks.guardrails,
       label: 'Guardrails',
       icon: Icons.shield_outlined,
       accentColor: accentPrimary,
     ),
     NavDestination(
-      route: '/tokens',
+      route: AppLinks.tokens,
       label: 'Tokens',
       icon: Icons.key_outlined,
       accentColor: accentAmber,
     ),
     NavDestination(
-      route: '/providers',
+      route: AppLinks.providers,
       label: 'Providers',
       icon: Icons.business_outlined,
       accentColor: accentSlate,
     ),
     NavDestination(
-      route: '/workflows',
+      route: AppLinks.workflows,
       label: 'Workflows',
       icon: Icons.account_tree_outlined,
       accentColor: accentLavender,
     ),
     NavDestination(
-      route: '/scheduled-agents',
+      route: AppLinks.scheduledAgents,
       label: 'Scheduled',
       icon: Icons.schedule_outlined,
       accentColor: accentTeal,
     ),
     NavDestination(
-      route: '/tasks',
+      route: AppLinks.tasks,
       label: 'Tasks',
       icon: Icons.list_alt_outlined,
       accentColor: accentAmber,
     ),
     NavDestination(
-      route: '/run-task',
+      route: AppLinks.runTask,
       label: 'Run Task',
       icon: Icons.play_circle_outline,
       accentColor: accentPrimary,
     ),
     NavDestination(
-      route: '/chat',
+      route: AppLinks.chat,
       label: 'Chat',
       icon: Icons.chat_bubble_outline,
       accentColor: accentLavender,
@@ -243,6 +246,13 @@ class _SidebarContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    bool isActiveRoute(String route) {
+      if (currentRoute == route) {
+        return true;
+      }
+      return route != AppLinks.dashboardRoot && currentRoute.startsWith('$route/');
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -254,9 +264,7 @@ class _SidebarContent extends StatelessWidget {
             itemCount: destinations.length,
             itemBuilder: (context, i) => _NavItem(
               destination: destinations[i],
-              isActive:
-                  currentRoute == destinations[i].route ||
-                  currentRoute.startsWith('${destinations[i].route}/'),
+              isActive: isActiveRoute(destinations[i].route),
             ),
           ),
         ),
@@ -404,20 +412,20 @@ class _TopBar extends StatelessWidget {
 
   String get _title {
     final map = {
-      '/dashboard': 'Dashboard',
-      '/agents': 'Agents',
-      '/mcp-servers': 'MCP Servers',
-      '/custom-tools': 'Custom Tools',
-      '/skills': 'Skills',
-      '/knowledge': 'Knowledge',
-      '/guardrails': 'Guardrails',
-      '/tokens': 'Tokens',
-      '/providers': 'Providers',
-      '/workflows': 'Workflows',
-      '/tasks': 'Task Executions',
-      '/run-task': 'Run Task',
-      '/chat': 'Chat',
-      '/scheduled-agents': 'Scheduled Agents',
+      AppLinks.dashboardRoot: 'Dashboard',
+      AppLinks.agents: 'Agents',
+      AppLinks.mcpServers: 'MCP Servers',
+      AppLinks.customTools: 'Custom Tools',
+      AppLinks.skills: 'Skills',
+      AppLinks.knowledge: 'Knowledge',
+      AppLinks.guardrails: 'Guardrails',
+      AppLinks.tokens: 'Tokens',
+      AppLinks.providers: 'Providers',
+      AppLinks.workflows: 'Workflows',
+      AppLinks.tasks: 'Task Executions',
+      AppLinks.runTask: 'Run Task',
+      AppLinks.chat: 'Chat',
+      AppLinks.scheduledAgents: 'Scheduled Agents',
     };
     for (final e in map.entries) {
       if (currentRoute.startsWith(e.key)) return e.value;
@@ -427,6 +435,7 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final legacyUri = AppLinks.legacyDashboardUri(route: currentRoute);
     return Container(
       height: 48,
       decoration: retroHeaderDecoration(),
@@ -440,16 +449,27 @@ class _TopBar extends StatelessWidget {
               padding: EdgeInsets.zero,
             ),
           const SizedBox(width: sp8),
-          Text(
-            _title.toUpperCase(),
-            style: const TextStyle(
-              fontFamily: fontDisplay,
-              fontSize: 10,
-              color: textPrimary,
-              letterSpacing: 1.5,
+          Expanded(
+            child: Text(
+              _title.toUpperCase(),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: fontDisplay,
+                fontSize: 10,
+                color: textPrimary,
+                letterSpacing: 1.5,
+              ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: sp8),
+          RetroButton(
+            label: 'LEGACY',
+            icon: Icons.open_in_new,
+            onPressed: () => openInBrowser(legacyUri.toString()),
+            color: accentAmber,
+            textColor: textPrimary,
+          ),
+          const SizedBox(width: sp8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: sp8, vertical: 4),
             decoration: BoxDecoration(

@@ -52,12 +52,21 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
    source .venv/bin/activate
    pip install -e ".[dev]"
    ```
+   If you are working on `frontend/`, also install Flutter with web support enabled.
 
 3. ✏️ **Make your changes.** Follow the coding standards below.
 
 4. ✅ **Run tests** and ensure they all pass:
    ```bash
    python -m pytest tests/ -v
+   ```
+   When your change touches `frontend/`, also run:
+   ```bash
+   cd frontend
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter build web --release --base-href /dashboard/
    ```
 
 5. 🧹 **Run the linter:**
@@ -155,7 +164,8 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
   docker-compose up --build
   ```
 - 📦 **MongoDB, Redis, and observability** services are included in the compose file.
-- 📖 See [docs/local-setup.md](docs/local-setup.md) for bare-metal setup.
+- 🧪 **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard`; use `/dashboard-legacy` to verify the legacy fallback.
+- 📖 See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for bare-metal setup.
 
 ---
 

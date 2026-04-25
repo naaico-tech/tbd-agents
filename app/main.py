@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -36,10 +36,55 @@ from app.services import memory_stm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent / "static"
+APP_DIR = Path(__file__).resolve().parent
+LEGACY_STATIC_DIR = APP_DIR / "static"
+FLUTTER_STATIC_CANDIDATES = (
+    APP_DIR / "dashboard",
+    APP_DIR.parent / "frontend" / "build" / "web",
+)
 
 # Celery default queue name
 _CELERY_QUEUE = "celery"
+
+
+def _resolve_flutter_static_dir() -> Path | None:
+    """Return the first available Flutter web build directory."""
+    for candidate in FLUTTER_STATIC_CANDIDATES:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+FLUTTER_STATIC_DIR = _resolve_flutter_static_dir()
+
+
+def _resolve_dashboard_path(request_path: str) -> Path | None:
+    """Resolve a dashboard asset path with SPA fallback for nested routes."""
+    if FLUTTER_STATIC_DIR is None:
+        return None
+
+    index_path = FLUTTER_STATIC_DIR / "index.html"
+    flutter_root = FLUTTER_STATIC_DIR.resolve()
+    normalized_path = request_path.lstrip("/")
+    if not normalized_path:
+        return index_path
+
+    requested_path = (FLUTTER_STATIC_DIR / normalized_path).resolve()
+    try:
+        relative_path = requested_path.relative_to(flutter_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Dashboard asset not found") from exc
+
+    if any(part.startswith(".") for part in relative_path.parts):
+        raise HTTPException(status_code=404, detail="Dashboard asset not found")
+
+    if requested_path.is_file():
+        return requested_path
+
+    if Path(normalized_path).suffix:
+        raise HTTPException(status_code=404, detail="Dashboard asset not found")
+
+    return index_path
 
 
 async def _poll_celery_queue(stop_event: asyncio.Event) -> None:
@@ -55,7 +100,7 @@ async def _poll_celery_queue(stop_event: asyncio.Event) -> None:
                 celery_queue_length.set(0)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=10)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
     finally:
         await r.aclose()
@@ -90,7 +135,7 @@ async def lifespan(app: FastAPI):
     stop_event.set()
     try:
         await asyncio.wait_for(poller_task, timeout=15)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         poller_task.cancel()
         try:
             await poller_task
@@ -127,9 +172,18 @@ app.include_router(tokens.router)
 app.include_router(tasks.router)
 app.include_router(workflows.router)
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 
 
-@app.get("/dashboard")
-async def dashboard():
-    return FileResponse(STATIC_DIR / "index.html")
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/{asset_path:path}", include_in_schema=False)
+async def dashboard(asset_path: str = ""):
+    resolved_path = _resolve_dashboard_path(asset_path)
+    if resolved_path is not None:
+        return FileResponse(resolved_path)
+    return FileResponse(LEGACY_STATIC_DIR / "index.html")
+
+
+@app.get("/dashboard-legacy", include_in_schema=False)
+async def dashboard_legacy():
+    return FileResponse(LEGACY_STATIC_DIR / "index.html")

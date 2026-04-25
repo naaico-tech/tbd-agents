@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/config/app_links.dart';
 import '../core/widgets/app_shell.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/agents/agents_screen.dart';
@@ -12,65 +13,68 @@ import '../features/chat/chat_screen.dart';
 // All shell routes share [AppShell] as a persistent layout wrapper.
 // ---------------------------------------------------------------------------
 final appRouter = GoRouter(
-  initialLocation: '/dashboard',
+  initialLocation: AppLinks.dashboardRoot,
   routes: [
     ShellRoute(
       builder: (context, state, child) =>
           _ShellWrapper(state: state, child: child),
       routes: [
         GoRoute(
-          path: '/dashboard',
+          path: AppLinks.dashboardRoot,
           builder: (context, state) => const DashboardScreen(),
         ),
         GoRoute(
-          path: '/agents',
+          path: AppLinks.agents,
           builder: (context, state) => const AgentsScreen(),
         ),
         GoRoute(
-          path: '/mcp-servers',
+          path: AppLinks.mcpServers,
           builder: (context, state) => const McpServersScreen(),
         ),
         GoRoute(
-          path: '/custom-tools',
+          path: AppLinks.customTools,
           builder: (context, state) => const CustomToolsScreen(),
         ),
         GoRoute(
-          path: '/skills',
+          path: AppLinks.skills,
           builder: (context, state) => const SkillsScreen(),
         ),
         GoRoute(
-          path: '/knowledge',
+          path: AppLinks.knowledge,
           builder: (context, state) => const KnowledgeScreen(),
         ),
         GoRoute(
-          path: '/guardrails',
+          path: AppLinks.guardrails,
           builder: (context, state) => const GuardrailsScreen(),
         ),
         GoRoute(
-          path: '/tokens',
+          path: AppLinks.tokens,
           builder: (context, state) => const TokensScreen(),
         ),
         GoRoute(
-          path: '/providers',
+          path: AppLinks.providers,
           builder: (context, state) => const ProvidersScreen(),
         ),
         GoRoute(
-          path: '/workflows',
+          path: AppLinks.workflows,
           builder: (context, state) => const WorkflowsScreen(),
         ),
         GoRoute(
-          path: '/tasks',
+          path: AppLinks.tasks,
           builder: (context, state) => const TasksScreen(),
         ),
         GoRoute(
-          path: '/scheduled-agents',
+          path: AppLinks.scheduledAgents,
           builder: (context, state) => const ScheduledAgentsScreen(),
         ),
         GoRoute(
-          path: '/run-task',
+          path: AppLinks.runTask,
           builder: (context, state) => const RunTaskScreen(),
         ),
-        GoRoute(path: '/chat', builder: (context, state) => const ChatScreen()),
+        GoRoute(
+          path: AppLinks.chat,
+          builder: (context, state) => const ChatScreen(),
+        ),
       ],
     ),
   ],
@@ -84,9 +88,7 @@ class _ShellWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Derive the top-level route segment for active-nav highlighting.
-    final uri = state.uri.toString();
-    final route = '/${uri.split('/').where((s) => s.isNotEmpty).first}';
+    final route = state.uri.path;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: AppShell(currentRoute: route, child: child),

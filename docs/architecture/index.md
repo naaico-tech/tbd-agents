@@ -52,3 +52,16 @@ graph LR
     Worker -->|Persist| Mongo[(MongoDB)]
     API -->|Read/Write| Mongo
 ```
+
+---
+
+## Dashboard Integration Boundary
+
+The built-in dashboard is currently a single static page served from `/dashboard`, but its backend contract is already cleanly separated behind REST + streaming endpoints under `/api`.
+
+- CRUD resources: agents, MCP servers, custom tools, skills, knowledge sources/items, guardrails, tokens, providers, workflows, memories, and scheduled agents
+- Execution surfaces: `POST /api/workflows/{id}/prompt`, `POST /api/workflows/{id}/halt`, `GET /api/workflows/{id}/stream`, task history under `/api/tasks`
+- Chat surfaces: `POST /api/agents/{id}/chat` plus persisted session endpoints under `/api/agents/{id}/chat/sessions`
+- Dynamic form dependencies: model listing via `/api/models`, file uploads for knowledge items and custom tools, and workflow/task views that combine CRUD state with live streaming events
+
+This makes the current UI a good candidate for a Flutter web replacement that preserves the feature set while keeping backend deployment and execution architecture unchanged.

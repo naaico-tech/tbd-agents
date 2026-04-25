@@ -1,17 +1,19 @@
-# naaico_frontend
+# TBD Agents Flutter Dashboard
 
-NAAICO TBD Agents – Retro Dawn UI
+The Flutter web app under `frontend/` is built into the main FastAPI image and served at `http://localhost:8000/dashboard`.
 
-## Getting Started
+## Local checks
 
-This project is a starting point for a Flutter application.
+```bash
+flutter config --enable-web
+flutter pub get
+flutter analyze
+flutter test
+flutter build web --release --base-href /dashboard/
+```
 
-A few resources to get you started if this is your first Flutter project:
+## Integration contract
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- Built assets are served by FastAPI from `/dashboard`
+- API requests should target same-origin `/api/*`
+- The legacy dashboard remains available at `/dashboard-legacy`

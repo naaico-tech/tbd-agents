@@ -6,6 +6,8 @@ on:
     paths:
       - 'app/**'
       - 'tests/**'
+      - 'frontend/**'
+      - 'Dockerfile'
       - 'pyproject.toml'
       - 'docker-compose.test.yml'
       - '.github/workflows/integration-tests.yml'
@@ -14,6 +16,8 @@ on:
     paths:
       - 'app/**'
       - 'tests/**'
+      - 'frontend/**'
+      - 'Dockerfile'
       - 'pyproject.toml'
       - 'docker-compose.test.yml'
       - '.github/workflows/integration-tests.yml'
@@ -24,6 +28,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Flutter web
+        run: flutter config --enable-web
+
+      - name: Install frontend dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter app
+        run: flutter analyze
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Build Flutter web bundle
+        run: flutter build web --release --base-href /dashboard/
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build application image
+        run: docker build .
+
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15

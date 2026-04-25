@@ -1,3 +1,14 @@
+FROM ghcr.io/cirruslabs/flutter:stable AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/pubspec.yaml frontend/pubspec.lock ./
+RUN flutter config --enable-web && flutter pub get
+
+COPY frontend/ ./
+RUN flutter build web --release --base-href /dashboard/
+
+
 FROM python:3.12-slim AS base
 
 WORKDIR /app
@@ -12,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 COPY app/ ./app/
 RUN pip install --no-cache-dir .
+COPY --from=frontend-builder /frontend/build/web ./app/dashboard/
 
 EXPOSE 8000
 
