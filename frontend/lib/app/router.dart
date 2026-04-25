@@ -15,7 +15,9 @@ import '../features/chat/chat_screen.dart';
 // ---------------------------------------------------------------------------
 final appRouter = createAppRouter();
 
-GoRouter createAppRouter() {
+GoRouter createAppRouter({WidgetBuilder? dashboardBuilder}) {
+  final resolvedDashboardBuilder =
+      dashboardBuilder ?? (_) => const DashboardScreen();
   return GoRouter(
     initialLocation: AppLinks.dashboardRoot,
     routes: [
@@ -27,7 +29,7 @@ GoRouter createAppRouter() {
         routes: [
           _buildShellChildRoute(
             path: AppLinks.dashboardRoot,
-            builder: (_) => const DashboardScreen(),
+            builder: resolvedDashboardBuilder,
           ),
           _buildShellChildRoute(
             path: AppLinks.agents,

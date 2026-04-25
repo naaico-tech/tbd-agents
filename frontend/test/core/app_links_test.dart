@@ -20,7 +20,7 @@ void main() {
     });
 
     test('marks mapped routes as legacy-backed until native parity lands', () {
-      expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.dashboardRoot), isTrue);
+      expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.dashboardRoot), isFalse);
       expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.tasks), isTrue);
       expect(AppLinks.shouldEmbedLegacyRoute('/settings'), isFalse);
     });

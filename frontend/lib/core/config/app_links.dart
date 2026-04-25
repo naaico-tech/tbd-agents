@@ -21,7 +21,7 @@ class AppLinks {
   static const String legacyDashboardBasePath = '/dashboard-legacy';
 
   /// Remove routes from legacy embed as they gain full Flutter parity.
-  static const Set<String> _nativeRoutes = <String>{};
+  static const Set<String> _nativeRoutes = <String>{dashboardRoot};
 
   static const Map<String, String> _legacyPagesByRoute = {
     dashboardRoot: 'dashboard',
