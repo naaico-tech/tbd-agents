@@ -18,6 +18,7 @@ from app.db import init_db
 from app.models.scheduled_agent import ScheduledAgent
 from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import Workflow
+from beanie.operators import In
 from app.services import scheduler
 from app.tasks.agent_task import run_agent_task
 
@@ -68,7 +69,7 @@ async def _execute(scheduled_agent_id: str) -> None:
     # -- Check for overlapping runs --
     active_te = await TaskExecution.find_one(
         TaskExecution.scheduled_agent_id == str(sa.id),
-        TaskExecution.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING])
+        In(TaskExecution.status, [TaskStatus.PENDING, TaskStatus.RUNNING])
     )
     if active_te:
         logger.warning(
