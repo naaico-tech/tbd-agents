@@ -10,7 +10,10 @@ void main() {
     });
 
     test('accentPrimary is retro red #E8434B', () {
-      expect(accentPrimary.toARGB32(), equals(const Color(0xFFE8434B).toARGB32()));
+      expect(
+        accentPrimary.toARGB32(),
+        equals(const Color(0xFFE8434B).toARGB32()),
+      );
     });
 
     test('accentTeal is #2B7A78', () {
@@ -18,11 +21,17 @@ void main() {
     });
 
     test('accentLavender is #A976F9', () {
-      expect(accentLavender.toARGB32(), equals(const Color(0xFFA976F9).toARGB32()));
+      expect(
+        accentLavender.toARGB32(),
+        equals(const Color(0xFFA976F9).toARGB32()),
+      );
     });
 
     test('borderColor is textPrimary #1A1A2E', () {
-      expect(borderColor.toARGB32(), equals(const Color(0xFF1A1A2E).toARGB32()));
+      expect(
+        borderColor.toARGB32(),
+        equals(const Color(0xFF1A1A2E).toARGB32()),
+      );
     });
 
     test('borderWidth is 2', () {
@@ -64,7 +73,7 @@ void main() {
     });
 
     test('fontBody constant matches expected family name', () {
-      expect(fontBody, equals('VT323'));
+      expect(fontBody, equals('Silkscreen'));
     });
   });
 }

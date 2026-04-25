@@ -165,10 +165,11 @@ class _RetroButtonState extends State<RetroButton> {
             Text(
               widget.label,
               style: TextStyle(
-                fontFamily: fontDisplay,
-                fontSize: fontSizeSmall,
+                fontFamily: fontBody,
+                fontSize: fontSizeCaption,
+                height: fontHeightBody,
                 color: widget.textColor,
-                letterSpacing: 0.5,
+                letterSpacing: letterSpacingLabel,
               ),
             ),
           ],

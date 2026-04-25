@@ -2,6 +2,8 @@
 
 import 'dart:html' as html;
 
+bool get canUseBrowserNavigation => true;
+
 void openInBrowser(String url) {
   html.window.location.assign(url);
 }

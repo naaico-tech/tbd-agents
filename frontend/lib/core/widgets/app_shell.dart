@@ -164,7 +164,7 @@ class _DesktopShell extends StatelessWidget {
             children: [
               _TopBar(currentRoute: currentRoute),
               Expanded(
-                child: Container(color: pageBg, child: child),
+                child: _ShellContent(currentRoute: currentRoute, child: child),
               ),
             ],
           ),
@@ -204,7 +204,28 @@ class _MobileShell extends StatelessWidget {
           currentRoute: currentRoute,
         ),
       ),
-      body: child,
+      body: _ShellContent(currentRoute: currentRoute, child: child),
+    );
+  }
+}
+
+class _ShellContent extends StatelessWidget {
+  const _ShellContent({required this.currentRoute, required this.child});
+
+  final String currentRoute;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: ColoredBox(
+        color: pageBg,
+        child: SizedBox.expand(
+          child: RepaintBoundary(
+            child: KeyedSubtree(key: ValueKey(currentRoute), child: child),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -250,7 +271,8 @@ class _SidebarContent extends StatelessWidget {
       if (currentRoute == route) {
         return true;
       }
-      return route != AppLinks.dashboardRoot && currentRoute.startsWith('$route/');
+      return route != AppLinks.dashboardRoot &&
+          currentRoute.startsWith('$route/');
     }
 
     return Column(
@@ -427,8 +449,12 @@ class _TopBar extends StatelessWidget {
       AppLinks.chat: 'Chat',
       AppLinks.scheduledAgents: 'Scheduled Agents',
     };
-    for (final e in map.entries) {
-      if (currentRoute.startsWith(e.key)) return e.value;
+    final matches = map.entries
+        .where((entry) => currentRoute.startsWith(entry.key))
+        .toList();
+    if (matches.isNotEmpty) {
+      matches.sort((a, b) => b.key.length.compareTo(a.key.length));
+      return matches.first.value;
     }
     return 'TBD Agents';
   }
@@ -465,7 +491,9 @@ class _TopBar extends StatelessWidget {
           RetroButton(
             label: 'LEGACY',
             icon: Icons.open_in_new,
-            onPressed: () => openInBrowser(legacyUri.toString()),
+            onPressed: canUseBrowserNavigation
+                ? () => openInBrowser(legacyUri.toString())
+                : null,
             color: accentAmber,
             textColor: textPrimary,
           ),

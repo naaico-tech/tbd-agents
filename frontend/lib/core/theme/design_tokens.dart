@@ -68,15 +68,21 @@ const double sp32 = 32;
 const double sp48 = 48;
 
 // ---------------------------------------------------------------------------
-// Typography — sizes matched to Press Start 2P feel
+// Typography — pixel-forward sizes tuned for readable 8-bit UI
 // ---------------------------------------------------------------------------
-const double fontSizeDisplay = 22;
-const double fontSizeHeading = 16;
-const double fontSizeBody = 14;
-const double fontSizeCaption = 12;
-const double fontSizeSmall = 11;
+const double fontSizeDisplay = 20;
+const double fontSizeHeading = 15;
+const double fontSizeBody = 13;
+const double fontSizeCaption = 11;
+const double fontSizeSmall = 10;
+
+const double fontHeightDisplay = 1.45;
+const double fontHeightBody = 1.5;
+const double letterSpacingDisplay = 1;
+const double letterSpacingBody = 0.25;
+const double letterSpacingLabel = 0.6;
 
 // Font families (loaded via Google Fonts link in web/index.html)
 const String fontDisplay = 'Press Start 2P';
-const String fontBody = 'VT323';
+const String fontBody = 'Silkscreen';
 const String fontFallback = 'monospace';
