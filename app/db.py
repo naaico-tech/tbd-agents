@@ -12,6 +12,7 @@ from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
 from app.models.memory import Memory
 from app.models.provider import Provider
+from app.models.scheduled_agent import ScheduledAgent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
 from app.models.token import Token
@@ -24,7 +25,7 @@ async def init_db() -> None:
         database=client[settings.mongo_db_name],
         document_models=[
             Agent, ChatMessage, ChatSession, CustomTool, Guardrail, KnowledgeItem,
-            KnowledgeSource, McpServer, Memory, Provider, Skill, TaskExecution, Token,
-            Workflow,
+            KnowledgeSource, McpServer, Memory, Provider, ScheduledAgent, Skill,
+            TaskExecution, Token, Workflow,
         ],
     )

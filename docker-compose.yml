@@ -78,6 +78,36 @@ services:
       - repos_data:/repos
     restart: unless-stopped
 
+  beat:
+    build: .
+    command: celery -A app.celery_app beat --loglevel=info --scheduler redbeat.RedBeatScheduler
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=copilot_agent_hub
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_MODEL=gpt-4.1
+      - DEFAULT_MAX_TURNS=5
+      - SESSION_TIMEOUT=600
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - DD_API_KEY=${DD_API_KEY:-}
+      - DD_APP_KEY=${DD_APP_KEY:-}
+      - DD_SITE=${DD_SITE:-datadoghq.com}
+      - ATLASSIAN_API_TOKEN=${ATLASSIAN_API_TOKEN:-}
+      - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
+      - ATLASSIAN_URL=${ATLASSIAN_URL:-}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=tbd-agents-beat
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
+    depends_on:
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:

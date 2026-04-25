@@ -21,6 +21,7 @@ from app.api.routes import (
     memories,
     models,
     providers,
+    scheduled_agents,
     skills,
     tasks,
     tokens,
@@ -115,6 +116,7 @@ app.include_router(chat.router)
 app.include_router(custom_tools.router)
 app.include_router(guardrails.router)
 app.include_router(providers.router)
+app.include_router(scheduled_agents.router)
 app.include_router(skills.router)
 app.include_router(knowledge_sources.router)
 app.include_router(knowledge_items.router)

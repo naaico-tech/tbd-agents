@@ -19,7 +19,7 @@ celery = Celery(
     "copilot_agent_hub",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.agent_task"],
+    include=["app.tasks.agent_task", "app.tasks.scheduled_trigger"],
 )
 
 celery.conf.update(
@@ -35,6 +35,11 @@ celery.conf.update(
     task_acks_late=True,
     # Reject tasks on worker shutdown so they're re-queued
     task_reject_on_worker_lost=True,
+    # RedBeat: store Celery Beat schedules in Redis so they are dynamic
+    # and persistent across container restarts.
+    redbeat_redis_url=settings.redis_url,
+    beat_scheduler="redbeat.RedBeatScheduler",
+    beat_max_loop_interval=5,  # seconds between Beat scheduler iterations
 )
 
 celery.autodiscover_tasks(["app.tasks"])

@@ -304,6 +304,7 @@
     <a data-page="tokens"><span class="icon">🔑</span> Tokens</a>
     <a data-page="providers"><span class="icon">🏢</span> Providers</a>
     <a data-page="workflows"><span class="icon">🔄</span> Workflows</a>
+    <a data-page="scheduled-agents"><span class="icon">🕐</span> Scheduled Agents</a>
     <a data-page="task"><span class="icon">💬</span> Run Task</a>
     <a data-page="chat"><span class="icon">🗨️</span> Chat</a>
   </nav>
@@ -328,6 +329,7 @@
         <div class="stat-card"><div class="label">Providers</div><div class="value yellow" id="stat-providers">-</div></div>
         <div class="stat-card"><div class="label">Knowledge Sources</div><div class="value blue" id="stat-knowledge">-</div></div>
         <div class="stat-card"><div class="label">Workflows</div><div class="value yellow" id="stat-workflows">-</div></div>
+        <div class="stat-card"><div class="label">Scheduled Agents</div><div class="value blue" id="stat-scheduled-agents">-</div></div>
         <div class="stat-card"><div class="label">Task Executions</div><div class="value purple" id="stat-tasks">-</div></div>
       </div>
       <div class="card">
@@ -658,6 +660,22 @@
       </div>
     </div>
 
+    <!-- Scheduled Agents Page -->
+    <div id="page-scheduled-agents" class="page">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="openScheduledAgentModal()">+ New Schedule</button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h2>Scheduled Agents</h2>
+          <button class="btn btn-sm" onclick="loadScheduledAgents()">↻ Refresh</button>
+        </div>
+        <div class="card-body"><table><thead><tr>
+          <th>Name</th><th>Workflow</th><th>Cadence</th><th>Status</th><th>Last Run</th><th>Next Run</th><th>Ends</th><th></th>
+        </tr></thead><tbody id="scheduled-agents-body"></tbody></table></div>
+      </div>
+    </div>
+
     <!-- Chat Page -->
     <div id="page-chat" class="page">
       <!-- Agent selector bar -->
@@ -767,7 +785,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('page-' + page).classList.add('active');
     document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', chat:'Chat' }[page];
+      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', 'scheduled-agents':'Scheduled Agents', tasks:'Task Executions', task:'Run Task', chat:'Chat' }[page];
     loadPage(page);
   });
 });
@@ -779,7 +797,7 @@ function navigateTo(page, title) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   document.getElementById('page-title').textContent = title ||
-    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory', chat:'Chat' }[page] || page;
+    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', 'scheduled-agents':'Scheduled Agents', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory', chat:'Chat' }[page] || page;
   loadPage(page);
 }
 
@@ -794,6 +812,7 @@ function loadPage(page) {
   else if (page === 'tokens') loadTokens();
   else if (page === 'providers') loadProviders();
   else if (page === 'workflows') loadWorkflows();
+  else if (page === 'scheduled-agents') loadScheduledAgents();
   else if (page === 'tasks') loadTaskExecutions();
   else if (page === 'task') loadTaskPage();
   else if (page === 'chat') loadChatPage();
@@ -806,8 +825,9 @@ async function loadDashboard() {
     [agents, mcps, customTools, skills, workflows, tokens, providers, taskExecs] = await Promise.all([
       api('/api/agents'), api('/api/mcps'), api('/api/custom-tools'), api('/api/skills'), api('/api/workflows'), api('/api/tokens'), api('/api/providers'), api('/api/tasks')
     ]);
-    let ksStat = '-';
+    let ksStat = '-'; let saStat = '-';
     try { const ks = await api('/api/knowledge-sources'); ksStat = ks.length; } catch {}
+    try { scheduledAgents = await api('/api/scheduled-agents'); saStat = scheduledAgents.length; } catch {}
     document.getElementById('stat-agents').textContent = agents.length;
     document.getElementById('stat-mcps').textContent = mcps.length;
     document.getElementById('stat-skills').textContent = skills.length;
@@ -815,6 +835,7 @@ async function loadDashboard() {
     document.getElementById('stat-providers').textContent = providers.length;
     document.getElementById('stat-knowledge').textContent = ksStat;
     document.getElementById('stat-workflows').textContent = workflows.length;
+    document.getElementById('stat-scheduled-agents').textContent = saStat;
     document.getElementById('stat-tasks').textContent = taskExecs.length;
 
     const recent = workflows.slice(-5).reverse();
@@ -3292,6 +3313,175 @@ function disconnectChatStream() {
     chatStreamReader = null;
   }
   finishChatStream();
+}
+
+// ── Scheduled Agents ──────────────────────────────────────────────────────
+let scheduledAgents = [];
+
+async function loadScheduledAgents() {
+  try {
+    scheduledAgents = await api('/api/scheduled-agents');
+    renderScheduledAgents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function _cadence(sa) {
+  return `Every ${sa.interval_value} ${sa.interval_unit}`;
+}
+
+function _scheduledStatusBadge(sa) {
+  if (!sa.enabled) return '<span class="badge badge-muted">Disabled</span>';
+  const now = new Date();
+  if (sa.end_at && new Date(sa.end_at) < now) return '<span class="badge badge-red">Expired</span>';
+  return '<span class="badge badge-green">Active</span>';
+}
+
+function _workflowTitle(wfId) {
+  const wf = workflows.find(w => w.id === wfId);
+  return wf ? (wf.title || wfId.slice(0,8)) : wfId?.slice(0,8) || '-';
+}
+
+function renderScheduledAgents() {
+  const tbody = document.getElementById('scheduled-agents-body');
+  if (!scheduledAgents.length) {
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">🕐</div><div>No scheduled agents yet</div></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = scheduledAgents.map(sa => `
+    <tr>
+      <td><strong>${sa.name}</strong></td>
+      <td><span class="mono">${_workflowTitle(sa.workflow_id)}</span></td>
+      <td><span class="badge badge-purple">${_cadence(sa)}</span></td>
+      <td>${_scheduledStatusBadge(sa)}</td>
+      <td>${fmtDate(sa.last_run_at)}</td>
+      <td>${fmtDate(sa.next_run_at)}</td>
+      <td>${sa.end_at ? fmtDate(sa.end_at) : '<span class="badge badge-muted">∞ Forever</span>'}</td>
+      <td>
+        <div class="btn-group">
+          <button class="btn btn-sm" onclick="editScheduledAgent('${sa.id}')" title="Edit">✏️</button>
+          ${sa.enabled
+            ? `<button class="btn btn-sm" onclick="toggleScheduledAgent('${sa.id}', false)" title="Disable">⏸</button>`
+            : `<button class="btn btn-sm" style="color:var(--green)" onclick="toggleScheduledAgent('${sa.id}', true)" title="Enable">▶</button>`}
+          <button class="btn btn-sm btn-danger" onclick="deleteScheduledAgent('${sa.id}')" title="Delete">🗑</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function toggleScheduledAgent(id, enable) {
+  try {
+    const action = enable ? 'enable' : 'disable';
+    await api(`/api/scheduled-agents/${id}/${action}`, { method: 'PATCH' });
+    toast(`Schedule ${enable ? 'enabled' : 'disabled'}`, 'success');
+    await loadScheduledAgents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteScheduledAgent(id) {
+  if (!confirm('Delete this scheduled agent? The Beat entry will also be removed.')) return;
+  try {
+    await api(`/api/scheduled-agents/${id}`, { method: 'DELETE' });
+    toast('Scheduled agent deleted', 'success');
+    await loadScheduledAgents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openScheduledAgentModal(prefill = {}) {
+  // Ensure we have workflows loaded for the dropdown
+  const wfOptions = workflows.map(w =>
+    `<option value="${w.id}" ${prefill.workflow_id === w.id ? 'selected' : ''}>${w.title || w.id.slice(0,8)}</option>`
+  ).join('');
+
+  // Default start_at to "now" in local ISO string (trimmed to minutes)
+  const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 16);
+
+  document.getElementById('modal-title').textContent = prefill.id ? 'Edit Scheduled Agent' : 'New Scheduled Agent';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label>Name</label>
+      <input id="sa-name" value="${prefill.name || ''}" placeholder="e.g. Daily Digest">
+    </div>
+    <div class="form-group">
+      <label>Workflow</label>
+      <select id="sa-workflow">${wfOptions || '<option>Loading…</option>'}</select>
+      <div class="hint">The workflow whose agent will run on each tick.</div>
+    </div>
+    <div class="form-group">
+      <label>Prompt</label>
+      <textarea id="sa-prompt" rows="3" placeholder="Task prompt sent to the agent on each run…">${prefill.prompt || ''}</textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>Repeat Every</label>
+        <input id="sa-interval-value" type="number" min="1" value="${prefill.interval_value || 1}" placeholder="1">
+      </div>
+      <div class="form-group">
+        <label>Unit</label>
+        <select id="sa-interval-unit">
+          <option value="minutes" ${prefill.interval_unit==='minutes'?'selected':''}>Minutes</option>
+          <option value="hours" ${prefill.interval_unit==='hours'||!prefill.interval_unit?'selected':''}>Hours</option>
+          <option value="days" ${prefill.interval_unit==='days'?'selected':''}>Days</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>Start At (UTC)</label>
+        <input id="sa-start-at" type="datetime-local" value="${prefill.start_at ? new Date(prefill.start_at).toISOString().slice(0,16) : nowLocal}">
+        <div class="hint">When the first tick fires.</div>
+      </div>
+      <div class="form-group">
+        <label>End At (UTC) <span class="badge badge-muted">Optional</span></label>
+        <input id="sa-end-at" type="datetime-local" value="${prefill.end_at ? new Date(prefill.end_at).toISOString().slice(0,16) : ''}">
+        <div class="hint">Leave empty to run forever.</div>
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveScheduledAgent('${prefill.id || ''}')">Save Schedule</button>
+  `;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+function editScheduledAgent(id) {
+  const sa = scheduledAgents.find(s => s.id === id);
+  if (!sa) return;
+  openScheduledAgentModal(sa);
+}
+
+async function saveScheduledAgent(existingId) {
+  const name = document.getElementById('sa-name').value.trim();
+  const workflow_id = document.getElementById('sa-workflow').value;
+  const prompt = document.getElementById('sa-prompt').value.trim();
+  const interval_value = parseInt(document.getElementById('sa-interval-value').value, 10);
+  const interval_unit = document.getElementById('sa-interval-unit').value;
+  const start_at_raw = document.getElementById('sa-start-at').value;
+  const end_at_raw = document.getElementById('sa-end-at').value;
+
+  if (!name || !workflow_id || !prompt || !interval_value || !start_at_raw) {
+    toast('Please fill in all required fields', 'error'); return;
+  }
+
+  const body = {
+    name, workflow_id, prompt, interval_value, interval_unit,
+    start_at: new Date(start_at_raw).toISOString(),
+    end_at: end_at_raw ? new Date(end_at_raw).toISOString() : null,
+  };
+
+  try {
+    if (existingId) {
+      await api(`/api/scheduled-agents/${existingId}`, { method: 'PATCH', body: JSON.stringify(body) });
+      toast('Schedule updated', 'success');
+    } else {
+      await api('/api/scheduled-agents', { method: 'POST', body: JSON.stringify(body) });
+      toast('Schedule created', 'success');
+    }
+    closeModal();
+    await loadScheduledAgents();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ── Init ──

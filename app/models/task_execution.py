@@ -50,6 +50,7 @@ class TaskExecution(Document):
     usage: UsageStats | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    scheduled_agent_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     class Settings:
