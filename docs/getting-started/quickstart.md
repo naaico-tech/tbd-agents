@@ -36,7 +36,8 @@ This starts four services:
 | `mongodb` | 27017 | Persistent storage |
 
 !!! tip "Access points"
-    - **Dashboard** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+    - **Legacy UI** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+    - **Flutter UI** — [http://localhost:8000/dashboard-new-ui](http://localhost:8000/dashboard-new-ui)
     - **Swagger UI** — [http://localhost:8000/docs](http://localhost:8000/docs)
     - **API base** — [http://localhost:8000/api](http://localhost:8000/api)
 

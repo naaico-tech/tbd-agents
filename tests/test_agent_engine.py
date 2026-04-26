@@ -109,7 +109,7 @@ class TestAutoMemoryPromptInjection:
         self, mock_agent, mock_workflow_auto_memory_on
     ):
         """Should include auto_memory_policy when workflow.auto_memory is True."""
-        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        prompt, _ = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         assert "<auto_memory_policy>" in prompt
         assert "store_memory" in prompt
         assert "snake_case" in prompt
@@ -119,7 +119,7 @@ class TestAutoMemoryPromptInjection:
         self, mock_agent, mock_workflow_auto_memory_off
     ):
         """Should NOT include auto_memory_policy when workflow.auto_memory is False."""
-        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_off)
+        prompt, _ = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_off)
         assert "<auto_memory_policy>" not in prompt
 
     @pytest.mark.asyncio
@@ -127,7 +127,7 @@ class TestAutoMemoryPromptInjection:
         self, mock_agent, mock_workflow_auto_memory_on
     ):
         """Auto-memory policy should appear alongside the execution policy."""
-        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        prompt, _ = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         assert "<execution_policy>" in prompt
         assert "<auto_memory_policy>" in prompt
 
@@ -136,7 +136,7 @@ class TestAutoMemoryPromptInjection:
         self, mock_agent, mock_workflow_auto_memory_on
     ):
         """Auto-memory policy should come after execution policy."""
-        prompt = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
+        prompt, _ = await _build_system_prompt(mock_agent, [], mock_workflow_auto_memory_on)
         exec_pos = prompt.index("<execution_policy>")
         auto_pos = prompt.index("<auto_memory_policy>")
         assert auto_pos > exec_pos
@@ -152,7 +152,7 @@ class TestCavemanWorkflowMode:
         workflow.caveman = True
         workflow.output_format = "markdown"
 
-        prompt = await _build_system_prompt(agent, [], workflow)
+        prompt, _ = await _build_system_prompt(agent, [], workflow)
 
         assert "<caveman_policy>" in prompt
         assert "workflow output obligation (markdown)" in prompt
@@ -190,7 +190,7 @@ class TestPromptBudgeting:
         long_skill.instructions = "X" * 8000
 
         with patch("app.core.agent_engine.Skill.get", new_callable=AsyncMock, return_value=long_skill):
-            prompt = await _build_system_prompt(agent, ["skill-1"], workflow)
+            prompt, _ = await _build_system_prompt(agent, ["skill-1"], workflow)
 
         assert "<skills>" in prompt
         assert len(prompt) <= 24000

@@ -19,6 +19,17 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+  body.embed-mode { background: transparent; }
+  body.hide-sidebar .sidebar,
+  body.hide-topbar .topbar,
+  body.hide-footer .sidebar-footer { display: none; }
+  body.hide-sidebar .main { width: 100%; min-width: 0; }
+  body.embed-mode .topbar { padding: 12px 16px; }
+  body.embed-mode .content { padding: 16px; }
+  body.embed-mode .card,
+  body.embed-mode .stat-card,
+  body.embed-mode .modal { box-shadow: none; }
+  body.embed-mode .toast-container { top: 12px; right: 12px; }
 
   /* Sidebar */
   .sidebar { width: 240px; background: var(--surface); border-right: 1px solid var(--border);
@@ -777,28 +788,207 @@ function agentName(id) {
 }
 
 // ── Navigation ──
+const DEFAULT_PAGE = 'dashboard';
+const PAGE_TITLES = {
+  dashboard:'Dashboard',
+  agents:'Agents',
+  mcps:'MCP Servers',
+  'custom-tools':'Custom Tools',
+  skills:'Skills',
+  knowledge:'Knowledge',
+  guardrails:'Guardrails',
+  tokens:'Tokens',
+  providers:'Providers',
+  workflows:'Workflows',
+  'scheduled-agents':'Scheduled Agents',
+  tasks:'Task Executions',
+  task:'Run Task',
+  chat:'Chat',
+  'workflow-detail':'Workflow Detail',
+  'task-logs':'Task Logs',
+  'agent-memory':'Agent Memory',
+};
+const CHROME_PARTS = ['sidebar', 'topbar', 'footer'];
+let currentRoute = { page: DEFAULT_PAGE, title: PAGE_TITLES[DEFAULT_PAGE] };
+
+function parseBoolish(value) {
+  if (value == null || value === '') return false;
+  return ['1', 'true', 'yes', 'on', 'embed'].includes(String(value).toLowerCase());
+}
+
+function parseCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map(part => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function normalizePage(rawPage) {
+  const page = String(rawPage || '').replace(/^page-/, '');
+  if (!page) return DEFAULT_PAGE;
+  if (page === 'run-task') return 'task';
+  return document.getElementById('page-' + page) ? page : DEFAULT_PAGE;
+}
+
+function decodeRouteSegment(segment) {
+  try { return decodeURIComponent(segment); }
+  catch { return segment; }
+}
+
+function parseHashRoute(hash) {
+  const rawHash = String(hash || '').replace(/^#/, '');
+  if (!rawHash) return {};
+  if (!rawHash.startsWith('/')) {
+    return Object.fromEntries(new URLSearchParams(rawHash));
+  }
+
+  const [pathPart, queryString = ''] = rawHash.slice(1).split('?');
+  const params = Object.fromEntries(new URLSearchParams(queryString));
+  const [first, second, third] = pathPart.split('/').filter(Boolean).map(decodeRouteSegment);
+
+  if (!first) return params;
+  if (first === 'workflows' && second) return { ...params, page: 'workflow-detail', workflowId: second };
+  if (first === 'tasks' && second && (!third || third === 'logs')) {
+    return { ...params, page: 'task-logs', taskId: second };
+  }
+  if (first === 'agents' && second && third === 'memory') return { ...params, page: 'agent-memory', agentId: second };
+  if (first === 'run-task') return { ...params, page: 'task' };
+  return { ...params, page: first };
+}
+
+function getLocationRoute() {
+  const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+  const hashParams = parseHashRoute(window.location.hash);
+  return { ...searchParams, ...hashParams };
+}
+
+function getPageTitle(page, fallback) {
+  return fallback || PAGE_TITLES[page] || page;
+}
+
+function getActiveNavPage(page, route) {
+  if (page === 'workflow-detail') return 'workflows';
+  if (page === 'agent-memory') return 'agents';
+  if (page === 'task-logs') return route.backTarget === 'workflow-detail' ? 'workflows' : 'tasks';
+  return page;
+}
+
+function resolveHiddenChrome(route) {
+  const hidden = new Set();
+  const chrome = String(route.chrome || '').toLowerCase();
+  if (chrome === 'none' || chrome === '0') {
+    CHROME_PARTS.forEach(part => hidden.add(part));
+  } else if (chrome === 'minimal') {
+    ['sidebar', 'footer'].forEach(part => hidden.add(part));
+  }
+  parseCsv(route.hide).forEach(part => {
+    if (CHROME_PARTS.includes(part)) hidden.add(part);
+  });
+  parseCsv(route.show).forEach(part => hidden.delete(part));
+  return hidden;
+}
+
+function applyEmbedMode(route) {
+  const hiddenChrome = resolveHiddenChrome(route);
+  const embedMode = parseBoolish(route.embed) || String(route.mode || '').toLowerCase() === 'embed' || hiddenChrome.size > 0;
+  document.body.classList.toggle('embed-mode', embedMode);
+  CHROME_PARTS.forEach(part => {
+    document.body.classList.toggle(`hide-${part}`, hiddenChrome.has(part));
+  });
+}
+
+function normalizeRoute(route = {}) {
+  const normalized = { ...route };
+  normalized.page = normalizePage(route.page || route.section);
+  normalized.workflowId = route.workflowId ? String(route.workflowId) : null;
+  normalized.taskId = route.taskId ? String(route.taskId) : null;
+  normalized.agentId = route.agentId ? String(route.agentId) : null;
+
+  if (normalized.page === 'workflow-detail' && !normalized.workflowId) normalized.page = 'workflows';
+  if (normalized.page === 'task-logs' && !normalized.taskId) normalized.page = 'tasks';
+  if (normalized.page === 'agent-memory' && !normalized.agentId) normalized.page = 'agents';
+
+  normalized.backTarget = normalized.backTarget || normalized.back || (normalized.workflowId ? 'workflow-detail' : 'tasks');
+  normalized.title = getPageTitle(normalized.page, normalized.title);
+  return normalized;
+}
+
+function buildRouteHash(route) {
+  const params = new URLSearchParams();
+  let path = `/${route.page}`;
+
+  if (route.page === 'workflow-detail' && route.workflowId) {
+    path = `/workflows/${encodeURIComponent(route.workflowId)}`;
+  } else if (route.page === 'task-logs' && route.taskId) {
+    path = `/tasks/${encodeURIComponent(route.taskId)}/logs`;
+    if (route.workflowId) params.set('workflowId', route.workflowId);
+    if (route.backTarget && route.backTarget !== 'tasks') params.set('back', route.backTarget);
+  } else if (route.page === 'agent-memory' && route.agentId) {
+    path = `/agents/${encodeURIComponent(route.agentId)}/memory`;
+  }
+
+  const query = params.toString();
+  return `#${path}${query ? `?${query}` : ''}`;
+}
+
+function syncRouteUrl(route, { replace = false } = {}) {
+  const nextHash = buildRouteHash(route);
+  const nextUrl = `${window.location.pathname}${window.location.search}${nextHash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl !== currentUrl) {
+    history[replace ? 'replaceState' : 'pushState'](null, '', nextUrl);
+  }
+}
+
+function setActivePage(route) {
+  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+  const nav = document.querySelector(`[data-page="${getActiveNavPage(route.page, route)}"]`);
+  if (nav) nav.classList.add('active');
+
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const pageEl = document.getElementById('page-' + route.page);
+  if (pageEl) pageEl.classList.add('active');
+  document.getElementById('page-title').textContent = route.title;
+}
+
 document.querySelectorAll('.sidebar nav a').forEach(a => {
   a.addEventListener('click', () => {
-    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
-    a.classList.add('active');
-    const page = a.dataset.page;
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-' + page).classList.add('active');
-    document.getElementById('page-title').textContent =
-      { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', 'scheduled-agents':'Scheduled Agents', tasks:'Task Executions', task:'Run Task', chat:'Chat' }[page];
-    loadPage(page);
+    navigateTo(a.dataset.page);
   });
 });
 
-function navigateTo(page, title) {
-  document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
-  const nav = document.querySelector(`[data-page="${page}"]`);
-  if (nav) nav.classList.add('active');
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.getElementById('page-title').textContent = title ||
-    { dashboard:'Dashboard', agents:'Agents', mcps:'MCP Servers', 'custom-tools':'Custom Tools', skills:'Skills', knowledge:'Knowledge', guardrails:'Guardrails', tokens:'Tokens', providers:'Providers', workflows:'Workflows', 'scheduled-agents':'Scheduled Agents', tasks:'Task Executions', task:'Run Task', 'workflow-detail':'Workflow Detail', 'task-logs':'Task Logs', 'agent-memory':'Agent Memory', chat:'Chat' }[page] || page;
-  loadPage(page);
+function navigateTo(page, title, route = {}) {
+  applyRoute({ ...route, page, title }, { updateUrl: true });
+}
+
+function applyRoute(rawRoute = {}, { updateUrl = false, replace = false } = {}) {
+  const route = normalizeRoute(rawRoute);
+  const previousPage = currentRoute.page;
+  currentRoute = route;
+
+  applyEmbedMode(route);
+  if (updateUrl) syncRouteUrl(route, { replace });
+  if (previousPage === 'task-logs' && route.page !== 'task-logs') disconnectTaskLogsSSE();
+  if (previousPage === 'chat' && route.page !== 'chat') disconnectChatStream();
+
+  setActivePage(route);
+
+  if (route.page === 'workflow-detail') {
+    currentWorkflowId = route.workflowId;
+    loadWorkflowDetail(route.workflowId);
+    return;
+  }
+  if (route.page === 'task-logs') {
+    loadTaskLogsRoute(route);
+    return;
+  }
+  if (route.page === 'agent-memory') {
+    currentMemoryAgentId = route.agentId;
+    loadAgentMemory(route.agentId);
+    return;
+  }
+
+  loadPage(route.page);
 }
 
 function loadPage(page) {
@@ -2208,8 +2398,7 @@ let taskLogsBackTarget = 'workflows'; // where to go back from task-logs page
 
 function viewWorkflowDetail(id) {
   currentWorkflowId = id;
-  navigateTo('workflow-detail', 'Workflow Detail');
-  loadWorkflowDetail(id);
+  navigateTo('workflow-detail', 'Workflow Detail', { workflowId: id });
 }
 
 async function loadWorkflowDetail(id) {
@@ -2329,23 +2518,37 @@ async function haltTaskFromDetail() {
 function navigateBackFromTaskLogs() {
   disconnectTaskLogsSSE();
   if (taskLogsBackTarget === 'workflow-detail' && currentWorkflowId) {
-    viewWorkflowDetail(currentWorkflowId);
+    navigateTo('workflow-detail', 'Workflow Detail', { workflowId: currentWorkflowId });
   } else {
     navigateTo('tasks', 'Task Executions');
   }
 }
 
-async function openTaskLogsPage(taskId, backTarget) {
-  taskLogsBackTarget = backTarget || 'tasks';
+function openTaskLogsPage(taskId, backTarget) {
+  navigateTo('task-logs', 'Task Logs', {
+    taskId,
+    backTarget: backTarget || 'tasks',
+    workflowId: backTarget === 'workflow-detail' ? currentWorkflowId : null,
+  });
+}
+
+async function loadTaskLogsRoute(route) {
+  taskLogsBackTarget = route.backTarget || 'tasks';
   disconnectTaskLogsSSE();
-  navigateTo('task-logs', 'Task Logs');
   try {
-    const t = await api(`/api/tasks/${taskId}`);
+    const t = await api(`/api/tasks/${route.taskId}`);
+    if (taskLogsBackTarget === 'workflow-detail') {
+      currentWorkflowId = route.workflowId || t.workflow_id || currentWorkflowId;
+      if (!route.workflowId && currentWorkflowId) {
+        currentRoute = { ...currentRoute, workflowId: currentWorkflowId };
+        syncRouteUrl(currentRoute, { replace: true });
+      }
+    }
     renderTaskLogsPage(t);
 
     // If task is still running, connect SSE for live streaming
     if (t.status === 'running' || t.status === 'pending') {
-      connectTaskLogsSSE(t.workflow_id, taskId);
+      connectTaskLogsSSE(t.workflow_id, route.taskId);
     }
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -3042,8 +3245,7 @@ let currentMemoryAgentId = null;
 
 function viewAgentMemory(agentId) {
   currentMemoryAgentId = agentId;
-  navigateTo('agent-memory', 'Agent Memory');
-  loadAgentMemory(agentId);
+  navigateTo('agent-memory', 'Agent Memory', { agentId });
 }
 
 async function loadAgentMemory(agentId) {
@@ -3485,7 +3687,9 @@ async function saveScheduledAgent(existingId) {
 }
 
 // ── Init ──
-loadDashboard();
+window.addEventListener('popstate', () => applyRoute(getLocationRoute()));
+window.addEventListener('hashchange', () => applyRoute(getLocationRoute()));
+applyRoute(getLocationRoute());
 </script>
 </body>
 </html>

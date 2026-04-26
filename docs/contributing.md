@@ -37,12 +37,21 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
     source .venv/bin/activate
     pip install -e ".[dev]"
     ```
+    If you are working on `frontend/`, also install Flutter with web support enabled.
 
 3. **Make your changes.** Follow the coding standards below.
 
 4. **Run tests** and ensure they all pass:
     ```bash
     python -m pytest tests/ -v
+    ```
+    When your change touches `frontend/`, also run:
+    ```bash
+    cd frontend
+    flutter pub get
+    flutter analyze
+    flutter test
+    flutter build web --release --base-href /dashboard-new-ui/
     ```
 
 5. **Run the linter:**
@@ -113,6 +122,7 @@ observability/      ← Grafana dashboards, Prometheus, Loki, Tempo
     docker-compose up --build
     ```
 - **MongoDB, Redis, and observability** services are included in the compose file.
+- **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard-new-ui`; use `/dashboard` for the legacy UI (`/dashboard-legacy` remains as a compatibility alias).
 - See [Local Setup](getting-started/local-setup.md) for bare-metal setup.
 
 ---

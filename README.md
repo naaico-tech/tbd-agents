@@ -81,13 +81,16 @@ Your GitHub PAT needs the `copilot` scope — [create one here](https://github.c
 
 ```
  ┌──────────────────────────────────────────────────┐
- │  ► Dashboard ─── http://localhost:8000/dashboard  │
+ │  ► Legacy UI ── http://localhost:8000/dashboard  │
+ │  ► New UI ───── http://localhost:8000/dashboard-new-ui │
  │  ► API docs  ─── http://localhost:8000/docs       │
  │  ► API base  ─── http://localhost:8000/api        │
  └──────────────────────────────────────────────────┘
 ```
 
-See [docs/local-setup.md](docs/local-setup.md) for detailed local development instructions.
+`/dashboard` serves the legacy dashboard. `/dashboard-new-ui` serves the built Flutter web app from the FastAPI container, and `/dashboard-legacy` remains as a compatibility alias for the legacy UI.
+
+See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for detailed local development instructions.
 
 ---
 
@@ -108,7 +111,7 @@ See [docs/local-setup.md](docs/local-setup.md) for detailed local development in
 
 | Document | Description |
 |---|---|
-| [Local Setup](docs/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
+| [Local Setup](docs/getting-started/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
 | [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
 | [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
 | [Contributing](CONTRIBUTING.md) | How to contribute: setup, coding standards, PR guidelines |
@@ -373,7 +376,7 @@ Any model available through GitHub Copilot is supported.
  │  Event bus     │  Redis Pub/Sub                    │
  │  Database      │  MongoDB + Beanie ODM             │
  │  Vector DB     │  Qdrant (optional, for knowledge)  │
- │  Frontend      │  Single-page dashboard (JS, SSE)  │
+ │  Frontend      │  Flutter web + legacy HTML dashboard │
  │  Containers    │  Docker Compose                   │
  └────────────────┴───────────────────────────────────┘
 ```

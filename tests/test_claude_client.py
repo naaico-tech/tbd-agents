@@ -303,7 +303,7 @@ class TestClaudeExecutionRouting:
             MockProvider.get = AsyncMock(return_value=mock_provider)
 
             mock_tm.get_token_value = AsyncMock(return_value="sk-ant-test-key")
-            mock_sp.return_value = "system prompt"
+            mock_sp.return_value = ("system prompt", len("system prompt"))
             mock_repo.return_value = None
             mock_mcp.return_value = {}
             mock_km.build_knowledge_context = AsyncMock(return_value="")
