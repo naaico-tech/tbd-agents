@@ -71,6 +71,7 @@ from app.services import custom_tool_runner, token_manager
 from app.services.copilot_client import build_client
 from app.services.google_adk_runtime import (
     GoogleAdkTool,
+    build_google_adk_agent_name,
     build_google_adk_model,
     build_google_adk_runtime_config,
     build_google_adk_session_service,
@@ -2832,7 +2833,7 @@ async def _run_with_google_adk_provider(
             raise error
 
         runner_agent = LlmAgent(
-            name=f"tbd-agent-{workflow.agent_id}",
+            name=build_google_adk_agent_name(workflow.agent_id),
             model=build_google_adk_model(runtime_config),
             instruction=system_prompt,
             tools=adk_tools,

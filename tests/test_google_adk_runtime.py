@@ -7,6 +7,7 @@ from google.genai import types
 from app.models.provider import Provider, ProviderType
 from app.services.google_adk_runtime import (
     GoogleAdkTool,
+    build_google_adk_agent_name,
     build_google_adk_client_config,
     build_google_adk_model,
     build_google_adk_runtime_config,
@@ -148,6 +149,18 @@ class TestGoogleAdkRuntimeConfig:
 
 
 class TestGoogleAdkToolHelpers:
+    def test_build_google_adk_agent_name_sanitizes_hyphenated_prefix_and_object_id(self):
+        name = build_google_adk_agent_name("69dcd725dee08e7a5f417d11")
+
+        assert name == "tbd_agent_69dcd725dee08e7a5f417d11"
+        assert name.isidentifier()
+
+    def test_build_google_adk_agent_name_keeps_traceable_segments(self):
+        name = build_google_adk_agent_name("workflow-alpha.69dcd725dee08e7a5f417d11")
+
+        assert name == "tbd_agent_workflow_alpha_69dcd725dee08e7a5f417d11"
+        assert name.isidentifier()
+
     def test_extract_google_adk_text_joins_visible_parts(self):
         response = SimpleNamespace(
             candidates=[

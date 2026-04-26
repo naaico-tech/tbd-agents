@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from functools import cached_property
@@ -35,6 +36,7 @@ _ALLOWED_SCHEMA_KEYS = {
 }
 
 _GOOGLE_ADK_MODEL_PAGE_SIZE = 100
+_IDENTIFIER_SANITIZE_RE = re.compile(r"\W+")
 
 ToolExecutor = Callable[[dict[str, Any]], Awaitable[Any] | Any]
 
@@ -88,6 +90,26 @@ def resolve_google_adk_session_id(
     if isinstance(session_id, str) and session_id.strip():
         return session_id
     return fallback_session_id
+
+
+def build_google_adk_agent_name(agent_id: str, *, prefix: str = "tbd-agent") -> str:
+    """Build a stable ADK-safe agent name from a workflow agent id."""
+    raw_name = prefix if not agent_id else f"{prefix}-{agent_id}"
+    normalized = _IDENTIFIER_SANITIZE_RE.sub("_", raw_name.strip())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+
+    if not normalized:
+        return "adk_agent"
+    if normalized[0].isdigit():
+        normalized = f"adk_{normalized}"
+    if normalized.isidentifier():
+        return normalized
+
+    fallback = "".join(char if char == "_" or char.isalnum() else "_" for char in normalized)
+    fallback = re.sub(r"_+", "_", fallback).strip("_") or "adk_agent"
+    if fallback[0].isdigit():
+        fallback = f"adk_{fallback}"
+    return fallback
 
 
 def _clip_tool_description(text: str | None) -> str:
