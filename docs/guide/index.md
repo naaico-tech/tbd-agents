@@ -71,7 +71,7 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     ---
 
-    Bring your own API keys for OpenAI, Azure, Anthropic, or custom endpoints.
+    Bring your own API keys for OpenAI, Azure, Anthropic, Google ADK, or custom endpoints.
 
     [:octicons-arrow-right-24: BYOK Providers](byok-providers.md)
 

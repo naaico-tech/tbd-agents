@@ -4,7 +4,7 @@ icon: material/key-variant
 
 # BYOK Providers
 
-Bring Your Own Key (BYOK) lets you run agents against **external LLM providers** — OpenAI, Azure OpenAI, Anthropic, or a custom endpoint — using your own API keys. TBD Agents handles streaming, retries, context management, and tool orchestration identically to the built-in Copilot SDK path.
+Bring Your Own Key (BYOK) lets you run agents against **external LLM providers** — OpenAI, Azure OpenAI, Anthropic, Google ADK, or a custom endpoint — using your own API keys. TBD Agents handles streaming, retries, context management, and tool orchestration identically to the built-in Copilot SDK path where runtime support exists.
 
 ## Supported Provider Types
 
@@ -13,6 +13,7 @@ Bring Your Own Key (BYOK) lets you run agents against **external LLM providers**
 | `openai` | OpenAI API (`api.openai.com`) or any compatible proxy |
 | `azure_openai` | Azure OpenAI Service with deployment-based routing |
 | `anthropic` | Anthropic Claude via the Claude Agent SDK (`beta.agents/sessions`) |
+| `google_adk` | Stores Google ADK configuration for Gemini API keys and optional Vertex AI settings |
 | `github_copilot` | Overrides the default GitHub token with a stored PAT |
 | `custom` | Any OpenAI-compatible endpoint — set `base_url` |
 
@@ -50,6 +51,36 @@ curl -X PUT http://localhost:8000/api/agents/{agent_id} \
 ```
 
 That's it — workflows created with this agent now route to OpenAI.
+
+## Google ADK
+
+Google ADK providers can now be configured on the provider surface. Use
+`api_key_token_name` for a Gemini API key, and optionally switch the provider into
+Vertex AI mode with explicit project/location metadata:
+
+```json
+{
+  "name": "google-adk-gemini",
+  "provider_type": "google_adk",
+  "api_key_token_name": "gemini-api-key",
+  "google_use_vertex_ai": true,
+  "google_cloud_project": "my-gcp-project",
+  "google_cloud_location": "us-central1"
+}
+```
+
+When `google_use_vertex_ai` is enabled, the provider stores the values that map cleanly to `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION`.
+
+!!! note
+    `google_adk` providers now support:
+
+    - workflow execution through the in-process Google ADK runtime
+    - agent chat through the app's chat surface
+    - `/api/models?provider_id=<google-adk-provider>` model listing
+
+    Gemini API providers require the provider's stored token to contain a Gemini API
+    key. Vertex AI providers can run keyless when `google_use_vertex_ai=true` and
+    both `google_cloud_project` and `google_cloud_location` are set.
 
 ## Azure OpenAI
 

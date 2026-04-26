@@ -22,11 +22,8 @@ import logging
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from io import StringIO
-from datetime import datetime, timezone
-
-# Compatibility: UTC alias for Python 3.9-3.10 support
-UTC = timezone.utc
 
 import httpx
 
@@ -72,6 +69,17 @@ from app.observability import (
 )
 from app.services import custom_tool_runner, token_manager
 from app.services.copilot_client import build_client
+from app.services.google_adk_runtime import (
+    GoogleAdkTool,
+    build_google_adk_agent_name,
+    build_google_adk_model,
+    build_google_adk_runtime_config,
+    build_google_adk_session_service,
+    dump_google_adk_session_service,
+    google_adk_provider_requires_api_key,
+    resolve_google_adk_session_id,
+    stringify_google_adk_tool_result,
+)
 from app.services.knowledge_manager import knowledge_manager
 from app.services.memory_manager import memory_manager
 from app.services.token_counter import count_tokens, estimate_messages_tokens
@@ -85,9 +93,38 @@ _CAVEMAN_PROTECTED_RE = re.compile(
     re.DOTALL,
 )
 _CAVEMAN_STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "been", "being", "for", "from",
-    "has", "have", "in", "into", "is", "it", "of", "on", "or", "that", "the",
-    "their", "there", "this", "to", "was", "were", "will", "with", "you", "your",
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "for",
+    "from",
+    "has",
+    "have",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "their",
+    "there",
+    "this",
+    "to",
+    "was",
+    "were",
+    "will",
+    "with",
+    "you",
+    "your",
 }
 _CAVEMAN_REPLACEMENTS = (
     (re.compile(r"\bplease\b", re.IGNORECASE), ""),
@@ -244,6 +281,7 @@ def _compress_caveman_context(text: str) -> str:
     compressed = "".join(compressed_parts)
     return compressed if len(compressed) < len(text) else text
 
+
 def _clip_prompt_text(text: str, max_chars: int) -> str:
     """Trim prompt section text to a soft character budget."""
     if max_chars <= 0 or len(text) <= max_chars:
@@ -299,7 +337,11 @@ def _sanitize_json_schema(obj):
             sanitized[key] = cleaned
         return sanitized
     if isinstance(obj, list):
-        return [item for item in (_sanitize_json_schema(item) for item in obj) if item not in ({}, [], "")]
+        return [
+            item
+            for item in (_sanitize_json_schema(item) for item in obj)
+            if item not in ({}, [], "")
+        ]
     return obj
 
 
@@ -327,9 +369,7 @@ def _truncate_tool_result(text: str, max_chars: int) -> str:
     """Bound tool result size before feeding it back into the next model turn."""
     if max_chars <= 0 or len(text) <= max_chars:
         return text
-    note = (
-        f"\n\n[tool result truncated for context efficiency; original_length={len(text)} chars]"
-    )
+    note = f"\n\n[tool result truncated for context efficiency; original_length={len(text)} chars]"
     content_budget = max_chars - len(note)
     if content_budget <= 0:
         return note.lstrip()
@@ -361,11 +401,7 @@ def _render_payload_as_tsv(payload) -> str | None:
 
     preferred_keys = ("results", "rows", "items", "matches", "entries")
     table_key = next(
-        (
-            key
-            for key in preferred_keys
-            if key in payload and _looks_like_table(payload.get(key))
-        ),
+        (key for key in preferred_keys if key in payload and _looks_like_table(payload.get(key))),
         None,
     )
     if table_key is None:
@@ -388,11 +424,7 @@ def _render_payload_as_tsv(payload) -> str | None:
 
 
 def _looks_like_table(value) -> bool:
-    return (
-        isinstance(value, list)
-        and bool(value)
-        and all(isinstance(row, dict) for row in value)
-    )
+    return isinstance(value, list) and bool(value) and all(isinstance(row, dict) for row in value)
 
 
 def _render_rows_as_tsv(rows) -> str | None:
@@ -531,8 +563,8 @@ async def _build_system_prompt(
                 return False
             section = (
                 section_prefix
-                + f'{_clip_prompt_text(skill.instructions, instruction_budget)}\n'
-                + '</skill>'
+                + f"{_clip_prompt_text(skill.instructions, instruction_budget)}\n"
+                + "</skill>"
             )
             if total_skill_chars + len(section) > settings.prompt_skills_char_budget:
                 return False
@@ -562,9 +594,7 @@ async def _build_system_prompt(
 
     if getattr(workflow, "caveman", False):
         target_format = (
-            "JSON payload"
-            if workflow.output_format == OutputFormat.JSON
-            else "markdown"
+            "JSON payload" if workflow.output_format == OutputFormat.JSON else "markdown"
         )
         system_prompt += (
             "\n\n<caveman_policy>"
@@ -631,11 +661,11 @@ def _build_anthropic_system_blocks(system_prompt: str, static_prefix_len: int) -
     Anthropic requires >=1024 tokens (~4096 chars) for a cache breakpoint to be effective.
     If the static prefix is too short, return a single block without cache_control.
     """
-    _ANTHROPIC_CACHE_MIN_CHARS = 4096  # ~1024 tokens, Anthropic's minimum cacheable size
+    anthropic_cache_min_chars = 4096  # ~1024 tokens, Anthropic's minimum cacheable size
     static_text = system_prompt[:static_prefix_len]
     dynamic_text = system_prompt[static_prefix_len:]
 
-    if len(static_text) >= _ANTHROPIC_CACHE_MIN_CHARS:
+    if len(static_text) >= anthropic_cache_min_chars:
         blocks: list[dict] = [
             {
                 "type": "text",
@@ -682,10 +712,16 @@ async def _sync_repo(workflow: Workflow) -> str | None:
 
     if os.path.isdir(os.path.join(repo_dir, ".git")):
         # Pull latest
-        cmd = f"git -C {shlex.quote(repo_dir)} fetch --depth 1 origin {shlex.quote(branch)} && git -C {shlex.quote(repo_dir)} checkout FETCH_HEAD"
+        cmd = (
+            f"git -C {shlex.quote(repo_dir)} fetch --depth 1 origin {shlex.quote(branch)} "
+            f"&& git -C {shlex.quote(repo_dir)} checkout FETCH_HEAD"
+        )
     else:
         os.makedirs(repo_dir, exist_ok=True)
-        cmd = f"git clone --depth 1 --branch {shlex.quote(branch)} {shlex.quote(clone_url)} {shlex.quote(repo_dir)}"
+        cmd = (
+            f"git clone --depth 1 --branch {shlex.quote(branch)} "
+            f"{shlex.quote(clone_url)} {shlex.quote(repo_dir)}"
+        )
 
     proc = await asyncio.create_subprocess_shell(
         cmd,
@@ -716,7 +752,7 @@ def _compute_retry_delay(attempt: int, response: httpx.Response | None = None) -
                 return float(retry_after)
             except ValueError:
                 pass
-    return _RETRY_BASE_DELAY * (2 ** attempt)
+    return _RETRY_BASE_DELAY * (2**attempt)
 
 
 async def _http_post_with_retry(
@@ -739,7 +775,10 @@ async def _http_post_with_retry(
             delay = _compute_retry_delay(attempt, response)
             logger.warning(
                 "Provider returned %d, retrying in %.1fs (attempt %d/%d)",
-                response.status_code, delay, attempt + 1, max_retries,
+                response.status_code,
+                delay,
+                attempt + 1,
+                max_retries,
             )
             await asyncio.sleep(delay)
         except httpx.HTTPStatusError:
@@ -751,7 +790,10 @@ async def _http_post_with_retry(
             delay = _compute_retry_delay(attempt)
             logger.warning(
                 "Provider connection error: %s, retrying in %.1fs (attempt %d/%d)",
-                exc, delay, attempt + 1, max_retries,
+                exc,
+                delay,
+                attempt + 1,
+                max_retries,
             )
             await asyncio.sleep(delay)
     # Should not reach here, but satisfy type checker
@@ -784,7 +826,10 @@ async def _stream_chat_completion(
                 await raw_response.aclose()
                 logger.warning(
                     "Streaming: provider returned %d, retrying in %.1fs (attempt %d/%d)",
-                    raw_response.status_code, delay, attempt + 1, _MAX_RETRIES,
+                    raw_response.status_code,
+                    delay,
+                    attempt + 1,
+                    _MAX_RETRIES,
                 )
                 await asyncio.sleep(delay)
                 continue
@@ -812,7 +857,7 @@ async def _stream_chat_completion(
         async for line in raw_response.aiter_lines():
             if not line.startswith("data:"):
                 continue
-            payload = line[len("data:"):].lstrip()
+            payload = line[len("data:") :].lstrip()
             if payload == "[DONE]":
                 break
             try:
@@ -837,9 +882,13 @@ async def _stream_chat_completion(
             content_delta = delta.get("content")
             if content_delta:
                 content_parts.append(content_delta)
-                asyncio.create_task(event_bus.publish(
-                    workflow_id, "message_delta", {"delta": content_delta},
-                ))
+                asyncio.create_task(
+                    event_bus.publish(
+                        workflow_id,
+                        "message_delta",
+                        {"delta": content_delta},
+                    )
+                )
 
             # Tool call deltas
             tc_deltas = delta.get("tool_calls") or []
@@ -898,19 +947,14 @@ def _build_provider_headers(provider: Provider, api_key: str) -> dict[str, str]:
         }
 
 
-def _clear_old_tool_results(
-    messages: list[dict], keep_recent: int
-) -> tuple[list[dict], int]:
+def _clear_old_tool_results(messages: list[dict], keep_recent: int) -> tuple[list[dict], int]:
     """Replace content of older tool-result messages with a short placeholder.
 
     Keeps the *keep_recent* most recent tool-call / tool-result pairs intact.
     Returns the modified message list and the number of messages cleared.
     """
     # Identify tool-result message indices (oldest first)
-    tool_indices = [
-        i for i, m in enumerate(messages)
-        if m.get("role") == "tool"
-    ]
+    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     # Keep the last keep_recent tool results; clear the rest
     to_clear = tool_indices[: max(0, len(tool_indices) - keep_recent)]
     if not to_clear:
@@ -1086,9 +1130,7 @@ async def _connect_mcp_and_list_tools(
             elif transport_type == "sse":
                 url = server_cfg["url"]
                 headers = server_cfg.get("headers", {})
-                streams = await exit_stack.enter_async_context(
-                    sse_client(url, headers=headers)
-                )
+                streams = await exit_stack.enter_async_context(sse_client(url, headers=headers))
                 read_stream, write_stream = streams
             elif transport_type == "http":
                 url = server_cfg["url"]
@@ -1100,9 +1142,7 @@ async def _connect_mcp_and_list_tools(
             else:
                 continue
 
-            session = await exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
+            session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
             result = await session.list_tools()
 
@@ -1162,24 +1202,28 @@ def _append_custom_tool_definition(
 
     schema = tool.parameters_schema or {"type": "object", "properties": {}}
 
-    openai_defs.append({
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": _clip_tool_description(tool.description),
-            "parameters": _sanitize_json_schema(schema),
-        },
-    })
+    openai_defs.append(
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": _clip_tool_description(tool.description),
+                "parameters": _sanitize_json_schema(schema),
+            },
+        }
+    )
     allowed_keys = {"type", "properties", "required", "description", "additionalProperties"}
     claude_schema = {k: v for k, v in schema.items() if k in allowed_keys}
     claude_schema.setdefault("type", "object")
     claude_schema.setdefault("properties", {})
-    claude_defs.append({
-        "type": "custom",
-        "name": tool.name,
-        "description": _clip_tool_description(tool.description),
-        "input_schema": claude_schema,
-    })
+    claude_defs.append(
+        {
+            "type": "custom",
+            "name": tool.name,
+            "description": _clip_tool_description(tool.description),
+            "input_schema": claude_schema,
+        }
+    )
     fn_map[tool.name] = tool
     return True
 
@@ -1218,6 +1262,7 @@ async def _execute_custom_tool(
     resolved_env = None
     if getattr(tool, "env_config", None):
         from app.services import token_manager
+
         resolved_env = await token_manager.resolve_config(tool.env_config)
 
     merged_env = dict(resolved_env or {})
@@ -1280,7 +1325,10 @@ STORE_MEMORY_TOOL_OPENAI = {
                 "scope": {
                     "type": "string",
                     "enum": ["session", "agent", "global"],
-                    "description": "Memory scope: session (this workflow), agent (this agent), global (all agents)",
+                    "description": (
+                        "Memory scope: session (this workflow), "
+                        "agent (this agent), global (all agents)"
+                    ),
                     "default": "agent",
                 },
                 "metadata": {
@@ -1316,7 +1364,9 @@ STORE_MEMORY_TOOL_CLAUDE = {
             "scope": {
                 "type": "string",
                 "enum": ["session", "agent", "global"],
-                "description": "Memory scope: session (this workflow), agent (this agent), global (all agents)",
+                "description": (
+                    "Memory scope: session (this workflow), agent (this agent), global (all agents)"
+                ),
             },
             "metadata": {
                 "type": "object",
@@ -1461,9 +1511,7 @@ async def _connect_local_mcp_and_list_tools(
             )
             read_stream, write_stream = streams
 
-            session = await exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
+            session = await exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
             await session.initialize()
             result = await session.list_tools()
 
@@ -1477,7 +1525,8 @@ async def _connect_local_mcp_and_list_tools(
         except Exception as exc:
             logger.warning(
                 "Failed to connect stdio MCP server '%s' for Claude Agent SDK: %s",
-                server_name, exc,
+                server_name,
+                exc,
             )
 
     return custom_tools, tool_server_map
@@ -1502,7 +1551,14 @@ def _build_claude_agent_mcp_servers(mcp_config: dict) -> list[dict]:
 
 # All tools available in the Claude Agent SDK agent_toolset_20260401
 CLAUDE_AGENT_TOOLSET_TOOLS = [
-    "bash", "read", "write", "edit", "glob", "grep", "web_fetch", "web_search",
+    "bash",
+    "read",
+    "write",
+    "edit",
+    "glob",
+    "grep",
+    "web_fetch",
+    "web_search",
 ]
 
 
@@ -1514,6 +1570,7 @@ def _copilot_tool_uses_mcp_allowlist(tool_name: str) -> bool:
     apply a second global allowlist check.
     """
     return False
+
 
 def _build_claude_agent_tools(
     native_mcp_servers: list[dict],
@@ -1612,9 +1669,9 @@ async def _run_with_claude_sdk(
             )
             if custom_tools:
                 await _log(
-                    workflow, "tools_discovered",
-                    f"{len(custom_tools)} local tool(s): "
-                    f"{[t['name'] for t in custom_tools]}"[:200],
+                    workflow,
+                    "tools_discovered",
+                    f"{len(custom_tools)} local tool(s): {[t['name'] for t in custom_tools]}"[:200],
                     task_exec,
                 )
 
@@ -1624,14 +1681,18 @@ async def _run_with_claude_sdk(
         try:
             _agent_for_claude = await Agent.get(workflow.agent_id)
             if _agent_for_claude and _agent_for_claude.custom_tool_ids:
-                _, _ct_claude_defs, custom_python_tool_map_claude = await _build_custom_tools_config(
-                    _agent_for_claude.custom_tool_ids
-                )
+                (
+                    _,
+                    _ct_claude_defs,
+                    custom_python_tool_map_claude,
+                ) = await _build_custom_tools_config(_agent_for_claude.custom_tool_ids)
                 if _ct_claude_defs:
                     custom_tools.extend(_ct_claude_defs)
                     await _log(
-                        workflow, "custom_tools_loaded",
-                        f"{len(_ct_claude_defs)} custom Python tool(s): {[t['name'] for t in _ct_claude_defs]}",
+                        workflow,
+                        "custom_tools_loaded",
+                        f"{len(_ct_claude_defs)} custom Python tool(s): "
+                        f"{[t['name'] for t in _ct_claude_defs]}",
                         task_exec,
                     )
         except Exception as _ct_exc:
@@ -1657,7 +1718,8 @@ async def _run_with_claude_sdk(
         native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
         if native_mcp_servers:
             await _log(
-                workflow, "mcp_native",
+                workflow,
+                "mcp_native",
                 f"{len(native_mcp_servers)} native MCP server(s): "
                 f"{[s['name'] for s in native_mcp_servers]}",
                 task_exec,
@@ -1667,11 +1729,14 @@ async def _run_with_claude_sdk(
         # Add store_memory as a custom tool
         custom_tools.append(STORE_MEMORY_TOOL_CLAUDE)
         agent_tools = _build_claude_agent_tools(
-            native_mcp_servers, custom_tools, builtin_tools=builtin_tools,
+            native_mcp_servers,
+            custom_tools,
+            builtin_tools=builtin_tools,
         )
 
         await _log(
-            workflow, "model_call",
+            workflow,
+            "model_call",
             f"Creating Claude Agent SDK session for {model} "
             f"(provider: '{provider.name}', tools: {len(agent_tools)}, "
             f"native_mcp: {len(native_mcp_servers)})",
@@ -1717,10 +1782,12 @@ async def _run_with_claude_sdk(
         # ── Send user message ────────────────────────────────────────────────
         await client.beta.sessions.events.send(
             session.id,
-            events=[{
-                "type": "user.message",
-                "content": [{"type": "text", "text": user_prompt}],
-            }],
+            events=[
+                {
+                    "type": "user.message",
+                    "content": [{"type": "text", "text": user_prompt}],
+                }
+            ],
         )
 
         # ── Stream events ────────────────────────────────────────────────────
@@ -1741,7 +1808,8 @@ async def _run_with_claude_sdk(
                     content = "".join(text_parts)
                     assistant_messages.append(content)
                     await event_bus.publish(
-                        str(workflow.id), "message",
+                        str(workflow.id),
+                        "message",
                         {"role": "assistant", "content": content},
                     )
                     await _log(workflow, "model_response", content[:200], task_exec)
@@ -1757,16 +1825,17 @@ async def _run_with_claude_sdk(
                     tool_use_id = event.id
 
                     await _log(
-                        workflow, "tool_call", tool_name, task_exec,
+                        workflow,
+                        "tool_call",
+                        tool_name,
+                        task_exec,
                         tool_input=json.dumps(tool_args, default=str)[:500],
                     )
                     tool_calls_total.labels(tool_name=tool_name).inc()
 
                     # Execute — built-in memory, custom Python, or local MCP session
                     if tool_name == "store_memory":
-                        tool_result = await _handle_store_memory(
-                            workflow.agent_id, tool_args
-                        )
+                        tool_result = await _handle_store_memory(workflow.agent_id, tool_args)
                     elif tool_name in custom_python_tool_map_claude:
                         tool_result = await _execute_custom_tool(
                             tool_name,
@@ -1776,14 +1845,19 @@ async def _run_with_claude_sdk(
                         )
                     else:
                         tool_result = await _execute_mcp_tool(
-                            tool_name, tool_args, tool_server_map,
+                            tool_name,
+                            tool_args,
+                            tool_server_map,
                         )
                     tool_result_for_model = _format_tool_result_for_context(
                         tool_result,
                         prefer_tsv=workflow.tsv_tool_results,
                     )
                     await _log(
-                        workflow, "tool_result", f"{tool_name} completed", task_exec,
+                        workflow,
+                        "tool_result",
+                        f"{tool_name} completed",
+                        task_exec,
                         tool_output=tool_result_for_model[:500],
                     )
                     if tool_name == "store_memory":
@@ -1792,11 +1866,13 @@ async def _run_with_claude_sdk(
                     # Send result back to the Claude Agent SDK session
                     await client.beta.sessions.events.send(
                         session.id,
-                        events=[{
-                            "type": "user.custom_tool_result",
-                            "custom_tool_use_id": tool_use_id,
-                            "content": [{"type": "text", "text": tool_result_for_model}],
-                        }],
+                        events=[
+                            {
+                                "type": "user.custom_tool_result",
+                                "custom_tool_use_id": tool_use_id,
+                                "content": [{"type": "text", "text": tool_result_for_model}],
+                            }
+                        ],
                     )
 
                 elif ev_type == "agent.mcp_tool_use":
@@ -1806,8 +1882,10 @@ async def _run_with_claude_sdk(
                     mcp_server = event.mcp_server_name
                     tool_args = dict(event.input) if event.input else {}
                     await _log(
-                        workflow, "tool_call",
-                        f"{tool_name} (mcp:{mcp_server})", task_exec,
+                        workflow,
+                        "tool_call",
+                        f"{tool_name} (mcp:{mcp_server})",
+                        task_exec,
                         tool_input=json.dumps(tool_args, default=str)[:500],
                     )
                     tool_calls_total.labels(tool_name=tool_name).inc()
@@ -1842,7 +1920,8 @@ async def _run_with_claude_sdk(
                             mu.cache_creation_input_tokens
                         )
                     await event_bus.publish(
-                        str(workflow.id), "usage",
+                        str(workflow.id),
+                        "usage",
                         {
                             "total_input_tokens": total_input_tokens,
                             "total_output_tokens": total_output_tokens,
@@ -1865,7 +1944,8 @@ async def _run_with_claude_sdk(
                     stop_reason = event.stop_reason
                     reason_type = getattr(stop_reason, "type", "unknown")
                     await _log(
-                        workflow, "session_idle",
+                        workflow,
+                        "session_idle",
                         f"Stop reason: {reason_type}",
                         task_exec,
                     )
@@ -1899,7 +1979,8 @@ async def _run_with_claude_sdk(
         # ── Publish final message ────────────────────────────────────────────
         if final_text:
             await event_bus.publish(
-                str(workflow.id), "message",
+                str(workflow.id),
+                "message",
                 {"role": "assistant", "content": final_text},
             )
 
@@ -1914,7 +1995,8 @@ async def _run_with_claude_sdk(
                     task_exec,
                 )
                 await event_bus.publish(
-                    str(workflow.id), "output_guardrail_violation",
+                    str(workflow.id),
+                    "output_guardrail_violation",
                     {"violations": output_violations},
                 )
 
@@ -1935,7 +2017,12 @@ async def _run_with_claude_sdk(
         if tool_call_count:
             tool_calls_per_task.labels(model=model).observe(tool_call_count)
 
-        await _log(workflow, "completed", f"Final status: completed (tool_calls: {tool_call_count})", task_exec)
+        await _log(
+            workflow,
+            "completed",
+            f"Final status: completed (tool_calls: {tool_call_count})",
+            task_exec,
+        )
         await _publish_status(workflow, "completed")
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
@@ -2022,6 +2109,7 @@ async def _run_with_custom_provider(
 
     try:
         from contextlib import AsyncExitStack
+
         mcp_exit_stack = AsyncExitStack()
         await mcp_exit_stack.__aenter__()
 
@@ -2043,12 +2131,15 @@ async def _run_with_custom_provider(
                 mcp_config, allowed_tools_set, mcp_exit_stack
             )
             if openai_tools:
-                tools_chars = len(json.dumps(openai_tools, ensure_ascii=False, separators=(",", ":")))
+                tools_chars = len(
+                    json.dumps(openai_tools, ensure_ascii=False, separators=(",", ":"))
+                )
                 tools_tokens = _estimate_tools_tokens(openai_tools)
                 await _log(
                     workflow,
                     "tools_discovered",
-                    f"{len(openai_tools)} tool(s) available (~{tools_tokens} tokens, {tools_chars} chars): "
+                    f"{len(openai_tools)} tool(s) available "
+                    f"(~{tools_tokens} tokens, {tools_chars} chars): "
                     f"{[t['function']['name'] for t in openai_tools][:12]}",
                     task_exec,
                 )
@@ -2065,8 +2156,10 @@ async def _run_with_custom_provider(
                 if _ct_openai:
                     openai_tools.extend(_ct_openai)
                     await _log(
-                        workflow, "custom_tools_loaded",
-                        f"{len(_ct_openai)} custom Python tool(s): {[t['function']['name'] for t in _ct_openai]}",
+                        workflow,
+                        "custom_tools_loaded",
+                        f"{len(_ct_openai)} custom Python tool(s): "
+                        f"{[t['function']['name'] for t in _ct_openai]}",
                         task_exec,
                     )
         except Exception as _ct_exc:
@@ -2134,21 +2227,28 @@ async def _run_with_custom_provider(
                     and len(messages) > 4
                 ):
                     await _log(
-                        workflow, "compaction_start",
+                        workflow,
+                        "compaction_start",
                         f"Compacting context (request≈{current_prompt_tokens} tokens, "
                         f"messages={len(messages)}, tools={len(openai_tools)})",
                         task_exec,
                     )
                     _msgs_before = len(messages)
-                    messages = _compact_messages(messages, model=model, context_window=context_window)
+                    messages = _compact_messages(
+                        messages, model=model, context_window=context_window
+                    )
                     compacted_count = len(messages)
                     _dropped = _msgs_before - compacted_count + 1  # +1 for injected compaction note
                     context_compactions_total.labels(model=model).inc()
-                    context_compaction_messages_dropped.labels(model=model).observe(max(0, _dropped))
+                    context_compaction_messages_dropped.labels(model=model).observe(
+                        max(0, _dropped)
+                    )
                     await _log(
-                        workflow, "compaction_complete",
+                        workflow,
+                        "compaction_complete",
                         f"Compacted to {compacted_count} messages "
-                        f"(request≈{_estimate_request_tokens(messages, openai_tools, model)} tokens)",
+                        f"(request≈"
+                        f"{_estimate_request_tokens(messages, openai_tools, model)} tokens)",
                         task_exec,
                     )
 
@@ -2159,7 +2259,11 @@ async def _run_with_custom_provider(
 
                 try:
                     response = await _stream_chat_completion(
-                        http, url, headers, body, str(workflow.id),
+                        http,
+                        url,
+                        headers,
+                        body,
+                        str(workflow.id),
                     )
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 429:
@@ -2171,7 +2275,8 @@ async def _run_with_custom_provider(
                             wait_secs = 5.0
                         wait_secs = min(wait_secs, 60.0)
                         await _log(
-                            workflow, "rate_limited",
+                            workflow,
+                            "rate_limited",
                             f"Provider rate-limited; retrying after {wait_secs:.0f}s",
                             task_exec,
                         )
@@ -2213,7 +2318,9 @@ async def _run_with_custom_provider(
                         tool_name = func.get("name", "unknown")
                         raw_args = func.get("arguments", "{}")
                         try:
-                            tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                            tool_args = (
+                                json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                            )
                         except json.JSONDecodeError:
                             tool_args = {}
 
@@ -2224,7 +2331,10 @@ async def _run_with_custom_provider(
                                 await _update_progress(workflow, task_exec, progress)
 
                         await _log(
-                            workflow, "tool_call", tool_name, task_exec,
+                            workflow,
+                            "tool_call",
+                            tool_name,
+                            task_exec,
                             tool_input=json.dumps(tool_args)[:500],
                         )
 
@@ -2247,9 +2357,7 @@ async def _run_with_custom_provider(
                                 )
                         except Exception as tool_exc:
                             tool_result = f"Tool execution error: {tool_exc}"
-                            logger.warning(
-                                "Tool '%s' raised an exception: %s", tool_name, tool_exc
-                            )
+                            logger.warning("Tool '%s' raised an exception: %s", tool_name, tool_exc)
 
                         tool_result_for_model = _format_tool_result_for_context(
                             tool_result,
@@ -2257,38 +2365,53 @@ async def _run_with_custom_provider(
                         )
 
                         await _log(
-                            workflow, "tool_result", f"{tool_name} completed", task_exec,
+                            workflow,
+                            "tool_result",
+                            f"{tool_name} completed",
+                            task_exec,
                             tool_output=tool_result_for_model[:500],
                         )
                         if tool_name == "store_memory":
                             await _log_store_memory_result(workflow, task_exec, tool_result)
 
                         # Append tool result to conversation
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.get("id", ""),
-                            "content": _truncate_tool_result(
-                                tool_result_for_model,
-                                settings.tool_result_context_max_chars,
-                            ),
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.get("id", ""),
+                                "content": _truncate_tool_result(
+                                    tool_result_for_model,
+                                    settings.tool_result_context_max_chars,
+                                ),
+                            }
+                        )
 
                     # Check max turns
                     if tool_call_count >= max_turns:
                         await _log(
-                            workflow, "max_turns",
+                            workflow,
+                            "max_turns",
                             f"Reached max tool turns ({max_turns}), requesting final answer",
                             task_exec,
                         )
                         # Ask model for a final answer without tools
-                        messages.append({
-                            "role": "user",
-                            "content": "You have reached the maximum number of tool calls. "
-                            "Please provide your final answer based on the information gathered so far.",
-                        })
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "You have reached the maximum number of tool calls. "
+                                    "Please provide your final answer based on the "
+                                    "information gathered so far."
+                                ),
+                            }
+                        )
                         final_body = {"model": model, "messages": messages}
                         final_data = await _stream_chat_completion(
-                            http, url, headers, final_body, str(workflow.id),
+                            http,
+                            url,
+                            headers,
+                            final_body,
+                            str(workflow.id),
                         )
                         fu = final_data.get("usage", {})
                         total_input_tokens += int(fu.get("prompt_tokens", 0))
@@ -2343,7 +2466,8 @@ async def _run_with_custom_provider(
                     task_exec,
                 )
                 await event_bus.publish(
-                    str(workflow.id), "output_guardrail_violation",
+                    str(workflow.id),
+                    "output_guardrail_violation",
                     {"violations": output_violations},
                 )
 
@@ -2360,16 +2484,17 @@ async def _run_with_custom_provider(
             task_final_status = TaskStatus.COMPLETED
 
         await _log(
-            workflow, "completed",
+            workflow,
+            "completed",
             f"Final status: {task_final_status} (tool_calls: {tool_call_count})",
             task_exec,
         )
         await _publish_status(workflow, task_final_status)
 
         task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
-        agent_task_duration_seconds.labels(
-            model=model, status=task_final_status
-        ).observe(task_duration)
+        agent_task_duration_seconds.labels(model=model, status=task_final_status).observe(
+            task_duration
+        )
         if usage.total_cost > 0:
             cost_per_task_dollars.labels(model=model).observe(usage.total_cost)
 
@@ -2424,6 +2549,475 @@ async def _run_with_custom_provider(
     return final_text
 
 
+def _extract_google_adk_text(event) -> str:
+    """Collect visible assistant text parts from a Google ADK event."""
+    if not getattr(event, "content", None) or not getattr(event.content, "parts", None):
+        return ""
+    parts: list[str] = []
+    for part in event.content.parts:
+        text = getattr(part, "text", None)
+        if not text or getattr(part, "thought", False):
+            continue
+        parts.append(text)
+    return "".join(parts)
+
+
+def _apply_google_adk_usage(usage: UsageStats, usage_metadata) -> bool:
+    """Accumulate Google ADK usage metadata into the workflow usage object."""
+    if not usage_metadata:
+        return False
+
+    prompt_tokens = int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
+    tool_prompt_tokens = int(getattr(usage_metadata, "tool_use_prompt_token_count", 0) or 0)
+    output_tokens = int(getattr(usage_metadata, "candidates_token_count", 0) or 0)
+    cache_read_tokens = int(getattr(usage_metadata, "cached_content_token_count", 0) or 0)
+
+    changed = any((prompt_tokens, tool_prompt_tokens, output_tokens, cache_read_tokens))
+    if not changed:
+        return False
+
+    usage.total_input_tokens += prompt_tokens + tool_prompt_tokens
+    usage.total_output_tokens += output_tokens
+    usage.total_cache_read_tokens += cache_read_tokens
+    return True
+
+
+async def _run_with_google_adk_provider(
+    workflow: Workflow,
+    user_prompt: str,
+    system_prompt: str,
+    provider: Provider,
+    api_key: str | None,
+    task_exec: TaskExecution | None,
+    *,
+    repo_path: str | None = None,
+    mcp_config: dict | None = None,
+    allowed_tools_set: set[str] | None = None,
+) -> str | None:
+    """Execute a workflow in-process through Google ADK."""
+    from contextlib import AsyncExitStack
+
+    from google.adk.agents import LlmAgent
+    from google.adk.runners import Runner
+    from google.genai import types
+
+    model = workflow.model
+    max_turns = workflow.max_turns
+    task_start_time = datetime.now(UTC)
+    agent_tasks_active.inc()
+    usage = UsageStats()
+    final_text: str | None = None
+    tool_call_count = 0
+    max_turns_reached = False
+    max_turns_logged = False
+    assistant_messages: list[str] = []
+    partial_text: list[str] = []
+
+    mcp_exit_stack = AsyncExitStack()
+    await mcp_exit_stack.__aenter__()
+    app_name = "tbd-agents-google-adk"
+    session_id = resolve_google_adk_session_id(
+        app_name=app_name,
+        user_id=workflow.github_user,
+        fallback_session_id=str(workflow.id),
+        persisted_session=workflow.google_adk_session,
+    )
+    session_service = None
+
+    try:
+        runtime_config = build_google_adk_runtime_config(provider, api_key, model)
+
+        agent = await Agent.get(workflow.agent_id)
+        if not agent:
+            raise ValueError("Agent not found for Google ADK execution")
+
+        if agent.builtin_tools:
+            unsupported = ", ".join(agent.builtin_tools)
+            raise ValueError(
+                f"Google ADK runtime does not support Copilot built-in tools yet: {unsupported}"
+            )
+
+        adk_tools: list[GoogleAdkTool] = []
+        tool_server_map: dict = {}
+
+        if mcp_config:
+            openai_tools, tool_server_map = await _connect_mcp_and_list_tools(
+                mcp_config,
+                allowed_tools_set,
+                mcp_exit_stack,
+            )
+            for tool_def in openai_tools:
+                function_def = tool_def.get("function", {})
+                tool_name = function_def.get("name")
+                if not tool_name:
+                    continue
+                adk_tools.append(
+                    GoogleAdkTool(
+                        name=tool_name,
+                        description=function_def.get("description", ""),
+                        schema=function_def.get("parameters"),
+                        executor=(
+                            lambda args, tool_name=tool_name: _execute_mcp_tool(
+                                tool_name, args, tool_server_map
+                            )
+                        ),
+                    )
+                )
+            if openai_tools:
+                await _log(
+                    workflow,
+                    "tools_discovered",
+                    f"{len(openai_tools)} MCP tool(s) bridged into Google ADK: "
+                    f"{[t['function']['name'] for t in openai_tools][:12]}",
+                    task_exec,
+                )
+
+        custom_python_tool_map: dict[str, CustomTool] = {}
+        custom_tool_runtime_env = _build_custom_tool_runtime_env(repo_path)
+        try:
+            if agent.custom_tool_ids:
+                openai_defs, _, custom_python_tool_map = await _build_custom_tools_config(
+                    agent.custom_tool_ids
+                )
+                for tool_def in openai_defs:
+                    function_def = tool_def.get("function", {})
+                    tool_name = function_def.get("name")
+                    if not tool_name:
+                        continue
+                    adk_tools.append(
+                        GoogleAdkTool(
+                            name=tool_name,
+                            description=function_def.get("description", ""),
+                            schema=function_def.get("parameters"),
+                            executor=(
+                                lambda args, tool_name=tool_name: _execute_custom_tool(
+                                    tool_name,
+                                    args,
+                                    custom_python_tool_map,
+                                    runtime_env=custom_tool_runtime_env,
+                                )
+                            ),
+                        )
+                    )
+                if openai_defs:
+                    await _log(
+                        workflow,
+                        "custom_tools_loaded",
+                        f"{len(openai_defs)} custom Python tool(s): "
+                        f"{[t['function']['name'] for t in openai_defs]}",
+                        task_exec,
+                    )
+        except Exception as exc:
+            logger.debug("Custom tool lookup skipped for Google ADK: %s", exc)
+
+        if repo_path:
+            repo_tool = await _load_builtin_repo_inspector_tool()
+            repo_openai_defs: list[dict] = []
+            if _append_custom_tool_definition(
+                repo_tool,
+                repo_openai_defs,
+                [],
+                custom_python_tool_map,
+            ):
+                repo_tool_def = repo_openai_defs[0]["function"]
+                repo_tool_name = repo_tool_def["name"]
+                adk_tools.append(
+                    GoogleAdkTool(
+                        name=repo_tool_name,
+                        description=repo_tool_def.get("description", ""),
+                        schema=repo_tool_def.get("parameters"),
+                        executor=(
+                            lambda args, tool_name=repo_tool_name: _execute_custom_tool(
+                                tool_name,
+                                args,
+                                custom_python_tool_map,
+                                runtime_env=custom_tool_runtime_env,
+                            )
+                        ),
+                    )
+                )
+                await _log(
+                    workflow,
+                    "repo_tool_loaded",
+                    "repo_inspector exposed for repository-aware file inspection",
+                    task_exec,
+                )
+
+        adk_tools.append(
+            GoogleAdkTool(
+                name="store_memory",
+                description=STORE_MEMORY_TOOL_OPENAI["function"]["description"],
+                schema=STORE_MEMORY_TOOL_OPENAI["function"]["parameters"],
+                executor=lambda args: _handle_store_memory(workflow.agent_id, args),
+            )
+        )
+
+        await _log(
+            workflow,
+            "model_call",
+            "Creating Google ADK runner "
+            f"for {model} via provider '{provider.name}' "
+            f"(vertex_ai={runtime_config['use_vertex_ai']}, tools={len(adk_tools)})",
+            task_exec,
+        )
+
+        async def _mark_max_turns_reached() -> None:
+            nonlocal max_turns_reached, max_turns_logged
+            max_turns_reached = True
+            if max_turns_logged:
+                return
+            max_turns_logged = True
+            await _log(
+                workflow,
+                "max_turns",
+                f"Reached max tool turns ({max_turns}), requesting final answer",
+                task_exec,
+            )
+
+        async def _before_tool_callback(tool, args, tool_context):
+            nonlocal tool_call_count
+            tool_call_count += 1
+
+            if tool.name == "manage_todo_list":
+                progress = _parse_todo_list(args)
+                if progress:
+                    await _update_progress(workflow, task_exec, progress)
+
+            await _log(
+                workflow,
+                "tool_call",
+                tool.name,
+                task_exec,
+                tool_input=json.dumps(args, default=str)[:500],
+            )
+            tool_calls_total.labels(tool_name=str(tool.name)).inc()
+
+            if tool_call_count > max_turns:
+                await _mark_max_turns_reached()
+                return {
+                    "error": f"Maximum number of tool calls ({max_turns}) reached.",
+                    "max_turns_reached": True,
+                    "message": (
+                        "Do not call more tools. Provide your final answer based on the "
+                        "information gathered so far."
+                    ),
+                }
+            return None
+
+        async def _after_tool_callback(tool, args, tool_context, tool_response):
+            tool_output = stringify_google_adk_tool_result(tool_response)
+            await _log(
+                workflow,
+                "tool_result",
+                f"{tool.name} completed",
+                task_exec,
+                tool_output=tool_output[:500],
+            )
+            if tool.name == "store_memory":
+                await _log_store_memory_result(workflow, task_exec, tool_output)
+            if tool_call_count >= max_turns:
+                await _mark_max_turns_reached()
+            return None
+
+        async def _on_tool_error_callback(tool, args, tool_context, error):
+            tool_output = json.dumps({"error": str(error)}, ensure_ascii=False)
+            await _log(
+                workflow,
+                "tool_result",
+                f"{tool.name} FAILED",
+                task_exec,
+                tool_output=tool_output[:500],
+            )
+            if tool.name == "store_memory":
+                await _log_store_memory_result(workflow, task_exec, tool_output)
+            raise error
+
+        runner_agent = LlmAgent(
+            name=build_google_adk_agent_name(workflow.agent_id),
+            model=build_google_adk_model(runtime_config),
+            instruction=system_prompt,
+            tools=adk_tools,
+            before_tool_callback=_before_tool_callback,
+            after_tool_callback=_after_tool_callback,
+            on_tool_error_callback=_on_tool_error_callback,
+        )
+        session_service, restored_session = await build_google_adk_session_service(
+            app_name=app_name,
+            user_id=workflow.github_user,
+            session_id=session_id,
+            persisted_session=workflow.google_adk_session,
+        )
+        runner = Runner(
+            app_name=app_name,
+            agent=runner_agent,
+            session_service=session_service,
+        )
+
+        workflow.session_id = session_id
+        await workflow.save()
+        await _log(
+            workflow,
+            "session_resumed" if restored_session else "session_created",
+            (
+                f"Reusing Google ADK session '{session_id}'"
+                if restored_session
+                else f"Created Google ADK session '{session_id}'"
+            ),
+            task_exec,
+        )
+
+        async for event in runner.run_async(
+            user_id=workflow.github_user,
+            session_id=session_id,
+            new_message=types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_prompt)],
+            ),
+        ):
+            if await event_bus.check_halt(str(workflow.id)):
+                await event_bus.clear_halt(str(workflow.id))
+                await _log(workflow, "halted", "Execution halted by user", task_exec)
+                await _publish_status(workflow, "halted")
+                if task_exec:
+                    task_exec.status = TaskStatus.HALTED
+                    task_exec.finished_at = datetime.now(UTC)
+                    task_exec.tool_calls = tool_call_count
+                    await task_exec.save()
+                await workflow.save()
+                return None
+
+            if _apply_google_adk_usage(usage, getattr(event, "usage_metadata", None)):
+                await event_bus.publish(
+                    str(workflow.id),
+                    "usage",
+                    usage.model_dump(),
+                )
+
+            event_text = _extract_google_adk_text(event)
+            if event_text:
+                if getattr(event, "partial", False):
+                    partial_text.append(event_text)
+                    await event_bus.publish(
+                        str(workflow.id),
+                        "message_delta",
+                        {"delta": event_text},
+                    )
+                elif not event.get_function_calls() and not event.get_function_responses():
+                    assistant_messages.append(event_text)
+                    final_text = event_text
+                    await event_bus.publish(
+                        str(workflow.id),
+                        "message",
+                        {"role": "assistant", "content": event_text},
+                    )
+                    await _log(
+                        workflow,
+                        "model_response",
+                        event_text[:200],
+                        task_exec,
+                    )
+
+            if getattr(event, "error_message", None):
+                raise RuntimeError(event.error_message)
+
+        if final_text is None and partial_text:
+            final_text = "".join(partial_text)
+
+        workflow.usage = usage
+        if usage.total_input_tokens:
+            tokens_total.labels(direction="input", model=model).inc(usage.total_input_tokens)
+        if usage.total_output_tokens:
+            tokens_total.labels(direction="output", model=model).inc(usage.total_output_tokens)
+        if usage.total_cache_read_tokens:
+            tokens_total.labels(direction="cache_read", model=model).inc(
+                usage.total_cache_read_tokens
+            )
+        if tool_call_count:
+            tool_calls_per_task.labels(model=model).observe(tool_call_count)
+
+        workflow.messages.append(Message(role="assistant", content=final_text or ""))
+
+        if final_text:
+            output_violations = await enforce_output_guardrails(workflow, final_text)
+            if output_violations:
+                await _log(
+                    workflow,
+                    "output_guardrail_violation",
+                    "; ".join(output_violations),
+                    task_exec,
+                )
+                await event_bus.publish(
+                    str(workflow.id),
+                    "output_guardrail_violation",
+                    {"violations": output_violations},
+                )
+
+        if final_text and workflow.output_format == OutputFormat.JSON:
+            final_text = json.dumps({"response": final_text})
+
+        task_final_status = (
+            TaskStatus.MAX_TURNS_REACHED
+            if max_turns_reached or tool_call_count >= max_turns
+            else TaskStatus.COMPLETED
+        )
+        await _log(
+            workflow,
+            "completed",
+            f"Final status: {task_final_status} (tool_calls: {tool_call_count})",
+            task_exec,
+        )
+        await _publish_status(workflow, task_final_status)
+
+        task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
+        agent_task_duration_seconds.labels(
+            model=model,
+            status=task_final_status,
+        ).observe(task_duration)
+
+        if task_exec:
+            task_exec.status = task_final_status
+            task_exec.finished_at = datetime.now(UTC)
+            task_exec.tool_calls = tool_call_count
+            task_exec.response = final_text
+            task_exec.usage = usage
+            task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
+            await task_exec.save()
+
+        await workflow.save()
+    except Exception as exc:
+        await _log(workflow, "error", str(exc), task_exec)
+        await _publish_status(workflow, "failed")
+        logger.exception("Google ADK run failed for workflow %s", workflow.id)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            task_exec.tool_calls = tool_call_count
+            await task_exec.save()
+        final_text = None
+        await workflow.save()
+    finally:
+        try:
+            if session_service is not None:
+                workflow.google_adk_session = dump_google_adk_session_service(
+                    session_service,
+                    app_name=app_name,
+                    user_id=workflow.github_user,
+                    session_id=session_id,
+                )
+                await workflow.save()
+            await mcp_exit_stack.__aexit__(None, None, None)
+        except Exception:
+            pass
+        agent_tasks_active.dec()
+        agent_tasks_total.labels(
+            status=task_exec.status if task_exec else "completed",
+            model=model,
+            reasoning_effort="default",
+        ).inc()
+
+    return final_text
+
+
 # ── Main Execution ───────────────────────────────────────────────────────────
 
 
@@ -2450,6 +3044,7 @@ async def run_agent(
     task_exec: TaskExecution | None = None
     if task_execution_id:
         from beanie import PydanticObjectId
+
         task_exec = await TaskExecution.get(PydanticObjectId(task_execution_id))
         if task_exec:
             task_exec.status = TaskStatus.RUNNING
@@ -2483,11 +3078,10 @@ async def run_agent(
     if agent.provider_id:
         try:
             from beanie import PydanticObjectId as _ObjId
+
             provider = await Provider.get(_ObjId(agent.provider_id))
         except Exception as _exc:
-            logger.warning(
-                "Failed to resolve provider_id '%s': %s", agent.provider_id, _exc
-            )
+            logger.warning("Failed to resolve provider_id '%s': %s", agent.provider_id, _exc)
             provider = None
         if provider:
             resolved_key = await token_manager.get_token_value(provider.api_key_token_name)
@@ -2510,6 +3104,18 @@ async def run_agent(
                         f"Using BYOK provider '{provider.name}' ({provider.provider_type})",
                         task_exec,
                     )
+            elif (
+                provider.provider_type == ProviderType.GOOGLE_ADK
+                and not google_adk_provider_requires_api_key(provider)
+            ):
+                custom_provider = provider
+                custom_provider_key = None
+                await _log(
+                    workflow,
+                    "provider_resolved",
+                    f"Using keyless Google ADK provider '{provider.name}' via Vertex AI",
+                    task_exec,
+                )
             else:
                 await _log(
                     workflow,
@@ -2614,7 +3220,8 @@ async def run_agent(
                 workflow,
                 "knowledge_loaded",
                 f"{len(knowledge_sources_list)} knowledge source(s) resolved "
-                f"({len(knowledge_context)} chars, ~{_estimate_text_tokens(knowledge_context)} tokens)",
+                f"({len(knowledge_context)} chars, "
+                f"~{_estimate_text_tokens(knowledge_context)} tokens)",
                 task_exec,
             )
             if workflow.caveman:
@@ -2623,7 +3230,8 @@ async def run_agent(
                     await _log(
                         workflow,
                         "caveman_context",
-                        f"Compressed knowledge context {len(knowledge_context)}→{len(compressed)} chars",
+                        f"Compressed knowledge context "
+                        f"{len(knowledge_context)}→{len(compressed)} chars",
                         task_exec,
                     )
                     knowledge_context = compressed
@@ -2660,7 +3268,8 @@ async def run_agent(
                         await _log(
                             workflow,
                             "caveman_context",
-                            f"Compressed memory context {len(memory_context)}→{len(compressed)} chars",
+                            f"Compressed memory context "
+                            f"{len(memory_context)}→{len(compressed)} chars",
                             task_exec,
                         )
                         memory_context = compressed
@@ -2684,7 +3293,8 @@ async def run_agent(
             f"URL: {workflow.repo_url}\n"
             f"Branch: {workflow.repo_branch or 'main'}\n"
             f"Use repository-aware tools to inspect this path when available. "
-            f"If the repo_inspector tool is exposed, prefer it for listing, searching, and reading files instead of attempting shell access.\n"
+            f"If the repo_inspector tool is exposed, prefer it for listing, "
+            f"searching, and reading files instead of attempting shell access.\n"
             f"</repository>"
         )
         system_prompt += repo_context
@@ -2696,7 +3306,8 @@ async def run_agent(
         workflow,
         "context_budget",
         "Prompt context assembled "
-        f"(base_system={len(agent.system_prompt)} chars, assembled_system={assembled_system_chars} chars, "
+        f"(base_system={len(agent.system_prompt)} chars, "
+        f"assembled_system={assembled_system_chars} chars, "
         f"knowledge={len(knowledge_context)} chars, memory={len(memory_context)} chars, "
         f"repo={len(repo_context)} chars, total={len(system_prompt)} chars, "
         f"~{_estimate_text_tokens(system_prompt, workflow.model)} tokens)",
@@ -2704,7 +3315,9 @@ async def run_agent(
     )
 
     # ── Route to custom provider if set ──────────────────────────────────────
-    if custom_provider and custom_provider_key:
+    if custom_provider and (
+        custom_provider_key or custom_provider.provider_type == ProviderType.GOOGLE_ADK
+    ):
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
             return await _run_with_claude_sdk(
@@ -2715,10 +3328,22 @@ async def run_agent(
                 custom_provider,
                 custom_provider_key,
                 task_exec,
-                    repo_path=repo_path,
+                repo_path=repo_path,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
                 builtin_tools=agent.builtin_tools or None,
+            )
+        if custom_provider.provider_type == ProviderType.GOOGLE_ADK:
+            return await _run_with_google_adk_provider(
+                workflow,
+                user_prompt,
+                system_prompt,
+                custom_provider,
+                custom_provider_key,
+                task_exec,
+                repo_path=repo_path,
+                mcp_config=mcp_config,
+                allowed_tools_set=allowed_tools_set,
             )
         return await _run_with_custom_provider(
             workflow,
@@ -2763,9 +3388,14 @@ async def run_agent(
     def permission_handler(request, invocation):
         """Auto-approve but enforce max tool-call turns."""
         nonlocal tool_call_count
-        kind = request.get("kind", "") if isinstance(request, dict) else (
-            request.kind.value if hasattr(request, "kind") and hasattr(request.kind, "value")
-            else str(getattr(request, "kind", ""))
+        kind = (
+            request.get("kind", "")
+            if isinstance(request, dict)
+            else (
+                request.kind.value
+                if hasattr(request, "kind") and hasattr(request.kind, "value")
+                else str(getattr(request, "kind", ""))
+            )
         )
         if kind in ("custom-tool", "mcp", "shell"):
             tool_call_count += 1
@@ -2791,17 +3421,13 @@ async def run_agent(
                 _log(workflow, "tool_denied", f"{tool_name} — max turns exceeded", task_exec)
             )
             return {"permissionDecision": "deny", "permissionDecisionReason": "Max turns exceeded"}
-        asyncio.create_task(
-            _log(workflow, "tool_call", str(tool_name), task_exec)
-        )
+        asyncio.create_task(_log(workflow, "tool_call", str(tool_name), task_exec))
         return {"permissionDecision": "allow"}
 
     def on_post_tool_use(input_data, context):
         """Log tool result; inject goal reminder when deep into the run."""
         tool_name = input_data.get("toolName", "unknown")
-        asyncio.create_task(
-            _log(workflow, "tool_result", f"{tool_name} completed", task_exec)
-        )
+        asyncio.create_task(_log(workflow, "tool_result", f"{tool_name} completed", task_exec))
         result = {}
         # Inject goal reminder when past 50% of max turns to reduce hallucination
         if tool_call_count > max_turns * 0.5:
@@ -2829,9 +3455,7 @@ async def run_agent(
     def on_session_end(input_data, context):
         """Log session end reason."""
         reason = input_data.get("reason", "unknown")
-        asyncio.create_task(
-            _log(workflow, "session_end", f"Reason: {reason}", task_exec)
-        )
+        asyncio.create_task(_log(workflow, "session_end", f"Reason: {reason}", task_exec))
         return None
 
     hooks = {
@@ -2886,11 +3510,7 @@ async def run_agent(
 
                 def on_event(event):
                     """Handle SDK session events — log, track usage, publish to SSE."""
-                    ev_type = (
-                        event.type.value
-                        if hasattr(event.type, "value")
-                        else str(event.type)
-                    )
+                    ev_type = event.type.value if hasattr(event.type, "value") else str(event.type)
 
                     if ev_type == "assistant.message":
                         content = getattr(event.data, "content", None) or ""
@@ -2898,18 +3518,24 @@ async def run_agent(
                         asyncio.create_task(
                             _log(workflow, "model_response", content[:200], task_exec)
                         )
-                        asyncio.create_task(event_bus.publish(
-                            str(workflow.id), "message",
-                            {"role": "assistant", "content": content},
-                        ))
+                        asyncio.create_task(
+                            event_bus.publish(
+                                str(workflow.id),
+                                "message",
+                                {"role": "assistant", "content": content},
+                            )
+                        )
 
                     elif ev_type == "assistant.message_delta":
                         delta = getattr(event.data, "delta_content", None) or ""
                         if delta:
-                            asyncio.create_task(event_bus.publish(
-                                str(workflow.id), "message_delta",
-                                {"delta": delta},
-                            ))
+                            asyncio.create_task(
+                                event_bus.publish(
+                                    str(workflow.id),
+                                    "message_delta",
+                                    {"delta": delta},
+                                )
+                            )
 
                     elif ev_type == "assistant.usage":
                         # Accumulate token/cost data
@@ -2934,12 +3560,18 @@ async def run_agent(
                         if cache_read:
                             tokens_total.labels(direction="cache_read", model=model).inc(cache_read)
                         if cache_write:
-                            tokens_total.labels(direction="cache_write", model=model).inc(cache_write)
+                            tokens_total.labels(direction="cache_write", model=model).inc(
+                                cache_write
+                            )
                         if cost:
                             cost_dollars_total.labels(model=model).inc(float(cost))
-                        asyncio.create_task(event_bus.publish(
-                            str(workflow.id), "usage", usage.model_dump(),
-                        ))
+                        asyncio.create_task(
+                            event_bus.publish(
+                                str(workflow.id),
+                                "usage",
+                                usage.model_dump(),
+                            )
+                        )
 
                     elif ev_type == "session.usage_info":
                         data = event.data
@@ -2949,9 +3581,13 @@ async def run_agent(
                             usage.total_premium_requests = float(premium)
                             if delta > 0:
                                 premium_requests_total.labels(model=workflow.model).inc(delta)
-                        asyncio.create_task(event_bus.publish(
-                            str(workflow.id), "usage", usage.model_dump(),
-                        ))
+                        asyncio.create_task(
+                            event_bus.publish(
+                                str(workflow.id),
+                                "usage",
+                                usage.model_dump(),
+                            )
+                        )
 
                     elif ev_type == "tool.execution_start":
                         data = event.data
@@ -2962,20 +3598,24 @@ async def run_agent(
                         tool_input_str = None
                         if args_raw is not None:
                             try:
-                                tool_input_str = json.dumps(args_raw, indent=2, default=str) if isinstance(args_raw, (dict, list)) else str(args_raw)
+                                tool_input_str = (
+                                    json.dumps(args_raw, indent=2, default=str)
+                                    if isinstance(args_raw, (dict, list))
+                                    else str(args_raw)
+                                )
                             except Exception:
                                 tool_input_str = str(args_raw)
                         # Parse TODO progress from manage_todo_list calls
                         if str(tool_name) == "manage_todo_list" and args_raw is not None:
                             progress = _parse_todo_list(args_raw)
                             if progress:
-                                asyncio.create_task(
-                                    _update_progress(workflow, task_exec, progress)
-                                )
+                                asyncio.create_task(_update_progress(workflow, task_exec, progress))
                         mcp_server = getattr(data, "mcp_server_name", None)
                         detail = f"{tool_name}" + (f" (mcp:{mcp_server})" if mcp_server else "")
                         asyncio.create_task(
-                            _log(workflow, "tool_call", detail, task_exec, tool_input=tool_input_str)
+                            _log(
+                                workflow, "tool_call", detail, task_exec, tool_input=tool_input_str
+                            )
                         )
 
                     elif ev_type == "tool.execution_complete":
@@ -2995,7 +3635,13 @@ async def run_agent(
                             tool_output_str = str(error)
                         status_tag = "completed" if success is not False else "FAILED"
                         asyncio.create_task(
-                            _log(workflow, "tool_result", f"{tool_name} {status_tag}", task_exec, tool_output=tool_output_str)
+                            _log(
+                                workflow,
+                                "tool_result",
+                                f"{tool_name} {status_tag}",
+                                task_exec,
+                                tool_output=tool_output_str,
+                            )
                         )
                         if str(tool_name) == "store_memory" and tool_output_str is not None:
                             asyncio.create_task(
@@ -3007,19 +3653,27 @@ async def run_agent(
 
                     elif ev_type == "session.error":
                         error_msg = getattr(event.data, "message", str(event.data))
-                        asyncio.create_task(
-                            _log(workflow, "error", error_msg, task_exec)
-                        )
+                        asyncio.create_task(_log(workflow, "error", error_msg, task_exec))
                         done.set()
 
                     elif ev_type == "session.compaction_start":
                         asyncio.create_task(
-                            _log(workflow, "compaction_start", "Context compaction started", task_exec)
+                            _log(
+                                workflow,
+                                "compaction_start",
+                                "Context compaction started",
+                                task_exec,
+                            )
                         )
 
                     elif ev_type == "session.compaction_complete":
                         asyncio.create_task(
-                            _log(workflow, "compaction_complete", "Context compaction completed", task_exec)
+                            _log(
+                                workflow,
+                                "compaction_complete",
+                                "Context compaction completed",
+                                task_exec,
+                            )
                         )
 
                 session.on(on_event)
@@ -3059,7 +3713,9 @@ async def run_agent(
                                 await event_bus.clear_halt(str(workflow.id))
                                 await session.abort()
                                 workflow.current_turn = tool_call_count
-                                await _log(workflow, "halted", "Execution halted by user", task_exec)
+                                await _log(
+                                    workflow, "halted", "Execution halted by user", task_exec
+                                )
                                 await _publish_status(workflow, "halted")
                                 if task_exec:
                                     task_exec.status = TaskStatus.HALTED
@@ -3092,11 +3748,7 @@ async def run_agent(
                 try:
                     all_events = await session.get_messages()
                     for ev in all_events:
-                        ev_type = (
-                            ev.type.value
-                            if hasattr(ev.type, "value")
-                            else str(ev.type)
-                        )
+                        ev_type = ev.type.value if hasattr(ev.type, "value") else str(ev.type)
                         if ev_type == "assistant.message":
                             workflow.messages.append(
                                 Message(
@@ -3127,7 +3779,8 @@ async def run_agent(
                             task_exec,
                         )
                         await event_bus.publish(
-                            str(workflow.id), "output_guardrail_violation",
+                            str(workflow.id),
+                            "output_guardrail_violation",
                             {"violations": output_violations},
                         )
 
@@ -3137,12 +3790,15 @@ async def run_agent(
                 # Determine task terminal status
                 if tool_call_count > max_turns:
                     task_final_status = TaskStatus.MAX_TURNS_REACHED
-                    await _log(workflow, "max_turns_reached", f"{tool_call_count} tool calls", task_exec)
+                    await _log(
+                        workflow, "max_turns_reached", f"{tool_call_count} tool calls", task_exec
+                    )
                 else:
                     task_final_status = TaskStatus.COMPLETED
 
                 agent_task_duration_seconds.labels(
-                    model=workflow.model, status=task_final_status,
+                    model=workflow.model,
+                    status=task_final_status,
                 ).observe(task_duration)
                 tool_calls_per_task.labels(model=workflow.model).observe(tool_call_count)
                 if usage.total_cost > 0:
@@ -3164,7 +3820,8 @@ async def run_agent(
                     task_exec.usage = usage
                     # Copy messages added during this execution
                     task_exec.messages = [
-                        m for m in workflow.messages
+                        m
+                        for m in workflow.messages
                         if m.content == user_prompt or m.role == "assistant"
                     ][-20:]  # Keep last 20 messages for this execution
                     await task_exec.save()
