@@ -7,7 +7,7 @@ The handler:
 1. Loads conversation history from MongoDB (``ChatMessage`` collection).
 2. Builds a chat-specific system prompt from the agent's base prompt plus the
    self-awareness context block.
-3. Calls the LLM directly via httpx (OpenAI-compatible streaming API).
+3. Calls the provider runtime directly (OpenAI-compatible HTTP or Google SDK).
 4. Yields SSE event dicts as tokens arrive.
 5. Persists the user message and the final assistant message to MongoDB.
 6. Yields a ``done`` event with token usage stats.
@@ -29,6 +29,14 @@ from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderTy
 from app.observability import chat_messages_total, chat_response_duration_seconds
 from app.services import token_manager
 from app.services.chat_context import build_chat_context
+from app.services.google_adk_runtime import (
+    build_google_adk_client,
+    build_google_adk_client_config,
+    extract_google_adk_text,
+    format_google_adk_error,
+    google_adk_provider_requires_api_key,
+    google_adk_usage_to_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +92,9 @@ def _resolve_url(provider: Provider | None, model: str) -> str:
         azure_deployments_path = "/openai/deployments/"
         if azure_deployments_path not in base:
             base = base.rstrip("/")
-            return f"{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+            return (
+                f"{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+            )
         return f"{base.rstrip('/')}/chat/completions?api-version={api_version}"
 
     if provider_type == ProviderType.ANTHROPIC:
@@ -100,9 +110,7 @@ def _resolve_url(provider: Provider | None, model: str) -> str:
 
     raw_url = provider.base_url or PROVIDER_DEFAULT_BASE_URLS.get(provider_type)
     if not raw_url:
-        raise ValueError(
-            f"Provider '{provider.name}' has no base_url configured."
-        )
+        raise ValueError(f"Provider '{provider.name}' has no base_url configured.")
     return raw_url.rstrip("/") + "/chat/completions"
 
 
@@ -129,6 +137,32 @@ def _build_headers(provider: Provider | None, api_key: str) -> dict[str, str]:
         "Authorization": f"Bearer {api_key}",
         "content-type": "application/json",
     }
+
+
+def _build_google_adk_contents(messages: list[dict]) -> tuple[str, list]:
+    """Split chat messages into a Gemini system prompt and content history."""
+    from google.genai import types
+
+    system_prompt = ""
+    contents: list[types.Content] = []
+
+    for message in messages:
+        role = message.get("role")
+        content = str(message.get("content") or "")
+        if not content:
+            continue
+        if role == "system":
+            system_prompt = content
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+        contents.append(
+            types.Content(
+                role="model" if role == "assistant" else "user",
+                parts=[types.Part.from_text(text=content)],
+            )
+        )
+    return system_prompt, contents
 
 
 # ── Main handler ─────────────────────────────────────────────────────────────
@@ -163,9 +197,7 @@ async def handle_chat(
         try:
             prov = await Provider.get(PydanticObjectId(agent.provider_id))
             if prov:
-                resolved_key = await token_manager.get_token_value(
-                    prov.api_key_token_name
-                )
+                resolved_key = await token_manager.get_token_value(prov.api_key_token_name)
                 if resolved_key:
                     if prov.provider_type == ProviderType.GITHUB_COPILOT:
                         # Treat stored github_copilot token as the GitHub token
@@ -173,14 +205,25 @@ async def handle_chat(
                     else:
                         provider = prov
                         api_key = resolved_key
+                elif prov.provider_type == ProviderType.GOOGLE_ADK:
+                    provider = prov
+                    api_key = None
         except Exception as exc:
             logger.warning("chat: provider resolution failed: %s", exc)
 
     if not api_key:
-        yield _error_event(
-            "No API key available — configure GITHUB_TOKEN or attach a provider."
-        )
-        return
+        if provider and provider.provider_type == ProviderType.GOOGLE_ADK:
+            if google_adk_provider_requires_api_key(provider):
+                yield _error_event(
+                    f"Google ADK provider '{provider.name}' requires a stored Gemini "
+                    f"API key in token '{provider.api_key_token_name}'."
+                )
+                return
+        else:
+            yield _error_event(
+                "No API key available — configure GITHUB_TOKEN or attach a provider."
+            )
+            return
 
     # ── Build system prompt ───────────────────────────────────────────────
     context_block = ""
@@ -239,58 +282,97 @@ async def handle_chat(
 
     # ── LLM streaming call ────────────────────────────────────────────────
     model = agent.model or settings.default_model
-    try:
-        url = _resolve_url(provider, model)
-        headers = _build_headers(provider, api_key)
-    except ValueError as exc:
-        logger.warning("chat: provider configuration error for session %s: %s", session_id, exc)
-        yield _error_event(str(exc))
-        return
-    body = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-
     response_parts: list[str] = []
     usage_data: dict = {}
     start_time = datetime.now(UTC)
 
-    try:
-        async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-            async with client.stream(
-                "POST", url, headers=headers, json=body
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    payload = line[len("data:"):].lstrip()
-                    if payload == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
+    if provider and provider.provider_type == ProviderType.GOOGLE_ADK:
+        try:
+            from google.genai import types
 
-                    if "usage" in chunk and chunk["usage"]:
-                        usage_data = chunk["usage"]
+            runtime_config = build_google_adk_client_config(provider, api_key)
+            client = build_google_adk_client(runtime_config)
+            try:
+                system_instruction, contents = _build_google_adk_contents(messages)
+                stream = await client.aio.models.generate_content_stream(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction or None,
+                    ),
+                )
+                async for chunk in stream:
+                    chunk_text = extract_google_adk_text(chunk)
+                    if chunk_text:
+                        response_parts.append(chunk_text)
+                        yield _delta_event(chunk_text)
+                    if getattr(chunk, "usage_metadata", None):
+                        usage_data = google_adk_usage_to_dict(chunk.usage_metadata)
+            finally:
+                await client.aio.aclose()
+                client.close()
+        except Exception as exc:
+            logger.exception("chat: Google ADK request failed for session %s", session_id)
+            yield _error_event(
+                format_google_adk_error(
+                    exc,
+                    provider=provider,
+                    action="chat",
+                    model=model,
+                )
+            )
+            return
+    else:
+        try:
+            url = _resolve_url(provider, model)
+            headers = _build_headers(provider, api_key)
+        except ValueError as exc:
+            logger.warning(
+                "chat: provider configuration error for session %s: %s",
+                session_id,
+                exc,
+            )
+            yield _error_event(str(exc))
+            return
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
 
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
+        try:
+            async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
+                async with client.stream("POST", url, headers=headers, json=body) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[len("data:") :].lstrip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
 
-                    delta = choices[0].get("delta", {})
-                    content_delta = delta.get("content")
-                    if content_delta:
-                        response_parts.append(content_delta)
-                        yield _delta_event(content_delta)
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_data = chunk["usage"]
 
-    except Exception:
-        logger.exception("chat: LLM call failed for session %s", session_id)
-        yield _error_event("LLM request failed. Please try again.")
-        return
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+
+                        delta = choices[0].get("delta", {})
+                        content_delta = delta.get("content")
+                        if content_delta:
+                            response_parts.append(content_delta)
+                            yield _delta_event(content_delta)
+
+        except Exception:
+            logger.exception("chat: LLM call failed for session %s", session_id)
+            yield _error_event("LLM request failed. Please try again.")
+            return
 
     # ── Record duration metric ────────────────────────────────────────────
     elapsed = (datetime.now(UTC) - start_time).total_seconds()

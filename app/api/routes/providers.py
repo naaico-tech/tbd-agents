@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_current_user
 from app.models.provider import Provider
 from app.schemas.provider import ProviderCreate, ProviderResponse, ProviderUpdate
+from app.services.google_adk_runtime import validate_google_adk_provider_config
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -19,10 +20,20 @@ def _to_response(provider: Provider) -> ProviderResponse:
         base_url=provider.base_url,
         azure_api_version=provider.azure_api_version,
         azure_deployment=provider.azure_deployment,
+        google_use_vertex_ai=provider.google_use_vertex_ai,
+        google_cloud_project=provider.google_cloud_project,
+        google_cloud_location=provider.google_cloud_location,
         description=provider.description,
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     )
+
+
+def _validate_provider_config(provider: Provider) -> None:
+    try:
+        validate_google_adk_provider_config(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("", response_model=ProviderResponse, status_code=201)
@@ -32,6 +43,7 @@ async def create_provider(body: ProviderCreate, _user=Depends(get_current_user))
     if existing:
         raise HTTPException(status_code=409, detail=f"Provider '{body.name}' already exists")
     provider = Provider(**body.model_dump())
+    _validate_provider_config(provider)
     await provider.insert()
     return _to_response(provider)
 
@@ -53,15 +65,14 @@ async def get_provider(provider_id: str, _user=Depends(get_current_user)):
 
 
 @router.put("/{provider_id}", response_model=ProviderResponse)
-async def update_provider(
-    provider_id: str, body: ProviderUpdate, _user=Depends(get_current_user)
-):
+async def update_provider(provider_id: str, body: ProviderUpdate, _user=Depends(get_current_user)):
     """Update a provider's configuration."""
     provider = await Provider.get(PydanticObjectId(provider_id))
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     update_data = body.model_dump(exclude_none=True)
     if update_data:
+        _validate_provider_config(provider.model_copy(update=update_data))
         update_data["updated_at"] = datetime.now(UTC)
         await provider.set(update_data)
     return _to_response(provider)

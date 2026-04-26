@@ -16,13 +16,13 @@ import pytest
 
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
+from app.models.provider import ProviderType
 from app.schemas.chat import (
     ChatMessageResponse,
     ChatRequest,
     ChatSessionDetail,
     ChatSessionResponse,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +50,7 @@ def _fake_agent():
 
 def _fake_session(github_user="testuser"):
     from beanie import PydanticObjectId
+
     s = MagicMock(spec=ChatSession)
     s.id = PydanticObjectId(FAKE_SESSION_ID)
     s.agent_id = PydanticObjectId(FAKE_ID)
@@ -66,6 +67,7 @@ def _fake_session(github_user="testuser"):
 
 def _fake_message(role="user", content="Hello"):
     from beanie import PydanticObjectId
+
     m = MagicMock(spec=ChatMessage)
     m.id = PydanticObjectId(FAKE_MSG_ID)
     m.session_id = PydanticObjectId(FAKE_SESSION_ID)
@@ -83,6 +85,7 @@ def _fake_message(role="user", content="Hello"):
 class TestChatSessionModel:
     def test_defaults(self):
         from beanie import PydanticObjectId
+
         s = ChatSession.model_construct(
             id=PydanticObjectId(FAKE_SESSION_ID),
             agent_id=PydanticObjectId(FAKE_ID),
@@ -101,6 +104,7 @@ class TestChatSessionModel:
 class TestChatMessageModel:
     def test_user_message(self):
         from beanie import PydanticObjectId
+
         m = ChatMessage.model_construct(
             id=PydanticObjectId(FAKE_MSG_ID),
             session_id=PydanticObjectId(FAKE_SESSION_ID),
@@ -113,6 +117,7 @@ class TestChatMessageModel:
 
     def test_assistant_message_with_usage(self):
         from beanie import PydanticObjectId
+
         usage = {"prompt_tokens": 100, "completion_tokens": 50}
         m = ChatMessage.model_construct(
             id=PydanticObjectId(FAKE_MSG_ID),
@@ -220,6 +225,7 @@ class TestHandleChat:
 
             with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
                 from app.services.chat_handler import handle_chat
+
                 events = []
                 async for ev in handle_chat(
                     agent=agent,
@@ -254,6 +260,254 @@ class TestHandleChat:
         assert events[0]["type"] == "session"
         assert any(e["type"] == "error" for e in events)
 
+    @pytest.mark.asyncio
+    async def test_google_adk_provider_requires_stored_token(self):
+        agent = _fake_agent()
+        agent.provider_id = "6601a1b2c3d4e5f607890abf"
+        session = _fake_session()
+        provider = SimpleNamespace(
+            name="google-adk",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="missing-gemini-token",
+        )
+
+        from app.services.chat_handler import handle_chat
+
+        with (
+            patch("app.services.chat_handler.Provider.get", new=AsyncMock(return_value=provider)),
+            patch(
+                "app.services.chat_handler.token_manager.get_token_value",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            events = []
+            async for ev in handle_chat(
+                agent=agent,
+                session=session,
+                user_message="Hello",
+                github_user="testuser",
+                github_token="ghp_test",
+            ):
+                events.append(ev)
+
+        assert events[0]["type"] == "session"
+        assert events[1] == {
+            "type": "error",
+            "message": (
+                "Google ADK provider 'google-adk' requires a stored Gemini API key "
+                "in token 'missing-gemini-token'."
+            ),
+        }
+
+    @pytest.mark.asyncio
+    async def test_google_adk_vertex_provider_allows_missing_stored_token(self):
+        agent = _fake_agent()
+        agent.provider_id = "6601a1b2c3d4e5f607890ac0"
+        agent.model = "gemini-2.5-flash"
+        session = _fake_session()
+        provider = SimpleNamespace(
+            name="google-adk-vertex",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="missing-gemini-token",
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location="us-central1",
+            base_url=None,
+        )
+        user_msg_instance = MagicMock()
+        user_msg_instance.id = FAKE_MSG_ID
+        user_msg_instance.insert = AsyncMock()
+        assistant_msg_instance = MagicMock()
+        assistant_msg_instance.id = FAKE_MSG_ID
+        assistant_msg_instance.insert = AsyncMock()
+        mock_chat_msg_cls = MagicMock(side_effect=[user_msg_instance, assistant_msg_instance])
+        mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+        chunks = [
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(text="Hello Vertex", thought=False)]
+                        )
+                    )
+                ],
+                usage_metadata=None,
+            )
+        ]
+        fake_client = SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(
+                    generate_content_stream=AsyncMock(return_value=aiter_from_list(chunks))
+                ),
+                aclose=AsyncMock(),
+            ),
+            close=MagicMock(),
+        )
+
+        with (
+            patch(
+                "app.services.chat_handler.build_chat_context",
+                new=AsyncMock(return_value=""),
+            ),
+            patch(
+                "app.services.chat_handler.Provider.get",
+                new=AsyncMock(return_value=provider),
+            ),
+            patch(
+                "app.services.chat_handler.token_manager.get_token_value",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.services.chat_handler.chat_messages_total",
+                MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.chat_response_duration_seconds",
+                MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.build_google_adk_client",
+                return_value=fake_client,
+            ) as mock_build_client,
+            patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls),
+        ):
+            from app.services.chat_handler import handle_chat
+
+            events = []
+            async for ev in handle_chat(
+                agent=agent,
+                session=session,
+                user_message="Hello",
+                github_user="testuser",
+                github_token="ghp_test",
+            ):
+                events.append(ev)
+
+        assert events[0]["type"] == "session"
+        assert events[1] == {"type": "delta", "content": "Hello Vertex"}
+        assert events[2]["type"] == "done"
+        runtime_config = mock_build_client.call_args.args[0]
+        assert runtime_config["api_key"] is None
+        assert runtime_config["use_vertex_ai"] is True
+
+    @pytest.mark.asyncio
+    async def test_google_adk_provider_streams_chat_response(self):
+        agent = _fake_agent()
+        agent.provider_id = "6601a1b2c3d4e5f607890ac0"
+        agent.model = "gemini-2.5-flash"
+        session = _fake_session()
+        provider = SimpleNamespace(
+            name="google-adk",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="gemini-token",
+            google_use_vertex_ai=False,
+            google_cloud_project=None,
+            google_cloud_location=None,
+            base_url=None,
+        )
+        user_msg_instance = MagicMock()
+        user_msg_instance.id = FAKE_MSG_ID
+        user_msg_instance.insert = AsyncMock()
+        assistant_msg_instance = MagicMock()
+        assistant_msg_instance.id = FAKE_MSG_ID
+        assistant_msg_instance.insert = AsyncMock()
+        mock_chat_msg_cls = MagicMock(side_effect=[user_msg_instance, assistant_msg_instance])
+        mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+        chunks = [
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(text="Hello", thought=False)]
+                        )
+                    )
+                ],
+                usage_metadata=None,
+            ),
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(text=" world", thought=False)]
+                        )
+                    )
+                ],
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=12,
+                    tool_use_prompt_token_count=0,
+                    candidates_token_count=4,
+                    cached_content_token_count=2,
+                ),
+            ),
+        ]
+        fake_client = SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(
+                    generate_content_stream=AsyncMock(return_value=aiter_from_list(chunks))
+                ),
+                aclose=AsyncMock(),
+            ),
+            close=MagicMock(),
+        )
+
+        with (
+            patch(
+                "app.services.chat_handler.build_chat_context",
+                new=AsyncMock(return_value=""),
+            ),
+            patch(
+                "app.services.chat_handler.Provider.get",
+                new=AsyncMock(return_value=provider),
+            ),
+            patch(
+                "app.services.chat_handler.token_manager.get_token_value",
+                new=AsyncMock(return_value="gemini-secret"),
+            ),
+            patch(
+                "app.services.chat_handler.chat_messages_total",
+                MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.chat_response_duration_seconds",
+                MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock()))),
+            ),
+            patch(
+                "app.services.chat_handler.build_google_adk_client",
+                return_value=fake_client,
+            ),
+            patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls),
+        ):
+            from app.services.chat_handler import handle_chat
+
+            events = []
+            async for ev in handle_chat(
+                agent=agent,
+                session=session,
+                user_message="Hello",
+                github_user="testuser",
+                github_token=None,
+            ):
+                events.append(ev)
+
+        assert events[0]["type"] == "session"
+        assert events[1] == {"type": "delta", "content": "Hello"}
+        assert events[2] == {"type": "delta", "content": " world"}
+        assert events[3] == {
+            "type": "done",
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 4,
+                "total_tokens": 16,
+                "cached_tokens": 2,
+            },
+            "message_id": FAKE_MSG_ID,
+        }
+        fake_client.aio.models.generate_content_stream.assert_awaited_once()
+        fake_client.aio.aclose.assert_awaited_once()
+        fake_client.close.assert_called_once()
+
 
 # ── Chat context builder tests ────────────────────────────────────────────────
 
@@ -273,6 +527,7 @@ class TestBuildChatContext:
             ),
         ):
             from app.services.chat_context import build_chat_context
+
             context = await build_chat_context(agent, "testuser")
 
         assert "<agent_context>" in context
@@ -293,6 +548,7 @@ class TestBuildChatContext:
             ),
         ):
             from app.services.chat_context import build_chat_context
+
             context = await build_chat_context(agent, "testuser")
 
         assert "bash" in context
@@ -311,6 +567,7 @@ class TestBuildChatContext:
             ),
         ):
             from app.services.chat_context import build_chat_context
+
             context = await build_chat_context(agent, "testuser")
 
         assert context.strip().endswith("</agent_context>")
@@ -324,9 +581,7 @@ class TestChatEndpoints:
     async def test_list_sessions_404_for_unknown_agent(self):
         from app.api.routes.chat import list_chat_sessions
 
-        with patch(
-            "app.api.routes.chat.Agent.get", new=AsyncMock(return_value=None)
-        ):
+        with patch("app.api.routes.chat.Agent.get", new=AsyncMock(return_value=None)):
             with pytest.raises(Exception) as exc_info:
                 await list_chat_sessions(
                     agent_id=FAKE_ID,
@@ -335,6 +590,7 @@ class TestChatEndpoints:
                     user={"login": "testuser"},
                 )
         from fastapi import HTTPException
+
         assert isinstance(exc_info.value, HTTPException)
         assert exc_info.value.status_code == 404
 
@@ -354,6 +610,7 @@ class TestChatEndpoints:
                     user={"login": "testuser"},
                 )
         from fastapi import HTTPException
+
         assert isinstance(exc_info.value, HTTPException)
         assert exc_info.value.status_code == 404
 
@@ -378,6 +635,7 @@ class TestChatEndpoints:
                     user={"login": "testuser"},  # different from session owner
                 )
         from fastapi import HTTPException
+
         assert isinstance(exc_info.value, HTTPException)
         assert exc_info.value.status_code == 403
 
@@ -456,18 +714,21 @@ class TestResolveUrl:
 class TestChatSSEFormat:
     def test_session_event_format(self):
         from app.services.chat_handler import _session_event
+
         ev = _session_event("abc123")
         assert ev["type"] == "session"
         assert ev["session_id"] == "abc123"
 
     def test_delta_event_format(self):
         from app.services.chat_handler import _delta_event
+
         ev = _delta_event("hello")
         assert ev["type"] == "delta"
         assert ev["content"] == "hello"
 
     def test_done_event_format(self):
         from app.services.chat_handler import _done_event
+
         usage = {"prompt_tokens": 10, "completion_tokens": 5}
         ev = _done_event(usage, "msg123")
         assert ev["type"] == "done"
@@ -476,6 +737,7 @@ class TestChatSSEFormat:
 
     def test_error_event_format(self):
         from app.services.chat_handler import _error_event
+
         ev = _error_event("something went wrong")
         assert ev["type"] == "error"
         assert ev["message"] == "something went wrong"
@@ -486,9 +748,11 @@ class TestChatSSEFormat:
 
 def aiter_from_list(items):
     """Return an async iterator from a list of items."""
+
     async def _iter():
         for item in items:
             yield item
+
     return _iter()
 
 

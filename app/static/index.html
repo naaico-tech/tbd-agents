@@ -457,7 +457,7 @@
       </div>
       <div class="card">
         <div class="card-body"><table><thead><tr>
-          <th>Name</th><th>Type</th><th>API Key Token</th><th>Base URL</th><th>Created</th><th></th>
+          <th>Name</th><th>Type</th><th>API Key Token</th><th>Endpoint / Config</th><th>Created</th><th></th>
         </tr></thead><tbody id="providers-body"></tbody></table></div>
       </div>
     </div>
@@ -1545,7 +1545,7 @@ async function loadProviders() {
           <td><strong>${esc(p.name)}</strong>${p.description ? `<br><span style="font-size:12px;color:var(--muted)">${esc(p.description)}</span>` : ''}</td>
           <td><span class="badge badge-blue">${esc(p.provider_type)}</span></td>
           <td><code style="font-size:12px;color:var(--accent)">${esc(p.api_key_token_name)}</code></td>
-          <td>${p.base_url ? `<span style="font-size:12px">${esc(p.base_url)}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${formatProviderConfig(p)}</td>
           <td>${fmtDate(p.created_at)}</td>
           <td><div class="btn-group">
             <button class="btn btn-sm" onclick="openProviderModal('${p.id}')">Edit</button>
@@ -1556,25 +1556,64 @@ async function loadProviders() {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+function formatProviderConfig(provider) {
+  if (provider.provider_type === 'google_adk') {
+    const details = [
+      provider.google_use_vertex_ai ? 'Vertex AI enabled' : 'Gemini API key',
+      provider.google_cloud_project ? `Project: ${esc(provider.google_cloud_project)}` : null,
+      provider.google_cloud_location ? `Location: ${esc(provider.google_cloud_location)}` : null,
+    ].filter(Boolean);
+    return details.length
+      ? details.map(detail => `<div style="font-size:12px">${detail}</div>`).join('')
+      : '<span style="color:var(--muted)">—</span>';
+  }
+  return provider.base_url
+    ? `<span style="font-size:12px">${esc(provider.base_url)}</span>`
+    : '<span style="color:var(--muted)">—</span>';
+}
+
 function openProviderModal(id) {
   const p = id ? providers.find(x => x.id === id) : null;
-  const typeOpts = ['github_copilot','openai','anthropic','azure_openai','custom'].map(t =>
+  const typeOpts = ['github_copilot','openai','anthropic','azure_openai','google_adk','custom'].map(t =>
     `<option value="${t}" ${p?.provider_type===t?'selected':''}>${t}</option>`).join('');
   document.getElementById('modal-title').textContent = p ? 'Edit Provider' : 'Create Provider';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group"><label>Name</label><input id="f-prov-name" value="${esc(p?.name||'')}" placeholder="e.g. my-openai"></div>
-    <div class="form-group"><label>Provider Type</label><select id="f-prov-type">${typeOpts}</select></div>
+    <div class="form-group"><label>Provider Type</label><select id="f-prov-type" onchange="toggleProviderTypeFields()">${typeOpts}</select></div>
     <div class="form-group"><label>API Key Token Name</label>
       <input id="f-prov-token" value="${esc(p?.api_key_token_name||'')}" placeholder="e.g. openai-api-key">
-      <div class="hint">Name of a token in the Token Store that holds the API key.</div></div>
-    <div class="form-group"><label>Base URL <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional for openai/anthropic)</span></label>
+      <div class="hint">Name of a token in the Token Store that holds the API key. For <code>google_adk</code>, store a Gemini API key here.</div></div>
+    <div class="form-group" id="f-prov-base-url-group"><label>Base URL <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional for openai/anthropic)</span></label>
       <input id="f-prov-url" value="${esc(p?.base_url||'')}" placeholder="https://api.openai.com/v1">
       <div class="hint">Required for azure_openai and custom types. Leave blank to use the default.</div></div>
+    <div id="f-prov-google-group">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="f-prov-google-use-vertex" type="checkbox" ${p?.google_use_vertex_ai ? 'checked' : ''}>
+          <span>Use Vertex AI settings</span>
+        </label>
+        <div class="hint">Stores Google ADK Vertex AI metadata for future in-app execution. Leave unchecked to use the Gemini API key directly.</div>
+      </div>
+      <div class="form-group"><label>Google Cloud Project</label>
+        <input id="f-prov-google-project" value="${esc(p?.google_cloud_project||'')}" placeholder="e.g. my-gcp-project"></div>
+      <div class="form-group"><label>Google Cloud Location</label>
+        <input id="f-prov-google-location" value="${esc(p?.google_cloud_location||'')}" placeholder="e.g. us-central1">
+        <div class="hint">Maps to <code>GOOGLE_CLOUD_PROJECT</code> / <code>GOOGLE_CLOUD_LOCATION</code> when Google ADK runtime support is enabled.</div></div>
+    </div>
     <div class="form-group"><label>Description</label><input id="f-prov-desc" value="${esc(p?.description||'')}" placeholder="Optional description"></div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
     <button class="btn btn-primary" onclick="saveProvider('${id||''}')">${p?'Update':'Create'}</button>`;
   showModal();
+  toggleProviderTypeFields();
+}
+
+function toggleProviderTypeFields() {
+  const type = document.getElementById('f-prov-type')?.value;
+  const googleGroup = document.getElementById('f-prov-google-group');
+  const baseUrlGroup = document.getElementById('f-prov-base-url-group');
+  if (googleGroup) googleGroup.style.display = type === 'google_adk' ? 'block' : 'none';
+  if (baseUrlGroup) baseUrlGroup.style.display = type === 'google_adk' ? 'none' : 'block';
 }
 
 async function saveProvider(id) {
@@ -1583,10 +1622,18 @@ async function saveProvider(id) {
     provider_type: document.getElementById('f-prov-type').value,
     api_key_token_name: document.getElementById('f-prov-token').value.trim(),
     base_url: document.getElementById('f-prov-url').value.trim() || null,
+    google_use_vertex_ai: document.getElementById('f-prov-google-use-vertex')?.checked || false,
+    google_cloud_project: document.getElementById('f-prov-google-project')?.value.trim() || null,
+    google_cloud_location: document.getElementById('f-prov-google-location')?.value.trim() || null,
     description: document.getElementById('f-prov-desc').value.trim(),
   };
   if (!body.name) return toast('Name is required', 'error');
   if (!body.api_key_token_name) return toast('API Key Token Name is required', 'error');
+  if (body.provider_type !== 'google_adk') {
+    body.google_use_vertex_ai = false;
+    body.google_cloud_project = null;
+    body.google_cloud_location = null;
+  }
   try {
     if (id) await api(`/api/providers/${id}`, { method:'PUT', body:JSON.stringify(body) });
     else await api('/api/providers', { method:'POST', body:JSON.stringify(body) });

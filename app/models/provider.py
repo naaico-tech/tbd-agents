@@ -10,6 +10,7 @@ class ProviderType(StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     AZURE_OPENAI = "azure_openai"
+    GOOGLE_ADK = "google_adk"
     CUSTOM = "custom"
 
 
@@ -32,6 +33,8 @@ class Provider(Document):
     - ``openai`` / ``anthropic`` / ``azure_openai`` / ``custom``: issues
       requests directly to the provider's OpenAI-compatible chat completions
       endpoint using the resolved API key.
+    - ``google_adk``: stores configuration for in-app Google ADK execution
+      with Gemini API keys and optional Vertex AI project/location settings.
     """
 
     name: Indexed(str, unique=True)
@@ -40,6 +43,9 @@ class Provider(Document):
     base_url: str | None = None  # required for azure_openai and custom types
     azure_api_version: str = "2024-12-01-preview"  # Azure OpenAI API version
     azure_deployment: str | None = None  # Azure deployment name (defaults to workflow model)
+    google_use_vertex_ai: bool = False
+    google_cloud_project: str | None = None
+    google_cloud_location: str | None = None
     description: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

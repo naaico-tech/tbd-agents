@@ -11,9 +11,11 @@ Covers:
 """
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderType
 from app.schemas.provider import ProviderCreate, ProviderResponse, ProviderUpdate
@@ -29,6 +31,9 @@ class TestProviderModel:
             api_key_token_name="openai-key",
         )
         assert p.base_url is None
+        assert p.google_use_vertex_ai is False
+        assert p.google_cloud_project is None
+        assert p.google_cloud_location is None
         assert p.description == ""
         assert p.provider_type == ProviderType.OPENAI
 
@@ -37,6 +42,7 @@ class TestProviderModel:
         assert ProviderType.OPENAI == "openai"
         assert ProviderType.ANTHROPIC == "anthropic"
         assert ProviderType.AZURE_OPENAI == "azure_openai"
+        assert ProviderType.GOOGLE_ADK == "google_adk"
         assert ProviderType.CUSTOM == "custom"
 
     def test_provider_with_base_url(self):
@@ -70,6 +76,9 @@ class TestProviderSchema:
         )
         assert body.description == ""
         assert body.base_url is None
+        assert body.google_use_vertex_ai is False
+        assert body.google_cloud_project is None
+        assert body.google_cloud_location is None
 
     def test_create_schema_with_all_fields(self):
         body = ProviderCreate(
@@ -82,12 +91,29 @@ class TestProviderSchema:
         assert body.name == "azure-gpt4"
         assert body.description == "Azure deployment"
 
+    def test_create_schema_for_google_adk(self):
+        body = ProviderCreate(
+            name="google-adk",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="gemini-key",
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location="us-central1",
+            description="Google ADK provider",
+        )
+        assert body.google_use_vertex_ai is True
+        assert body.google_cloud_project == "my-project"
+        assert body.google_cloud_location == "us-central1"
+
     def test_update_schema_all_optional(self):
         body = ProviderUpdate()
         assert body.name is None
         assert body.provider_type is None
         assert body.api_key_token_name is None
         assert body.base_url is None
+        assert body.google_use_vertex_ai is None
+        assert body.google_cloud_project is None
+        assert body.google_cloud_location is None
         assert body.description is None
 
     def test_response_schema(self):
@@ -98,12 +124,41 @@ class TestProviderSchema:
             provider_type=ProviderType.OPENAI,
             api_key_token_name="openai-key",
             base_url=None,
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location="us-central1",
             description="",
             created_at=now,
             updated_at=now,
         )
         assert resp.id == "abc123"
         assert resp.provider_type == ProviderType.OPENAI
+        assert resp.google_use_vertex_ai is True
+        assert resp.google_cloud_project == "my-project"
+        assert resp.google_cloud_location == "us-central1"
+
+    def test_provider_route_response_includes_google_adk_fields(self):
+        from app.api.routes.providers import _to_response
+
+        provider = Provider.model_construct(
+            id="abc123",
+            name="google-adk",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="gemini-key",
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location="us-central1",
+            description="Google ADK provider",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+        response = _to_response(provider)
+
+        assert response.provider_type == ProviderType.GOOGLE_ADK
+        assert response.google_use_vertex_ai is True
+        assert response.google_cloud_project == "my-project"
+        assert response.google_cloud_location == "us-central1"
 
 
 # ── _build_provider_headers + _resolve_provider_url ──────────────────────────
@@ -171,9 +226,7 @@ class TestBuildProviderRequest:
         assert "Authorization" not in headers
 
     def test_custom_provider_bearer_auth(self):
-        provider = self._make_provider(
-            ProviderType.CUSTOM, base_url="https://llm.example.com/v1"
-        )
+        provider = self._make_provider(ProviderType.CUSTOM, base_url="https://llm.example.com/v1")
         url, headers, body = self._call(provider, api_key="custom-key")
         assert url == "https://llm.example.com/v1/chat/completions"
         assert headers["Authorization"] == "Bearer custom-key"
@@ -226,12 +279,17 @@ class TestRunWithCustomProvider:
     @pytest.mark.asyncio
     async def test_successful_response(self, mock_workflow, openai_provider):
         from app.core.agent_engine import _run_with_custom_provider
-        from app.models.workflow import OutputFormat, WorkflowStatus
+        from app.models.workflow import OutputFormat
 
         mock_workflow.output_format = OutputFormat.JSON
 
         stream_result = {
-            "choices": [{"message": {"role": "assistant", "content": "Hello, world!"}, "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello, world!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
         }
 
@@ -242,8 +300,16 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
-            patch("app.core.agent_engine.enforce_output_guardrails", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "app.core.agent_engine._stream_chat_completion",
+                new_callable=AsyncMock,
+                return_value=stream_result,
+            ),
+            patch(
+                "app.core.agent_engine.enforce_output_guardrails",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "You are helpful.", openai_provider, "sk-test", None
@@ -272,7 +338,11 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, side_effect=http_error),
+            patch(
+                "app.core.agent_engine._stream_chat_completion",
+                new_callable=AsyncMock,
+                side_effect=http_error,
+            ),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "bad-key", None
@@ -291,7 +361,11 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, side_effect=RuntimeError("network error")),
+            patch(
+                "app.core.agent_engine._stream_chat_completion",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("network error"),
+            ),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "sk-test", None
@@ -307,7 +381,9 @@ class TestRunWithCustomProvider:
         mock_workflow.output_format = OutputFormat.MARKDOWN
 
         stream_result = {
-            "choices": [{"message": {"role": "assistant", "content": "## Report"}, "finish_reason": "stop"}],
+            "choices": [
+                {"message": {"role": "assistant", "content": "## Report"}, "finish_reason": "stop"}
+            ],
             "usage": {},
         }
 
@@ -318,8 +394,16 @@ class TestRunWithCustomProvider:
             patch("app.core.agent_engine.agent_tasks_total"),
             patch("app.core.agent_engine.agent_task_duration_seconds"),
             patch("app.core.agent_engine.tokens_total"),
-            patch("app.core.agent_engine._stream_chat_completion", new_callable=AsyncMock, return_value=stream_result),
-            patch("app.core.agent_engine.enforce_output_guardrails", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "app.core.agent_engine._stream_chat_completion",
+                new_callable=AsyncMock,
+                return_value=stream_result,
+            ),
+            patch(
+                "app.core.agent_engine.enforce_output_guardrails",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await _run_with_custom_provider(
                 mock_workflow, "Hello!", "sys", openai_provider, "sk-test", None
@@ -417,6 +501,64 @@ class TestProviderAPI:
                 headers=self._auth_headers(),
             )
         assert resp.status_code in (404, 401)
+
+    @pytest.mark.asyncio
+    async def test_create_provider_rejects_misconfigured_google_adk_vertex_provider(self):
+        from app.api.routes.providers import create_provider
+
+        body = ProviderCreate(
+            name="google-adk-vertex",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="gemini-key",
+            google_use_vertex_ai=True,
+            google_cloud_project="",
+            google_cloud_location=None,
+        )
+
+        with patch("app.api.routes.providers.Provider") as mock_provider_cls:
+            mock_provider_cls.find_one = AsyncMock(return_value=None)
+            mock_provider_cls.side_effect = lambda **kwargs: Provider.model_construct(**kwargs)
+            with pytest.raises(HTTPException) as exc_info:
+                await create_provider(body, _user={"login": "u"})
+
+        assert exc_info.value.status_code == 400
+        assert "missing required field(s)" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_update_provider_rejects_switch_to_invalid_google_adk_vertex_provider(self):
+        from app.api.routes.providers import update_provider
+
+        provider = MagicMock()
+        provider.model_copy.return_value = Provider.model_construct(
+            id="6601a1b2c3d4e5f607890abc",
+            name="existing-provider",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="openai-key",
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location=None,
+            updated_at=datetime.now(UTC),
+        )
+        provider.set = AsyncMock()
+
+        with patch(
+            "app.api.routes.providers.Provider.get",
+            new=AsyncMock(return_value=provider),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await update_provider(
+                    "6601a1b2c3d4e5f607890abc",
+                    ProviderUpdate(
+                        provider_type=ProviderType.GOOGLE_ADK,
+                        google_use_vertex_ai=True,
+                        google_cloud_project="my-project",
+                    ),
+                    _user={"login": "u"},
+                )
+
+        assert exc_info.value.status_code == 400
+        assert "missing required field(s)" in exc_info.value.detail
+        provider.set.assert_not_awaited()
 
 
 # ── Agent model with provider_id ──────────────────────────────────────────────
@@ -532,7 +674,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Agent") as mock_agent_cls,
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
-            patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
+            patch.object(
+                agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}
+            ),
             patch.object(
                 agent_engine,
                 "_build_system_prompt",
@@ -587,7 +731,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Agent") as mock_agent_cls,
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
-            patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
+            patch.object(
+                agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}
+            ),
             patch.object(
                 agent_engine,
                 "_build_system_prompt",
@@ -641,7 +787,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Agent") as mock_agent_cls,
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
-            patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
+            patch.object(
+                agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}
+            ),
             patch.object(
                 agent_engine,
                 "_build_system_prompt",
@@ -652,7 +800,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "knowledge_manager") as mock_km,
             patch.object(agent_engine, "_log", new_callable=_am),
             patch.object(agent_engine, "_publish_status", new_callable=_am),
-            patch.object(agent_engine, "_run_with_custom_provider", return_value="answer") as mock_custom,
+            patch.object(
+                agent_engine, "_run_with_custom_provider", return_value="answer"
+            ) as mock_custom,
             patch.object(agent_engine, "mcp_connections_total"),
         ):
             mock_agent_cls.get = AsyncMock(return_value=agent)
@@ -668,6 +818,131 @@ class TestRunAgentProviderRouting:
         call_args = mock_custom_rv.call_args
         assert call_args.args[3] is provider
         assert call_args.args[4] == "sk-test-key"
+        assert result == "answer"
+
+    @pytest.mark.asyncio
+    async def test_google_adk_provider_routes_to_native_runtime(self):
+        """google_adk providers should call the native Google ADK path."""
+        from app.core import agent_engine
+
+        workflow = self._make_workflow()
+        workflow.model = "gemini-2.5-flash"
+        agent = self._make_agent(provider_id="6601a1b2c3d4e5f607890ab8")
+        provider = Provider.model_construct(
+            name="my-google-adk",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="gemini-key",
+            google_use_vertex_ai=False,
+        )
+
+        _am = AsyncMock
+        mock_adk_rv = AsyncMock(return_value="answer")
+        with (
+            patch.object(agent_engine, "Agent") as mock_agent_cls,
+            patch.object(agent_engine, "Provider") as mock_prov_cls,
+            patch.object(agent_engine, "token_manager") as mock_tm,
+            patch.object(
+                agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}
+            ),
+            patch.object(
+                agent_engine,
+                "_build_system_prompt",
+                new_callable=_am,
+                return_value=("sys", len("sys")),
+            ),
+            patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
+            patch.object(agent_engine, "_log", new_callable=_am),
+            patch.object(agent_engine, "_publish_status", new_callable=_am),
+            patch.object(
+                agent_engine,
+                "_run_with_google_adk_provider",
+                return_value="answer",
+            ) as mock_google_adk,
+            patch.object(agent_engine, "mcp_connections_total"),
+        ):
+            mock_agent_cls.get = AsyncMock(return_value=agent)
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="gemini-secret")
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
+            mock_google_adk.return_value = "answer"
+            mock_google_adk.side_effect = mock_adk_rv
+
+            result = await agent_engine.run_agent(
+                workflow,
+                "hello",
+                "ghp_original_token",
+            )
+
+        mock_adk_rv.assert_awaited_once()
+        call_args = mock_adk_rv.call_args
+        assert call_args.args[3] is provider
+        assert call_args.args[4] == "gemini-secret"
+        assert result == "answer"
+
+    @pytest.mark.asyncio
+    async def test_google_adk_vertex_provider_routes_without_stored_token(self):
+        """Vertex AI Google ADK providers should work without a stored Gemini key."""
+        from app.core import agent_engine
+
+        workflow = self._make_workflow()
+        workflow.model = "gemini-2.5-flash"
+        agent = self._make_agent(provider_id="6601a1b2c3d4e5f607890ab9")
+        provider = Provider.model_construct(
+            name="my-google-adk-vertex",
+            provider_type=ProviderType.GOOGLE_ADK,
+            api_key_token_name="missing-gemini-key",
+            google_use_vertex_ai=True,
+            google_cloud_project="my-project",
+            google_cloud_location="us-central1",
+        )
+
+        _am = AsyncMock
+        mock_adk_rv = AsyncMock(return_value="answer")
+        with (
+            patch.object(agent_engine, "Agent") as mock_agent_cls,
+            patch.object(agent_engine, "Provider") as mock_prov_cls,
+            patch.object(agent_engine, "token_manager") as mock_tm,
+            patch.object(
+                agent_engine,
+                "build_mcp_servers_config",
+                new_callable=_am,
+                return_value={},
+            ),
+            patch.object(
+                agent_engine,
+                "_build_system_prompt",
+                new_callable=_am,
+                return_value=("sys", len("sys")),
+            ),
+            patch.object(agent_engine, "_sync_repo", new_callable=_am, return_value=None),
+            patch.object(agent_engine, "knowledge_manager") as mock_km,
+            patch.object(agent_engine, "_log", new_callable=_am),
+            patch.object(agent_engine, "_publish_status", new_callable=_am),
+            patch.object(
+                agent_engine,
+                "_run_with_google_adk_provider",
+                return_value="answer",
+            ) as mock_google_adk,
+            patch.object(agent_engine, "mcp_connections_total"),
+        ):
+            mock_agent_cls.get = AsyncMock(return_value=agent)
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value=None)
+            mock_km.build_knowledge_context = AsyncMock(return_value="")
+            mock_google_adk.return_value = "answer"
+            mock_google_adk.side_effect = mock_adk_rv
+
+            result = await agent_engine.run_agent(
+                workflow,
+                "hello",
+                "ghp_original_token",
+            )
+
+        mock_adk_rv.assert_awaited_once()
+        call_args = mock_adk_rv.call_args
+        assert call_args.args[3] is provider
+        assert call_args.args[4] is None
         assert result == "answer"
 
     @pytest.mark.asyncio
@@ -688,7 +963,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "Agent") as mock_agent_cls,
             patch.object(agent_engine, "Provider") as mock_prov_cls,
             patch.object(agent_engine, "token_manager") as mock_tm,
-            patch.object(agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}),
+            patch.object(
+                agent_engine, "build_mcp_servers_config", new_callable=_am, return_value={}
+            ),
             patch.object(
                 agent_engine,
                 "_build_system_prompt",
@@ -699,7 +976,9 @@ class TestRunAgentProviderRouting:
             patch.object(agent_engine, "knowledge_manager") as mock_km,
             patch.object(agent_engine, "_log", new_callable=_am),
             patch.object(agent_engine, "_publish_status", new_callable=_am),
-            patch.object(agent_engine, "_run_with_custom_provider", new_callable=_am) as mock_custom,
+            patch.object(
+                agent_engine, "_run_with_custom_provider", new_callable=_am
+            ) as mock_custom,
             patch.object(agent_engine, "build_client") as mock_build_client,
             patch.object(agent_engine, "agent_tasks_active"),
             patch.object(agent_engine, "agent_tasks_total"),
@@ -720,3 +999,248 @@ class TestRunAgentProviderRouting:
         mock_custom.assert_not_awaited()
         # Should have attempted the SDK path (and hit our stop-here error)
         mock_build_client.assert_called_once_with("ghp_original_token")
+
+
+@pytest.mark.asyncio
+async def test_google_adk_runtime_restores_workflow_session_across_runs():
+    from google.adk.events import Event
+    from google.genai import types
+
+    from app.core import agent_engine
+    from app.models.workflow import OutputFormat
+
+    workflow = MagicMock()
+    workflow.id = "wf-google-adk-session"
+    workflow.agent_id = "6601a1b2c3d4e5f607890abc"
+    workflow.github_user = "testuser"
+    workflow.model = "gemini-2.5-flash"
+    workflow.max_turns = 5
+    workflow.output_format = OutputFormat.MARKDOWN
+    workflow.messages = []
+    workflow.session_id = None
+    workflow.google_adk_session = None
+    workflow.save = AsyncMock()
+
+    provider = Provider.model_construct(
+        name="my-google-adk",
+        provider_type=ProviderType.GOOGLE_ADK,
+        api_key_token_name="gemini-key",
+        google_use_vertex_ai=False,
+    )
+    agent = SimpleNamespace(
+        id=workflow.agent_id,
+        builtin_tools=[],
+        custom_tool_ids=[],
+    )
+
+    class _FakeRunner:
+        def __init__(self, *, app_name, agent, session_service):
+            self.app_name = app_name
+            self.session_service = session_service
+
+        async def run_async(self, *, user_id, session_id, new_message):
+            session = await self.session_service.get_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            event = Event(
+                author="agent",
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=f"history={len(session.events)}")],
+                ),
+            )
+            await self.session_service.append_event(session, event)
+            yield event
+
+    fake_event_bus = SimpleNamespace(
+        check_halt=AsyncMock(return_value=False),
+        clear_halt=AsyncMock(),
+        publish=AsyncMock(),
+    )
+    fake_counter = MagicMock(
+        labels=MagicMock(return_value=MagicMock(inc=MagicMock(), observe=MagicMock()))
+    )
+
+    with (
+        patch.object(agent_engine, "Agent") as mock_agent_cls,
+        patch.object(agent_engine, "_log", new=AsyncMock()),
+        patch.object(agent_engine, "_publish_status", new=AsyncMock()),
+        patch.object(agent_engine, "event_bus", fake_event_bus),
+        patch.object(agent_engine, "enforce_output_guardrails", new=AsyncMock(return_value=[])),
+        patch.object(agent_engine, "build_google_adk_model", return_value=MagicMock()),
+        patch.object(
+            agent_engine,
+            "build_google_adk_runtime_config",
+            return_value={
+                "model": workflow.model,
+                "api_key": "gemini-secret",
+                "use_vertex_ai": False,
+                "project": None,
+                "location": None,
+                "base_url": None,
+            },
+        ),
+        patch("google.adk.agents.LlmAgent", return_value=MagicMock()),
+        patch("google.adk.runners.Runner", _FakeRunner),
+        patch.object(agent_engine, "agent_tasks_active"),
+        patch.object(agent_engine, "agent_tasks_total", fake_counter),
+        patch.object(agent_engine, "tokens_total", fake_counter),
+        patch.object(agent_engine, "tool_calls_total", fake_counter),
+        patch.object(agent_engine, "tool_calls_per_task", fake_counter),
+        patch.object(agent_engine, "agent_task_duration_seconds", fake_counter),
+    ):
+        mock_agent_cls.get = AsyncMock(return_value=agent)
+
+        first = await agent_engine._run_with_google_adk_provider(
+            workflow,
+            "hello",
+            "system",
+            provider,
+            "gemini-secret",
+            None,
+        )
+        workflow.session_id = "copilot-session-overwrite"
+        second = await agent_engine._run_with_google_adk_provider(
+            workflow,
+            "hello again",
+            "system",
+            provider,
+            "gemini-secret",
+            None,
+        )
+
+    assert first == "history=0"
+    assert second == "history=1"
+    assert workflow.session_id == "wf-google-adk-session"
+    assert workflow.google_adk_session is not None
+
+
+@pytest.mark.asyncio
+async def test_google_adk_runtime_treats_tool_limit_as_max_turns_not_failure():
+    from app.core import agent_engine
+    from app.models.task_execution import TaskStatus
+    from app.models.workflow import OutputFormat
+
+    workflow = MagicMock()
+    workflow.id = "wf-google-adk-max-turns"
+    workflow.agent_id = "6601a1b2c3d4e5f607890abc"
+    workflow.github_user = "testuser"
+    workflow.model = "gemini-2.5-flash"
+    workflow.max_turns = 1
+    workflow.output_format = OutputFormat.MARKDOWN
+    workflow.messages = []
+    workflow.session_id = None
+    workflow.google_adk_session = None
+    workflow.save = AsyncMock()
+
+    provider = Provider.model_construct(
+        name="my-google-adk",
+        provider_type=ProviderType.GOOGLE_ADK,
+        api_key_token_name="gemini-key",
+        google_use_vertex_ai=False,
+    )
+    agent = SimpleNamespace(
+        id=workflow.agent_id,
+        builtin_tools=[],
+        custom_tool_ids=[],
+    )
+
+    class _FakeLlmAgent:
+        def __init__(self, **kwargs):
+            self.before_tool_callback = kwargs["before_tool_callback"]
+            self.after_tool_callback = kwargs["after_tool_callback"]
+
+    class _FakeRunner:
+        def __init__(self, *, app_name, agent, session_service):
+            self.agent = agent
+
+        async def run_async(self, *, user_id, session_id, new_message):
+            tool = SimpleNamespace(name="lookup")
+            tool_context = SimpleNamespace()
+
+            first_result = await self.agent.before_tool_callback(tool, {"step": 1}, tool_context)
+            assert first_result is None
+            await self.agent.after_tool_callback(tool, {"step": 1}, tool_context, {"result": "ok"})
+
+            limit_result = await self.agent.before_tool_callback(tool, {"step": 2}, tool_context)
+            assert limit_result["max_turns_reached"] is True
+
+            yield SimpleNamespace(
+                usage_metadata=None,
+                partial=False,
+                error_message=None,
+                content=SimpleNamespace(
+                    parts=[
+                        SimpleNamespace(
+                            text="final answer after max turns",
+                            thought=False,
+                        )
+                    ]
+                ),
+                get_function_calls=lambda: [],
+                get_function_responses=lambda: [],
+            )
+
+    fake_event_bus = SimpleNamespace(
+        check_halt=AsyncMock(return_value=False),
+        clear_halt=AsyncMock(),
+        publish=AsyncMock(),
+    )
+    fake_counter = MagicMock(
+        labels=MagicMock(return_value=MagicMock(inc=MagicMock(), observe=MagicMock()))
+    )
+    mock_publish_status = AsyncMock()
+
+    with (
+        patch.object(agent_engine, "Agent") as mock_agent_cls,
+        patch.object(agent_engine, "_log", new=AsyncMock()),
+        patch.object(agent_engine, "_publish_status", mock_publish_status),
+        patch.object(agent_engine, "event_bus", fake_event_bus),
+        patch.object(agent_engine, "enforce_output_guardrails", new=AsyncMock(return_value=[])),
+        patch.object(agent_engine, "build_google_adk_model", return_value=MagicMock()),
+        patch.object(
+            agent_engine,
+            "build_google_adk_runtime_config",
+            return_value={
+                "model": workflow.model,
+                "api_key": "gemini-secret",
+                "use_vertex_ai": False,
+                "project": None,
+                "location": None,
+                "base_url": None,
+            },
+        ),
+        patch.object(
+            agent_engine,
+            "build_google_adk_session_service",
+            new=AsyncMock(return_value=(SimpleNamespace(), False)),
+        ),
+        patch.object(agent_engine, "dump_google_adk_session_service", return_value=None),
+        patch("google.adk.agents.LlmAgent", _FakeLlmAgent),
+        patch("google.adk.runners.Runner", _FakeRunner),
+        patch.object(agent_engine, "agent_tasks_active"),
+        patch.object(agent_engine, "agent_tasks_total", fake_counter),
+        patch.object(agent_engine, "tokens_total", fake_counter),
+        patch.object(agent_engine, "tool_calls_total", fake_counter),
+        patch.object(agent_engine, "tool_calls_per_task", fake_counter),
+        patch.object(agent_engine, "agent_task_duration_seconds", fake_counter),
+    ):
+        mock_agent_cls.get = AsyncMock(return_value=agent)
+
+        result = await agent_engine._run_with_google_adk_provider(
+            workflow,
+            "hello",
+            "system",
+            provider,
+            "gemini-secret",
+            None,
+        )
+
+    assert result == "final answer after max turns"
+    assert workflow.messages[-1].content == "final answer after max turns"
+    assert any(
+        call.args[1] == TaskStatus.MAX_TURNS_REACHED for call in mock_publish_status.await_args_list
+    )
+    assert not any(call.args[1] == "failed" for call in mock_publish_status.await_args_list)

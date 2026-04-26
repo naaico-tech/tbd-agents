@@ -12,6 +12,9 @@ class ProviderCreate(BaseModel):
     base_url: str | None = None
     azure_api_version: str = "2024-12-01-preview"
     azure_deployment: str | None = None
+    google_use_vertex_ai: bool = False
+    google_cloud_project: str | None = None
+    google_cloud_location: str | None = None
     description: str = ""
 
 
@@ -22,6 +25,9 @@ class ProviderUpdate(BaseModel):
     base_url: str | None = None
     azure_api_version: str | None = None
     azure_deployment: str | None = None
+    google_use_vertex_ai: bool | None = None
+    google_cloud_project: str | None = None
+    google_cloud_location: str | None = None
     description: str | None = None
 
 
@@ -33,6 +39,9 @@ class ProviderResponse(BaseModel):
     base_url: str | None
     azure_api_version: str = "2024-12-01-preview"
     azure_deployment: str | None = None
+    google_use_vertex_ai: bool = False
+    google_cloud_project: str | None = None
+    google_cloud_location: str | None = None
     description: str
     created_at: datetime
     updated_at: datetime
