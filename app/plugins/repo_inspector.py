@@ -67,7 +67,10 @@ def _iter_paths(root_path: Path, target_path: Path, max_depth: int, include_hidd
             continue
 
         try:
-            children = sorted(current_path.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+            children = sorted(
+                current_path.iterdir(),
+                key=lambda item: (not item.is_dir(), item.name.lower()),
+            )
         except OSError:
             continue
 
@@ -309,7 +312,9 @@ class RepoInspectorPlugin(PluginBase):
         operation_name = operation.strip().lower()
 
         if operation_name == "list_tree":
-            return _list_tree(root_path, target_path, bounded_max_depth, bounded_max_results, include_hidden)
+            return _list_tree(
+                root_path, target_path, bounded_max_depth, bounded_max_results, include_hidden
+            )
         if operation_name == "read_file":
             return _read_file(root_path, target_path, max(start_line, 1), bounded_max_lines)
         if operation_name == "find_files":

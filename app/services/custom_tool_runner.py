@@ -111,7 +111,7 @@ async def infer_schema(source_code: str, func_name: str) -> dict:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"type": "object", "properties": {}}
 
@@ -173,7 +173,9 @@ async def validate_tool(source_code: str, func_name: str) -> dict:
     # Build env with project root so plugin source can do `from app.* import ...`
     _validate_env = dict(os.environ)
     _pypath = _validate_env.get("PYTHONPATH", "")
-    _validate_env["PYTHONPATH"] = f"{_PROJECT_ROOT}{os.pathsep}{_pypath}" if _pypath else _PROJECT_ROOT
+    _validate_env["PYTHONPATH"] = (
+        f"{_PROJECT_ROOT}{os.pathsep}{_pypath}" if _pypath else _PROJECT_ROOT
+    )
     _validate_env["TBD_PROJECT_ROOT"] = _PROJECT_ROOT
 
     proc = await asyncio.create_subprocess_exec(
@@ -186,7 +188,7 @@ async def validate_tool(source_code: str, func_name: str) -> dict:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"valid": False, "error": "Validation timed out"}
 
@@ -262,7 +264,7 @@ async def run_tool(source_code: str, func_name: str, arguments: dict, env: dict[
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         logger.warning("Custom tool '%s' timed out after %ds", func_name, CUSTOM_TOOL_TIMEOUT_SECONDS)
         return json.dumps({"error": f"Tool '{func_name}' timed out after {CUSTOM_TOOL_TIMEOUT_SECONDS}s"})

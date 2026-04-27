@@ -22,8 +22,9 @@ class MysqlReadPlugin(PluginBase):
 
     def execute(self, query: str, max_rows: int = 50) -> dict:
         """Execute a read-only SELECT query against the MySQL database."""
-        import os
-        import pymysql
+        import os  # noqa: PLC0415
+
+        import pymysql  # noqa: PLC0415
 
         # Block destructive SQL
         dangerous_keywords = ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE")
