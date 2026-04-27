@@ -11,12 +11,19 @@ from app.services import custom_tool_runner
 logger = logging.getLogger(__name__)
 
 
-async def load_tools_from_disk(tools_dir: str = "app/tools") -> None:
+async def load_tools_from_disk(
+    tools_dir: str = "app/tools",
+    skip_names: set[str] | None = None,
+) -> None:
     """Scan the local tools directory and upsert tools into MongoDB.
 
     Each ``.py`` file is parsed as a Custom Tool whose name matches the filename.
     A companion ``.json`` file (e.g., `weather.json` for `weather.py`) can provide
     extra configuration, such as tags, description, and token-backed environment variables.
+
+    Args:
+        tools_dir: Path to the directory containing raw ``.py`` tool files.
+        skip_names: Optional set of tool names to skip (e.g. already loaded as plugins).
     """
     tools_path = Path(tools_dir)
     if not tools_path.exists() or not tools_path.is_dir():
@@ -31,6 +38,9 @@ async def load_tools_from_disk(tools_dir: str = "app/tools") -> None:
             continue
 
         func_name = py_file.stem
+        if skip_names and func_name in skip_names:
+            logger.debug("Skipping '%s' — already loaded as a plugin.", func_name)
+            continue
         source_code = py_file.read_text("utf-8")
 
         # Basic default config
@@ -59,9 +69,10 @@ async def load_tools_from_disk(tools_dir: str = "app/tools") -> None:
 
         # Check existing tool in DB to avoid unnecessary schema inference on identical code
         existing_tool = await CustomTool.find_one({"name": func_name})
-        
+
         schema = {}
-        if existing_tool and existing_tool.source_code == source_code and existing_tool.parameters_schema:
+        code_unchanged = existing_tool and existing_tool.source_code == source_code
+        if code_unchanged and existing_tool.parameters_schema:
             schema = existing_tool.parameters_schema
         else:
             validation = await custom_tool_runner.validate_tool(source_code, func_name)

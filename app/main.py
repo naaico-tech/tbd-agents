@@ -112,9 +112,17 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized.")
 
-    # Auto-load disk-based tools
+    # Load registered plugins first (class-based, from app/plugins.yaml)
+    loaded_plugin_names: set[str] = set()
     try:
-        await tools_loader.load_tools_from_disk()
+        from app.core import plugin_loader
+        loaded_plugin_names = await plugin_loader.load_plugins_from_config()
+    except Exception as exc:
+        logger.error("Failed to load plugins: %s", exc)
+
+    # Auto-load any remaining disk-based tools (skipping already-loaded plugins)
+    try:
+        await tools_loader.load_tools_from_disk(skip_names=loaded_plugin_names)
     except Exception as exc:
         logger.error("Failed to auto-load custom tools: %s", exc)
 

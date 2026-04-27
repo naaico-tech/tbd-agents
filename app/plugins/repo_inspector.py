@@ -1,7 +1,20 @@
+"""RepoInspectorPlugin — read-only repository inspection plugin.
+
+Migrated from ``app/tools/repo_inspector.py`` into the plugin system.
+All helper functions are kept at module level so ``execute`` stays clean.
+"""
+
+from __future__ import annotations
+
 import os
 from fnmatch import fnmatch
 from pathlib import Path
 
+from app.core.plugin_base import PluginBase
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
 
 MAX_DEPTH_LIMIT = 6
 MAX_LINES_LIMIT = 400
@@ -10,70 +23,9 @@ MAX_FILE_BYTES = 256_000
 MAX_MATCH_LINE_LENGTH = 240
 
 
-def repo_inspector(
-    operation: str,
-    path: str = ".",
-    query: str = "",
-    glob: str = "*",
-    start_line: int = 1,
-    max_lines: int = 200,
-    max_depth: int = 2,
-    max_results: int = 50,
-    include_hidden: bool = False,
-) -> dict:
-    """Inspect the synced repository without shell access.
-
-    Operations:
-    - list_tree: list files and directories under path
-    - read_file: read a bounded slice of a text file
-    - find_files: find files under path matching glob
-    - search_text: search text matches under path
-    """
-    repo_root = _get_repo_root()
-    if not repo_root:
-        return {"error": "TBD_AGENTS_REPO_ROOT is not set for this tool invocation"}
-
-    root_path = Path(repo_root).resolve()
-    if not root_path.exists() or not root_path.is_dir():
-        return {"error": f"Repository root is unavailable: {root_path}"}
-
-    try:
-        target_path = _resolve_within_root(root_path, path)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    bounded_max_depth = _clamp(max_depth, 0, MAX_DEPTH_LIMIT)
-    bounded_max_lines = _clamp(max_lines, 1, MAX_LINES_LIMIT)
-    bounded_max_results = _clamp(max_results, 1, MAX_RESULTS_LIMIT)
-    operation_name = operation.strip().lower()
-
-    if operation_name == "list_tree":
-        return _list_tree(root_path, target_path, bounded_max_depth, bounded_max_results, include_hidden)
-    if operation_name == "read_file":
-        return _read_file(root_path, target_path, max(start_line, 1), bounded_max_lines)
-    if operation_name == "find_files":
-        return _find_files(
-            root_path,
-            target_path,
-            glob or "*",
-            bounded_max_depth,
-            bounded_max_results,
-            include_hidden,
-        )
-    if operation_name == "search_text":
-        if not query:
-            return {"error": "query is required for search_text"}
-        return _search_text(
-            root_path,
-            target_path,
-            query,
-            glob or "*",
-            bounded_max_depth,
-            bounded_max_results,
-            include_hidden,
-        )
-
-    return {"error": f"Unsupported operation: {operation}"}
+# ---------------------------------------------------------------------------
+# Module-level helper functions
+# ---------------------------------------------------------------------------
 
 
 def _get_repo_root() -> str:
@@ -288,3 +240,98 @@ def _search_text(
         "matches": matches,
         "truncated": truncated,
     }
+
+
+# ---------------------------------------------------------------------------
+# Plugin class
+# ---------------------------------------------------------------------------
+
+
+class RepoInspectorPlugin(PluginBase):
+    """Read-only repository inspection plugin."""
+
+    @property
+    def name(self) -> str:
+        return "repo_inspector"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Read-only repository inspection for synced workflow clones. "
+            "Supports bounded tree listing, file reads, filename matching, "
+            "and text search without shell access."
+        )
+
+    @property
+    def tags(self) -> list[str]:
+        return ["auto-loaded", "repo", "byok", "read-only"]
+
+    @property
+    def env_config(self) -> dict[str, str]:
+        return {}
+
+    def execute(
+        self,
+        operation: str,
+        path: str = ".",
+        query: str = "",
+        glob: str = "*",
+        start_line: int = 1,
+        max_lines: int = 200,
+        max_depth: int = 2,
+        max_results: int = 50,
+        include_hidden: bool = False,
+    ) -> dict:
+        """Inspect the synced repository without shell access.
+
+        Operations:
+        - list_tree: list files and directories under path
+        - read_file: read a bounded slice of a text file
+        - find_files: find files under path matching glob
+        - search_text: search text matches under path
+        """
+        repo_root = _get_repo_root()
+        if not repo_root:
+            return {"error": "TBD_AGENTS_REPO_ROOT is not set for this tool invocation"}
+
+        root_path = Path(repo_root).resolve()
+        if not root_path.exists() or not root_path.is_dir():
+            return {"error": f"Repository root is unavailable: {root_path}"}
+
+        try:
+            target_path = _resolve_within_root(root_path, path)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        bounded_max_depth = _clamp(max_depth, 0, MAX_DEPTH_LIMIT)
+        bounded_max_lines = _clamp(max_lines, 1, MAX_LINES_LIMIT)
+        bounded_max_results = _clamp(max_results, 1, MAX_RESULTS_LIMIT)
+        operation_name = operation.strip().lower()
+
+        if operation_name == "list_tree":
+            return _list_tree(root_path, target_path, bounded_max_depth, bounded_max_results, include_hidden)
+        if operation_name == "read_file":
+            return _read_file(root_path, target_path, max(start_line, 1), bounded_max_lines)
+        if operation_name == "find_files":
+            return _find_files(
+                root_path,
+                target_path,
+                glob or "*",
+                bounded_max_depth,
+                bounded_max_results,
+                include_hidden,
+            )
+        if operation_name == "search_text":
+            if not query:
+                return {"error": "query is required for search_text"}
+            return _search_text(
+                root_path,
+                target_path,
+                query,
+                glob or "*",
+                bounded_max_depth,
+                bounded_max_results,
+                include_hidden,
+            )
+
+        return {"error": f"Unsupported operation: {operation}"}

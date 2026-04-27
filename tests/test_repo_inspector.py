@@ -7,7 +7,8 @@ def _write(path: Path, content: str) -> None:
 
 
 def test_repo_inspector_requires_repo_root(monkeypatch):
-    from app.tools.repo_inspector import repo_inspector
+    from app.plugins.repo_inspector import RepoInspectorPlugin
+    repo_inspector = RepoInspectorPlugin().execute
 
     monkeypatch.delenv("TBD_AGENTS_REPO_ROOT", raising=False)
 
@@ -18,7 +19,8 @@ def test_repo_inspector_requires_repo_root(monkeypatch):
 
 
 def test_repo_inspector_rejects_path_escape(tmp_path, monkeypatch):
-    from app.tools.repo_inspector import repo_inspector
+    from app.plugins.repo_inspector import RepoInspectorPlugin
+    repo_inspector = RepoInspectorPlugin().execute
 
     _write(tmp_path / "src" / "main.py", "print('ok')\n")
     monkeypatch.setenv("TBD_AGENTS_REPO_ROOT", str(tmp_path))
@@ -30,7 +32,8 @@ def test_repo_inspector_rejects_path_escape(tmp_path, monkeypatch):
 
 
 def test_repo_inspector_read_file_returns_bounded_slice(tmp_path, monkeypatch):
-    from app.tools.repo_inspector import repo_inspector
+    from app.plugins.repo_inspector import RepoInspectorPlugin
+    repo_inspector = RepoInspectorPlugin().execute
 
     _write(tmp_path / "README.md", "line1\nline2\nline3\nline4\n")
     monkeypatch.setenv("TBD_AGENTS_REPO_ROOT", str(tmp_path))
@@ -46,7 +49,8 @@ def test_repo_inspector_read_file_returns_bounded_slice(tmp_path, monkeypatch):
 
 
 def test_repo_inspector_search_text_and_find_files(tmp_path, monkeypatch):
-    from app.tools.repo_inspector import repo_inspector
+    from app.plugins.repo_inspector import RepoInspectorPlugin
+    repo_inspector = RepoInspectorPlugin().execute
 
     _write(tmp_path / "app" / "service.py", "def run():\n    return 'needle'\n")
     _write(tmp_path / "app" / "other.txt", "needle here too\n")

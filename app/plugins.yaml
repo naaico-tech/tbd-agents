@@ -1,0 +1,17 @@
+# TBD Agents Plugin Registry
+# Register plugins here to auto-load them at startup.
+# Each plugin corresponds to a class in app/plugins/{name}.py that extends PluginBase.
+#
+# Format:
+#   - name: <tool_name>        # must match the Python file stem in app/plugins/
+#     enabled: true|false      # set to false to disable without removing
+#
+# Convention: app/plugins/{name}.py must contain a class named
+# {CamelCase(name)}Plugin that extends app.core.plugin_base.PluginBase.
+# Example: name "mysql_read" → file app/plugins/mysql_read.py → class MysqlReadPlugin
+
+plugins:
+  - name: mysql_read
+    enabled: true
+  - name: repo_inspector
+    enabled: true

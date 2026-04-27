@@ -97,3 +97,34 @@ async def test_load_tools_from_disk_proper_objects(mock_tools_dir):
     assert simple_t.tags == ["auto-loaded"]
     assert simple_t.env_config == {}
     assert simple_t.is_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_load_tools_skips_plugin_names(tmp_path):
+    """Tools whose names appear in skip_names are never constructed or inserted."""
+    from app.core.tools_loader import load_tools_from_disk
+    from unittest.mock import MagicMock
+
+    # Minimal tools directory with only the file we want to skip
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "mysql_read.py").write_text("def mysql_read(query: str): pass\n")
+
+    mock_doc = MagicMock()
+    mock_doc.insert = AsyncMock()
+
+    with (
+        patch("app.core.tools_loader.CustomTool", return_value=mock_doc) as mock_cls,
+        patch(
+            "app.core.tools_loader.custom_tool_runner.validate_tool",
+            new_callable=AsyncMock,
+        ) as mock_validate,
+    ):
+        mock_cls.find_one = AsyncMock(return_value=None)
+        mock_validate.return_value = {"valid": True, "inferred_schema": {"type": "object"}}
+
+        await load_tools_from_disk(str(tools_dir), skip_names={"mysql_read"})
+
+    # Neither the constructor nor insert should have been called for mysql_read
+    mock_cls.assert_not_called()
+    mock_doc.insert.assert_not_called()
