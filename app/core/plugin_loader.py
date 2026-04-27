@@ -225,6 +225,7 @@ async def load_plugins_from_config(
                 existing.description = plugin.description
                 existing.tags = plugin.tags
                 existing.env_config = plugin.env_config
+                existing.is_plugin = True
                 existing.updated_at = datetime.now(UTC)
 
                 # Only update source / schema when they have changed
@@ -249,6 +250,7 @@ async def load_plugins_from_config(
                     env_config=plugin.env_config,
                     tags=plugin.tags,
                     is_enabled=True,
+                    is_plugin=True,
                 )
                 await new_tool.insert()
                 logger.info("Plugin '%s': registered as new CustomTool.", plugin.name)
