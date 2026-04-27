@@ -16,9 +16,12 @@ from app.core.plugin_loader import _name_to_class
 
 def _make_plugin_cls(name: str = "test_plugin", is_enabled: bool = True):
     """Return a minimal concrete PluginBase subclass for use in loader tests."""
+    import sys
+    import types
     from app.core.plugin_base import PluginBase
 
     _enabled = is_enabled  # close over the value
+    fake_module_name = f"app.plugins._{name}"
 
     class _TestPlugin(PluginBase):
         @property
@@ -35,6 +38,13 @@ def _make_plugin_cls(name: str = "test_plugin", is_enabled: bool = True):
 
         def execute(self, query: str) -> dict:
             return {"result": query}
+
+    # Fake the module so get_source_code() module-path check passes
+    _TestPlugin.__module__ = fake_module_name
+    if fake_module_name not in sys.modules:
+        fake_mod = types.ModuleType(fake_module_name)
+        setattr(fake_mod, _TestPlugin.__name__, _TestPlugin)
+        sys.modules[fake_module_name] = fake_mod
 
     return _TestPlugin
 
@@ -83,7 +93,7 @@ async def test_load_plugins_empty_yaml(tmp_path):
 
 
 async def test_load_plugins_all_disabled(tmp_path):
-    """Plugins with enabled: false are skipped; no DB calls are made."""
+    """Plugins with enabled: false attempt to deactivate existing DB tools."""
     from app.core.plugin_loader import load_plugins_from_config
 
     config_file = tmp_path / "plugins.yaml"
@@ -97,14 +107,16 @@ async def test_load_plugins_all_disabled(tmp_path):
     )
 
     with patch("app.core.plugin_loader.CustomTool") as mock_ct:
-        mock_ct.find_one = AsyncMock()
+        # Return None so there is nothing to deactivate
+        mock_ct.find_one = AsyncMock(return_value=None)
         result = await load_plugins_from_config(
             config_path=str(config_file),
             plugins_dir=str(tmp_path),
         )
 
     assert result == set()
-    mock_ct.find_one.assert_not_called()
+    # find_one is now called once per disabled entry to check for an existing tool
+    assert mock_ct.find_one.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +201,7 @@ async def test_load_plugins_updates_existing_tool(tmp_path):
 
 
 async def test_load_plugins_skips_disabled_plugin_object(tmp_path):
-    """Plugin with is_enabled=False on the instance is skipped even if YAML says enabled."""
+    """Plugin with is_enabled=False on the instance deactivates any existing DB tool."""
     from app.core.plugin_loader import load_plugins_from_config
 
     config_file = tmp_path / "plugins.yaml"
@@ -206,7 +218,8 @@ async def test_load_plugins_skips_disabled_plugin_object(tmp_path):
         patch("app.core.plugin_loader._load_plugin_class", return_value=disabled_cls),
         patch("app.core.plugin_loader.CustomTool") as mock_ct,
     ):
-        mock_ct.find_one = AsyncMock()
+        # Return None so there is nothing to deactivate
+        mock_ct.find_one = AsyncMock(return_value=None)
 
         result = await load_plugins_from_config(
             config_path=str(config_file),
@@ -214,7 +227,8 @@ async def test_load_plugins_skips_disabled_plugin_object(tmp_path):
         )
 
     assert result == set()
-    mock_ct.find_one.assert_not_called()
+    # find_one is now called to check for an existing DB tool to deactivate
+    mock_ct.find_one.assert_called_once()
 
 
 async def test_load_plugins_returns_loaded_names(tmp_path):

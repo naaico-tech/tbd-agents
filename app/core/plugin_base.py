@@ -29,6 +29,7 @@ Usage example::
 from __future__ import annotations
 
 import inspect
+import keyword
 import textwrap
 from abc import ABC, abstractmethod
 from typing import Any
@@ -290,11 +291,22 @@ class PluginBase(ABC):
         module_path: str = cls.__module__  # e.g. "app.plugins.my_plugin"
         class_name: str = cls.__name__
 
+        if not module_path.startswith("app.plugins."):
+            raise ValueError(
+                "Plugin class must be defined in an 'app.plugins.*' module; "
+                f"got {module_path!r}."
+            )
+
         # Derive the stem: "app.plugins.my_plugin" → "my_plugin"
         parts = module_path.split(".")
         module_stem = parts[-1]
 
         tool_name = self.name
+        if not tool_name.isidentifier() or keyword.iskeyword(tool_name):
+            raise ValueError(
+                f"Plugin name {tool_name!r} is not a valid Python identifier or is a "
+                "reserved keyword. Plugin names must be valid Python identifiers."
+            )
 
         source = textwrap.dedent(f"""\
             import sys as _sys, os as _os

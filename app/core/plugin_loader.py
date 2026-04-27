@@ -192,7 +192,23 @@ async def load_plugins_from_config(
             continue
 
         if not enabled:
-            logger.debug("Plugin '%s' is disabled in config — skipping.", name)
+            # Deactivate any previously-registered plugin tool so it is no
+            # longer exposed to agents, even though we skip loading the class.
+            try:
+                existing_disabled = await CustomTool.find_one(
+                    {"name": name, "is_plugin": True}
+                )
+                if existing_disabled and existing_disabled.is_enabled:
+                    existing_disabled.is_enabled = False
+                    existing_disabled.updated_at = datetime.now(UTC)
+                    await existing_disabled.save()
+                    logger.info(
+                        "Plugin '%s': disabled in config — DB tool deactivated.", name
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Plugin '%s': error while deactivating disabled tool: %s", name, exc
+                )
             continue
 
         try:
@@ -206,18 +222,44 @@ async def load_plugins_from_config(
 
             # c. Respect the plugin's own is_enabled flag
             if not plugin.is_enabled:
-                logger.debug(
-                    "Plugin '%s': is_enabled=False on instance — skipping.", name
+                # Deactivate any existing DB record so it won't be runnable.
+                try:
+                    existing_off = await CustomTool.find_one(
+                        {"name": plugin.name, "is_plugin": True}
+                    )
+                    if existing_off and existing_off.is_enabled:
+                        existing_off.is_enabled = False
+                        existing_off.updated_at = datetime.now(UTC)
+                        await existing_off.save()
+                        logger.info(
+                            "Plugin '%s': is_enabled=False on instance — DB tool deactivated.",
+                            name,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Plugin '%s': error while deactivating tool: %s", name, exc
+                    )
+                continue
+
+            # d. Enforce that plugin.name matches the YAML entry name to keep
+            #    the returned set accurate and avoid upsert/report mismatches.
+            if plugin.name != name:
+                logger.warning(
+                    "Plugin '%s': plugin.name=%r does not match YAML entry name=%r"
+                    " — skipping to avoid accidental duplicate registration.",
+                    name,
+                    plugin.name,
+                    name,
                 )
                 continue
 
-            # d. Generate source code
+            # e. Generate source code
             source_code: str = plugin.get_source_code()
 
-            # e. Get parameter schema
+            # f. Get parameter schema
             schema: dict = plugin.get_parameters_schema()
 
-            # f. Upsert to MongoDB
+            # g. Upsert to MongoDB
             existing = await CustomTool.find_one({"name": plugin.name})
 
             if existing:
@@ -226,10 +268,11 @@ async def load_plugins_from_config(
                 existing.tags = plugin.tags
                 existing.env_config = plugin.env_config
                 existing.is_plugin = True
+                existing.is_enabled = True
                 existing.updated_at = datetime.now(UTC)
 
-                # Only update source / schema when they have changed
-                if existing.source_code != source_code or not existing.parameters_schema:
+                # Update source/schema when source or schema has changed
+                if existing.source_code != source_code or existing.parameters_schema != schema:
                     existing.source_code = source_code
                     existing.parameters_schema = schema
                     logger.info(
@@ -255,7 +298,7 @@ async def load_plugins_from_config(
                 await new_tool.insert()
                 logger.info("Plugin '%s': registered as new CustomTool.", plugin.name)
 
-            loaded.add(name)
+            loaded.add(plugin.name)
 
         except Exception as exc:  # noqa: BLE001
             logger.error(

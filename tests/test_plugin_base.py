@@ -188,3 +188,56 @@ def test_repo_inspector_plugin_schema():
     schema = plugin.get_parameters_schema()
     assert "operation" in schema["required"]
     assert schema["properties"]["operation"]["type"] == "string"
+
+
+def test_get_source_code_raises_for_non_plugin_module():
+    """get_source_code() raises ValueError when class is not in app.plugins.*."""
+    from app.core.plugin_base import PluginBase
+
+    class OutsiderPlugin(PluginBase):
+        @property
+        def name(self) -> str:
+            return "outsider"
+
+        @property
+        def description(self) -> str:
+            return "An outsider plugin."
+
+        def execute(self, x: str) -> dict:
+            return {}
+
+    plugin = OutsiderPlugin()
+    with pytest.raises(ValueError, match="app.plugins"):
+        plugin.get_source_code()
+
+
+def test_get_source_code_raises_for_invalid_name():
+    """get_source_code() raises ValueError when plugin name is not a valid identifier."""
+    import sys
+    import types
+
+    # Create a fake module under app.plugins so the module check passes
+    fake_mod = types.ModuleType("app.plugins._test_invalid_name")
+    sys.modules["app.plugins._test_invalid_name"] = fake_mod
+    try:
+        from app.core.plugin_base import PluginBase
+
+        class InvalidNamePlugin(PluginBase):
+            @property
+            def name(self) -> str:
+                return "not-valid!"
+
+            @property
+            def description(self) -> str:
+                return "Invalid name."
+
+            def execute(self, x: str) -> dict:
+                return {}
+
+        # Patch __module__ so the module path check passes
+        InvalidNamePlugin.__module__ = "app.plugins._test_invalid_name"
+        plugin = InvalidNamePlugin()
+        with pytest.raises(ValueError, match="not a valid Python identifier"):
+            plugin.get_source_code()
+    finally:
+        sys.modules.pop("app.plugins._test_invalid_name", None)
