@@ -13,3 +13,12 @@ dist
 build
 tests
 README.md
+CONTRIBUTING.md
+docs
+frontend/.dart_tool
+frontend/.idea
+frontend/build
+helm
+observability
+scripts
+site
