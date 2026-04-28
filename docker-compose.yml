@@ -1,5 +1,8 @@
+# Default image for all app services.
+# In development:   docker compose up --build  (builds from source; overrides the pulled image)
+# In production:    TBD_IMAGE=ghcr.io/naaico-tech/tbd-agents:v0.1.0 docker compose up
 x-app-image: &app-image
-  image: tbd-agents:local
+  image: ${TBD_IMAGE:-ghcr.io/naaico-tech/tbd-agents:latest}
 
 x-app-build: &app-build
   context: .
@@ -35,7 +38,7 @@ services:
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-api
-      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.1.0,deployment.environment=docker
     depends_on:
       mongodb:
         condition: service_started
@@ -70,7 +73,7 @@ services:
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-worker
-      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.1.0,deployment.environment=docker
       - WORKER_METRICS_PORT=9101
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     expose:
@@ -108,7 +111,7 @@ services:
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-beat
-      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.2.0,deployment.environment=docker
+      - OTEL_RESOURCE_ATTRIBUTES=service.version=0.1.0,deployment.environment=docker
     depends_on:
       mongodb:
         condition: service_started

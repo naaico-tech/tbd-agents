@@ -34,3 +34,4 @@ Thumbs.db
 .coverage
 htmlcov
 scripts/setup-hero-mechanic.sh
+site/

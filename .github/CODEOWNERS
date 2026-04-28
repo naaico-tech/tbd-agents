@@ -1,0 +1,4 @@
+# CODEOWNERS — every file in the repository requires a review from a maintainer.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @naaico-tech/maintainers

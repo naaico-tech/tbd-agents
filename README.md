@@ -24,12 +24,14 @@
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" alt="License: Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <a href="https://github.com/naaico-tech/tbd-agents/pkgs/container/tbd-agents"><img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker"></a>
   <img src="https://img.shields.io/badge/Celery-distributed-37814A?style=flat-square&logo=celery&logoColor=white" alt="Celery">
   <img src="https://img.shields.io/badge/Redis-pub%2Fsub-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis">
   <img src="https://img.shields.io/badge/MongoDB-beanie-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
   <img src="https://img.shields.io/badge/GitHub%20Copilot-SDK-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub Copilot SDK">
   <img src="https://img.shields.io/badge/MCP-compatible-6236FF?style=flat-square" alt="MCP Compatible">
+  <a href="https://github.com/naaico-tech/tbd-agents/releases"><img src="https://img.shields.io/github/v/release/naaico-tech/tbd-agents?style=flat-square&color=brightgreen&label=release" alt="Latest Release"></a>
+  <a href="https://github.com/naaico-tech/tbd-agents/pkgs/container/tbd-agents"><img src="https://img.shields.io/badge/ghcr.io-tbd--agents-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Image"></a>
 </p>
 
 ---
@@ -76,6 +78,10 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 📚 **Knowledge bases**<br>Attach Qdrant vector DBs or upload files/text tagged for retrieval; agents pull relevant knowledge automatically.
 
+📦 **Import/Export**<br>Export and import Skills, Agents, Workflows, and Knowledge Bases as JSON bundles for backup or cross-environment migration.
+
+🧩 **Plugin system**<br>Extend TBD Agents with custom Python plugins registered via a YAML registry. Loaded at startup via `PluginBase`.
+
 </td>
 </tr>
 </table>
@@ -84,13 +90,27 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 ## 🚀 Quick Start
 
+### Option A — Pull pre-built image (recommended for production)
+
 ```bash
-git clone <repo-url> && cd tbd-agents
+# Pull the latest release
+docker pull ghcr.io/naaico-tech/tbd-agents:latest
 
-# Create your environment file and fill in at least GITHUB_TOKEN
+# Or pin to a specific version
+docker pull ghcr.io/naaico-tech/tbd-agents:v0.1.0
+
+# Start all services using the pre-built image
+cp .env.example .env   # fill in GITHUB_TOKEN etc.
+docker compose up
+```
+
+### Option B — Build from source (for development)
+
+```bash
+git clone https://github.com/naaico-tech/tbd-agents.git
+cd tbd-agents
 cp .env.example .env
-
-docker-compose up --build
+docker compose up --build
 ```
 
 Your GitHub PAT needs the `copilot` scope — [create one here](https://github.com/settings/tokens).
@@ -425,7 +445,25 @@ Any model available through GitHub Copilot is supported. Currently includes:
 | Database | ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white&style=flat-square) MongoDB + Beanie ODM |
 | Vector DB | ![Qdrant](https://img.shields.io/badge/Qdrant-optional-6236FF?style=flat-square) Qdrant *(optional, for knowledge)* |
 | Frontend | ![Flutter](https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white&style=flat-square) Flutter web + legacy HTML dashboard |
-| Containers | ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white&style=flat-square) Docker Compose |
+| Containers | ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white&style=flat-square) Docker Compose · Pre-built images on [GHCR](https://github.com/naaico-tech/tbd-agents/pkgs/container/tbd-agents) |
+
+---
+
+## 📦 Releases
+
+TBD Agents uses [Semantic Versioning](https://semver.org/). Pre-built Docker images are published to **GitHub Container Registry** on every release.
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Most recent stable release |
+| `v0.1.0` | First public release |
+| `0.1` | Latest patch in the 0.1.x series |
+
+```bash
+docker pull ghcr.io/naaico-tech/tbd-agents:latest
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history and [GitHub Releases](https://github.com/naaico-tech/tbd-agents/releases) for release notes.
 
 ---
 

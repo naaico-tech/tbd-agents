@@ -1,6 +1,6 @@
 [project]
 name = "tbd-agents"
-version = "0.2.0"
+version = "0.1.0"
 description = "Multi-agent API hub powered by the official GitHub Copilot SDK with MCP support"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.12"
