@@ -262,7 +262,18 @@ async def handle_chat(
             async with client.stream(
                 "POST", url, headers=headers, json=body
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    body_bytes = await response.aread()
+                    body_text = body_bytes.decode(errors="replace")[:500]
+                    logger.error(
+                        "chat: LLM HTTP %s for session %s url=%s body=%s",
+                        response.status_code,
+                        session_id,
+                        url,
+                        body_text,
+                    )
+                    yield _error_event("LLM request failed. Please try again.")
+                    return
                 async for line in response.aiter_lines():
                     if not line.startswith("data:"):
                         continue

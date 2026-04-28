@@ -434,6 +434,25 @@ class TestChatEndpoints:
 # ── URL resolution tests ──────────────────────────────────────────────────────
 
 
+def _make_provider_mock(
+    provider_type,
+    base_url=None,
+    azure_deployment=None,
+    azure_api_version="2024-12-01-preview",
+    name="test-provider",
+):
+    """Create a Provider-like mock for chat_handler tests."""
+    from app.models.provider import Provider
+    p = MagicMock(spec=Provider)
+    p.name = name
+    p.provider_type = provider_type
+    p.api_key_token_name = "tok"
+    p.base_url = base_url
+    p.azure_deployment = azure_deployment
+    p.azure_api_version = azure_api_version
+    return p
+
+
 class TestResolveUrl:
     def test_no_provider_uses_copilot_endpoint(self):
         """Default path must target api.githubcopilot.com, not GitHub Models.
@@ -448,6 +467,539 @@ class TestResolveUrl:
             f"Default chat URL must use api.githubcopilot.com, got: {url}"
         )
         assert "models.inference.ai.azure.com" not in url
+
+    def test_openai_provider_default_url(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(ProviderType.OPENAI)
+        url = _resolve_url(p, "gpt-4o")
+        assert url == "https://api.openai.com/v1/chat/completions"
+
+    def test_openai_provider_custom_base_url(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(ProviderType.OPENAI, base_url="https://my-proxy.com/v1/")
+        url = _resolve_url(p, "gpt-4o")
+        assert url == "https://my-proxy.com/v1/chat/completions"
+
+    def test_custom_provider_with_base_url(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(ProviderType.CUSTOM, base_url="https://openrouter.ai/api/v1")
+        url = _resolve_url(p, "some-model")
+        assert url == "https://openrouter.ai/api/v1/chat/completions"
+
+    def test_custom_provider_no_base_url_raises(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(ProviderType.CUSTOM, base_url=None)
+        with pytest.raises(ValueError, match="no base_url"):
+            _resolve_url(p, "some-model")
+
+    def test_azure_provider_without_deployment_in_base_url(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(
+            ProviderType.AZURE_OPENAI,
+            base_url="https://my-azure.openai.azure.com",
+            azure_deployment="my-deployment",
+            azure_api_version="2024-12-01-preview",
+        )
+        url = _resolve_url(p, "gpt-4o")
+        assert "openai/deployments/my-deployment/chat/completions" in url
+        assert "api-version=2024-12-01-preview" in url
+
+    def test_azure_provider_deployment_falls_back_to_model(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(
+            ProviderType.AZURE_OPENAI,
+            base_url="https://my-azure.openai.azure.com",
+            azure_deployment=None,
+        )
+        url = _resolve_url(p, "gpt-4o")
+        assert "openai/deployments/gpt-4o/chat/completions" in url
+
+    def test_azure_provider_with_deployment_already_in_base_url(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(
+            ProviderType.AZURE_OPENAI,
+            base_url="https://my-azure.openai.azure.com/openai/deployments/my-dep",
+            azure_api_version="2024-12-01-preview",
+        )
+        url = _resolve_url(p, "gpt-4o")
+        assert url.endswith("/chat/completions?api-version=2024-12-01-preview")
+        assert "openai/deployments" in url
+
+    def test_anthropic_provider_raises_value_error(self):
+        """Anthropic is not supported in chat mode — no OpenAI-compatible endpoint."""
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _resolve_url
+
+        p = _make_provider_mock(ProviderType.ANTHROPIC)
+        with pytest.raises(ValueError, match="Anthropic"):
+            _resolve_url(p, "claude-3")
+
+
+# ── BYOK header building tests ────────────────────────────────────────────────
+
+
+class TestBuildHeaders:
+    def test_no_provider_uses_bearer_auth(self):
+        from app.services.chat_handler import _build_headers
+
+        hdrs = _build_headers(None, "ghp_mytoken")
+        assert hdrs["Authorization"] == "Bearer ghp_mytoken"
+        assert hdrs["content-type"] == "application/json"
+
+    def test_openai_provider_uses_bearer_auth(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _build_headers
+
+        p = _make_provider_mock(ProviderType.OPENAI)
+        hdrs = _build_headers(p, "sk-mykey")
+        assert hdrs["Authorization"] == "Bearer sk-mykey"
+        assert hdrs["content-type"] == "application/json"
+
+    def test_azure_provider_uses_api_key_header(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _build_headers
+
+        p = _make_provider_mock(ProviderType.AZURE_OPENAI)
+        hdrs = _build_headers(p, "azure-secret")
+        assert hdrs["api-key"] == "azure-secret"
+        assert "Authorization" not in hdrs
+        assert hdrs["content-type"] == "application/json"
+
+    def test_anthropic_provider_uses_x_api_key(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _build_headers
+
+        p = _make_provider_mock(ProviderType.ANTHROPIC)
+        hdrs = _build_headers(p, "ant-mykey")
+        assert hdrs["x-api-key"] == "ant-mykey"
+        assert "anthropic-version" in hdrs
+        assert "Authorization" not in hdrs
+
+    def test_custom_provider_uses_bearer_auth(self):
+        from app.models.provider import ProviderType
+        from app.services.chat_handler import _build_headers
+
+        p = _make_provider_mock(ProviderType.CUSTOM, base_url="https://openrouter.ai/api/v1")
+        hdrs = _build_headers(p, "or-key")
+        assert hdrs["Authorization"] == "Bearer or-key"
+        assert hdrs["content-type"] == "application/json"
+
+
+# ── BYOK handle_chat integration tests ───────────────────────────────────────
+
+
+class TestHandleChatByok:
+    @pytest.mark.asyncio
+    async def test_byok_openai_provider_uses_provider_url_and_key(self):
+        """handle_chat with OpenAI BYOK provider calls provider URL with stored key."""
+        from app.models.provider import ProviderType
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="BYOK Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="gpt-4o",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+        provider = _make_provider_mock(
+            ProviderType.OPENAI, base_url="https://api.openai.com/v1"
+        )
+
+        captured_url = []
+        captured_auth = []
+
+        def _mock_stream(method, url, headers, json):
+            captured_url.append(url)
+            captured_auth.append(headers.get("Authorization", ""))
+            return _make_stream_ctx(["data: [DONE]"])()
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.chat_response_duration_seconds", MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.token_manager") as mock_tm,
+            patch("app.services.chat_handler.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="sk-openai-key")
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _mock_stream
+            mock_client_cls.return_value = mock_client
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token=None,
+                ):
+                    events.append(ev)
+
+        assert captured_url[0] == "https://api.openai.com/v1/chat/completions"
+        assert captured_auth[0] == "Bearer sk-openai-key"
+        assert any(e["type"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_byok_github_copilot_provider_uses_copilot_endpoint(self):
+        """handle_chat with github_copilot BYOK uses api.githubcopilot.com with stored token."""
+        from app.models.provider import ProviderType
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="Copilot Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="gpt-4.1",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+        provider = _make_provider_mock(ProviderType.GITHUB_COPILOT)
+
+        captured_url = []
+        captured_auth = []
+
+        def _mock_stream(method, url, headers, json):
+            captured_url.append(url)
+            captured_auth.append(headers.get("Authorization", ""))
+            return _make_stream_ctx(["data: [DONE]"])()
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.chat_response_duration_seconds", MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.token_manager") as mock_tm,
+            patch("app.services.chat_handler.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="ghp_stored_token")
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _mock_stream
+            mock_client_cls.return_value = mock_client
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token=None,
+                ):
+                    events.append(ev)
+
+        assert "api.githubcopilot.com" in captured_url[0]
+        assert captured_auth[0] == "Bearer ghp_stored_token"
+
+    @pytest.mark.asyncio
+    async def test_byok_anthropic_provider_yields_error_event(self):
+        """handle_chat with Anthropic BYOK yields error — not OpenAI-compatible."""
+        from app.models.provider import ProviderType
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="Ant Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="claude-3",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+        provider = _make_provider_mock(ProviderType.ANTHROPIC)
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.token_manager") as mock_tm,
+        ):
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="ant-key")
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token=None,
+                ):
+                    events.append(ev)
+
+        error_events = [e for e in events if e["type"] == "error"]
+        assert error_events, "Expected an error event for Anthropic BYOK in chat mode"
+        assert "Anthropic" in error_events[0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_byok_provider_resolution_failure_falls_back_to_github_token(self):
+        """When Provider.get() raises, handle_chat falls back to github_token."""
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="Fallback Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="gpt-4.1",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+
+        captured_auth = []
+
+        def _mock_stream(method, url, headers, json):
+            captured_auth.append(headers.get("Authorization", ""))
+            return _make_stream_ctx(["data: [DONE]"])()
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.chat_response_duration_seconds", MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_prov_cls.get = AsyncMock(side_effect=Exception("DB connection error"))
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _mock_stream
+            mock_client_cls.return_value = mock_client
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token="ghp_fallback_token",
+                ):
+                    events.append(ev)
+
+        assert captured_auth[0] == "Bearer ghp_fallback_token"
+        assert any(e["type"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_byok_token_resolution_returns_none_falls_back_to_github_token(self):
+        """When token_manager returns None for the provider key, fall back to github_token."""
+        from app.models.provider import ProviderType
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="Fallback Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="gpt-4.1",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+        provider = _make_provider_mock(ProviderType.OPENAI, base_url="https://api.openai.com/v1")
+
+        captured_auth = []
+
+        def _mock_stream(method, url, headers, json):
+            captured_auth.append(headers.get("Authorization", ""))
+            return _make_stream_ctx(["data: [DONE]"])()
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.chat_response_duration_seconds", MagicMock(labels=MagicMock(return_value=MagicMock(observe=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.token_manager") as mock_tm,
+            patch("app.services.chat_handler.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value=None)  # token not found
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _mock_stream
+            mock_client_cls.return_value = mock_client
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token="ghp_fallback_token",
+                ):
+                    events.append(ev)
+
+        assert captured_auth[0] == "Bearer ghp_fallback_token"
+        assert any(e["type"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_byok_http_error_logs_response_body_and_yields_error(self):
+        """When LLM returns non-2xx, handler logs response body and yields error event."""
+        from app.models.provider import ProviderType
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(
+            id=FAKE_ID,
+            name="BYOK Bot",
+            description="",
+            system_prompt="You are helpful.",
+            model="gpt-4o",
+            mcp_server_ids=[],
+            mcp_server_tags=[],
+            tool_definitions=[],
+            builtin_tools=[],
+            custom_tool_ids=[],
+            skill_ids=[],
+            provider_id=FAKE_ID,
+        )
+        session = _fake_session()
+        provider = _make_provider_mock(ProviderType.OPENAI, base_url="https://api.openai.com/v1")
+
+        def _mock_error_stream(method, url, headers, json):
+            resp = AsyncMock()
+            resp.__aenter__ = AsyncMock(return_value=resp)
+            resp.__aexit__ = AsyncMock(return_value=False)
+            resp.status_code = 400
+            resp.aread = AsyncMock(return_value=b'{"error": "bad request"}')
+
+            def _ctx():
+                return resp
+
+            return _ctx()
+
+        with (
+            patch("app.services.chat_handler.build_chat_context", new=AsyncMock(return_value="")),
+            patch("app.services.chat_handler.chat_messages_total", MagicMock(labels=MagicMock(return_value=MagicMock(inc=MagicMock())))),
+            patch("app.services.chat_handler.Provider") as mock_prov_cls,
+            patch("app.services.chat_handler.token_manager") as mock_tm,
+            patch("app.services.chat_handler.httpx.AsyncClient") as mock_client_cls,
+        ):
+            mock_prov_cls.get = AsyncMock(return_value=provider)
+            mock_tm.get_token_value = AsyncMock(return_value="sk-openai-key")
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = _mock_error_stream
+            mock_client_cls.return_value = mock_client
+
+            fake_msg = MagicMock()
+            fake_msg.id = FAKE_MSG_ID
+            fake_msg.insert = AsyncMock()
+            mock_chat_msg_cls = MagicMock(return_value=fake_msg)
+            mock_chat_msg_cls.find = MagicMock(return_value=_fake_query([]))
+
+            with patch("app.services.chat_handler.ChatMessage", mock_chat_msg_cls):
+                from app.services.chat_handler import handle_chat
+                events = []
+                async for ev in handle_chat(
+                    agent=agent,
+                    session=session,
+                    user_message="Hello",
+                    github_user="testuser",
+                    github_token=None,
+                ):
+                    events.append(ev)
+
+        error_events = [e for e in events if e["type"] == "error"]
+        assert error_events, "Expected error event when LLM returns 400"
+        assert error_events[0]["message"] == "LLM request failed. Please try again."
 
 
 # ── SSE format tests ──────────────────────────────────────────────────────────
@@ -503,11 +1055,12 @@ def _fake_query(results):
     return q
 
 
-def _make_stream_ctx(lines):
+def _make_stream_ctx(lines, status_code: int = 200):
     """Return a mock async context manager for httpx client.stream()."""
     resp = AsyncMock()
     resp.__aenter__ = AsyncMock(return_value=resp)
     resp.__aexit__ = AsyncMock(return_value=False)
+    resp.status_code = status_code
     resp.raise_for_status = MagicMock()
     resp.aiter_lines = MagicMock(return_value=aiter_from_list(lines))
 
