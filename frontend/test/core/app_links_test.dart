@@ -19,9 +19,10 @@ void main() {
       );
     });
 
-    test('marks mapped routes as legacy-backed until native parity lands', () {
+    test('no mapped routes embed legacy now that all screens are native', () {
       expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.dashboardRoot), isFalse);
-      expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.tasks), isTrue);
+      expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.tasks), isFalse);
+      expect(AppLinks.shouldEmbedLegacyRoute(AppLinks.chat), isFalse);
       expect(AppLinks.shouldEmbedLegacyRoute('/settings'), isFalse);
     });
 
