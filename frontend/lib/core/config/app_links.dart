@@ -20,10 +20,22 @@ class AppLinks {
   static const String apiBasePath = '/api';
   static const String legacyDashboardBasePath = '/dashboard';
 
-  /// Remove routes from legacy embed as they gain full Flutter parity.
+  /// All routes now render native Flutter screens.
   static const Set<String> _nativeRoutes = <String>{
     dashboardRoot,
+    agents,
+    mcpServers,
     customTools,
+    skills,
+    knowledge,
+    guardrails,
+    tokens,
+    providers,
+    workflows,
+    scheduledAgents,
+    tasks,
+    runTask,
+    chat,
   };
 
   static const Map<String, String> _legacyPagesByRoute = {

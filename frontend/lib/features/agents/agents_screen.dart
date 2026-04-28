@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../core/config/app_links.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/widgets/export_import_dialog.dart';
 import '../../core/widgets/retro_card.dart';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,26 @@ class AgentsScreen extends StatelessWidget {
             title: 'AGENTS',
             subtitle: 'Configured AI agents',
             actions: [
+              RetroButton(
+                label: 'EXPORT',
+                onPressed: () => showExportDialog(
+                  context,
+                  apiPath: '/agents/export',
+                  resourceLabel: 'AGENTS',
+                ),
+                icon: Icons.download_outlined,
+                color: accentSlate,
+              ),
+              RetroButton(
+                label: 'IMPORT',
+                onPressed: () => showImportDialog(
+                  context,
+                  apiPath: '/agents/import',
+                  resourceLabel: 'AGENTS',
+                ),
+                icon: Icons.upload_outlined,
+                color: accentSlate,
+              ),
               RetroButton(
                 label: 'NEW AGENT',
                 onPressed: () {},
@@ -473,6 +494,26 @@ class SkillsScreen extends StatelessWidget {
             subtitle: 'Reusable skill modules',
             actions: [
               RetroButton(
+                label: 'EXPORT',
+                onPressed: () => showExportDialog(
+                  context,
+                  apiPath: '/skills/export',
+                  resourceLabel: 'SKILLS',
+                ),
+                icon: Icons.download_outlined,
+                color: accentLavender,
+              ),
+              RetroButton(
+                label: 'IMPORT',
+                onPressed: () => showImportDialog(
+                  context,
+                  apiPath: '/skills/import',
+                  resourceLabel: 'SKILLS',
+                ),
+                icon: Icons.upload_outlined,
+                color: accentLavender,
+              ),
+              RetroButton(
                 label: 'INSTALL SKILL',
                 onPressed: () {},
                 icon: Icons.bolt,
@@ -516,6 +557,26 @@ class KnowledgeScreen extends StatelessWidget {
             title: 'KNOWLEDGE',
             subtitle: 'Knowledge bases and document stores',
             actions: [
+              RetroButton(
+                label: 'EXPORT',
+                onPressed: () => showExportDialog(
+                  context,
+                  apiPath: '/knowledge-sources/export',
+                  resourceLabel: 'KNOWLEDGE',
+                ),
+                icon: Icons.download_outlined,
+                color: accentTeal,
+              ),
+              RetroButton(
+                label: 'IMPORT',
+                onPressed: () => showImportDialog(
+                  context,
+                  apiPath: '/knowledge-sources/import',
+                  resourceLabel: 'KNOWLEDGE',
+                ),
+                icon: Icons.upload_outlined,
+                color: accentTeal,
+              ),
               RetroButton(
                 label: 'ADD SOURCE',
                 onPressed: () {},

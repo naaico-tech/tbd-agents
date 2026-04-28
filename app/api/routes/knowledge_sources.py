@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_current_user
 from app.models.knowledge_item import KnowledgeItem
 from app.models.knowledge_source import KnowledgeSource, KnowledgeSourceStatus, KnowledgeSourceType
+from app.schemas.export_import import (
+    ExportedKnowledgeSource,
+    ImportResult,
+    KnowledgeSourceExportBundle,
+    KnowledgeSourceImportBundle,
+)
 from app.schemas.knowledge import (
     KnowledgeSourceCreate,
     KnowledgeSourceResponse,
@@ -58,6 +64,52 @@ async def list_knowledge_sources(
     return [_to_response(s) for s in sources]
 
 
+def _to_exported_ks(source: KnowledgeSource) -> ExportedKnowledgeSource:
+    return ExportedKnowledgeSource(
+        name=source.name,
+        description=source.description,
+        source_type=source.source_type,
+        connection_config=source.connection_config,
+        tags=source.tags,
+    )
+
+
+@router.get("/export", response_model=KnowledgeSourceExportBundle)
+async def export_knowledge_sources(_user=Depends(get_current_user)):
+    sources = await KnowledgeSource.find_all().to_list()
+    return KnowledgeSourceExportBundle(items=[_to_exported_ks(s) for s in sources])
+
+
+@router.get("/{source_id}/export", response_model=KnowledgeSourceExportBundle)
+async def export_knowledge_source(source_id: str, _user=Depends(get_current_user)):
+    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    if not source:
+        raise HTTPException(status_code=404, detail="Knowledge source not found")
+    return KnowledgeSourceExportBundle(items=[_to_exported_ks(source)])
+
+
+@router.post("/import", response_model=ImportResult, status_code=201)
+async def import_knowledge_sources(
+    body: KnowledgeSourceImportBundle, _user=Depends(get_current_user)
+):
+    result = ImportResult()
+    for item in body.items:
+        try:
+            source = KnowledgeSource(
+                name=item.name,
+                description=item.description,
+                source_type=KnowledgeSourceType(item.source_type),
+                connection_config=item.connection_config,
+                tags=item.tags,
+            )
+            await source.insert()
+            result.ids.append(str(source.id))
+            result.created += 1
+        except Exception as exc:
+            result.errors.append(f"{item.name}: {exc}")
+    return result
+
+
 @router.get("/{source_id}", response_model=KnowledgeSourceResponse)
 async def get_knowledge_source(source_id: str, _user=Depends(get_current_user)):
     source = await KnowledgeSource.get(PydanticObjectId(source_id))
@@ -76,7 +128,9 @@ async def update_knowledge_source(
     update_data = body.model_dump(exclude_none=True)
     if "source_type" in update_data:
         update_data["source_type"] = KnowledgeSourceType(update_data["source_type"])
-    connection_fields_updated = any(field in update_data for field in ("source_type", "connection_config"))
+    connection_fields_updated = any(
+        field in update_data for field in ("source_type", "connection_config")
+    )
     if update_data:
         update_data["updated_at"] = datetime.now(UTC)
         if connection_fields_updated:

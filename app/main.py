@@ -13,6 +13,7 @@ from app.api.routes import (
     agents,
     chat,
     custom_tools,
+    export_import,
     guardrails,
     health,
     knowledge_items,
@@ -159,6 +160,7 @@ app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(chat.router)
 app.include_router(custom_tools.router)
+app.include_router(export_import.router)
 app.include_router(guardrails.router)
 app.include_router(providers.router)
 app.include_router(scheduled_agents.router)
