@@ -91,6 +91,7 @@ nav:
       - Custom Tools: guide/custom-tools.md
       - Agent Chat: guide/agent-chat.md
       - Observability: guide/observability.md
+      - Import & Export: guide/import-export.md
   - Architecture:
       - architecture/index.md
       - System Overview: architecture/system-overview.md
@@ -111,4 +112,5 @@ nav:
       - Guardrails: api/guardrails.md
       - Tasks: api/tasks.md
       - Models: api/models.md
+      - Import & Export: api/import-export.md
   - Contributing: contributing.md

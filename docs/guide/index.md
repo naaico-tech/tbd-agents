@@ -83,4 +83,12 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: Custom Tools](custom-tools.md)
 
+-   :material-database-export:{ .lg .middle } **Import & Export**
+
+    ---
+
+    Back up, migrate, and share agent configurations as JSON bundles.
+
+    [:octicons-arrow-right-24: Import & Export](import-export.md)
+
 </div>

@@ -87,31 +87,11 @@ docker compose exec mongo mongorestore --db tbd_agents /dump/tbd_agents
 
 ## Version-Specific Notes
 
-### v0.1.0 → v0.2.0
+### v0.1.0
 
-**New features requiring attention:**
+This is the first public release of TBD Agents. No migration is needed — start fresh.
 
-| Feature | Impact |
-|---|---|
-| Output guardrails | New `output_config` field on Guardrail documents. No migration needed — defaults to `null`. |
-| SSE reconnection | Event bus now assigns monotonic event IDs. Clients can send `Last-Event-ID` header to replay missed events. No migration needed. |
-| BYOK providers | New `providers` collection. No migration needed. |
-| Knowledge sources | New `knowledge_sources` and `knowledge_items` collections plus GridFS buckets. No migration needed. |
-| Agent memory | New `memories` collection. No migration needed. |
-| MCP servers | New `mcp_servers` collection. No migration needed. |
-
-**Environment variables added in v0.2.0:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for event bus and caching |
-| `QDRANT_URL` | — | Optional default Qdrant endpoint |
-| `GITHUB_CLIENT_ID` | — | GitHub OAuth app client ID |
-| `GITHUB_CLIENT_SECRET` | — | GitHub OAuth app client secret |
-
-**Redis requirements:**
-
-v0.2.0 introduces Redis as a required dependency for SSE streaming and halt signals. Ensure Redis is running and `REDIS_URL` is configured.
+See the [CHANGELOG](https://github.com/naaico-tech/tbd-agents/blob/master/CHANGELOG.md) for a full list of features included in this release.
 
 ---
 
@@ -122,7 +102,7 @@ If deploying via the Helm chart:
 ```bash
 # Update chart values
 helm upgrade tbd-agents ./helm/tbd-agents \
-  --set image.tag=0.2.0 \
+  --set image.tag=0.1.0 \
   --reuse-values
 
 # Verify rollout
