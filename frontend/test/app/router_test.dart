@@ -52,7 +52,8 @@ void main() {
     router.go(AppLinks.agents);
     await tester.pumpAndSettle();
 
-    expect(find.text('AGENTS'), findsOneWidget);
+    // "AGENTS" now appears in both the nav tab and the native screen header.
+    expect(find.text('AGENTS'), findsAtLeast(1));
     expect(find.text('DASHBOARD'), findsNothing);
   });
 
@@ -67,11 +68,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('WORKFLOWS'), findsOneWidget);
+    // workflowDetailPattern is now native (inherits from workflows in _nativeRoutes)
+    // so no legacy embed is shown; the portal shell remains visible.
     expect(
       find.text(
         'Legacy functionality is embedded here until this screen reaches Flutter parity.',
       ),
-      findsOneWidget,
+      findsNothing,
     );
   });
 }
