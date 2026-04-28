@@ -24,6 +24,7 @@ class CustomTool(Document):
     env_config: dict[str, str] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     is_enabled: bool = True
+    is_plugin: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

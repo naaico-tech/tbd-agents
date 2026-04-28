@@ -106,6 +106,7 @@
   .badge-yellow { background: rgba(255,158,74,.12); color: var(--yellow); border: 1px solid rgba(255,158,74,.25); }
   .badge-red { background: rgba(255,58,94,.12); color: var(--red); border: 1px solid rgba(255,58,94,.25); }
   .badge-purple { background: rgba(169,118,249,.12); color: var(--purple); border: 1px solid rgba(169,118,249,.25); }
+  .badge-teal { background: rgba(54,224,224,.18); color: var(--cyan); border: 1px solid rgba(54,224,224,.4); font-weight: 700; }
   .badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
   .badge-gray { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
   .tag { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 11px; background: var(--surface2);
@@ -1380,15 +1381,21 @@ async function loadCustomTools() {
     document.getElementById('custom-tools-body').innerHTML = customTools.length
       ? customTools.map(c => {
           const tagBadges = c.tags?.length ? c.tags.map(t => `<span class="badge badge-purple">${esc(t)}</span> `).join('') : '';
+          const pluginBadge = c.is_plugin ? `<span class="badge badge-teal" title="Bundled plugin — read-only">PLUGIN</span> ` : '';
+          const actions = c.is_plugin
+            ? `<div class="btn-group">
+                <button class="btn btn-sm" onclick="runCustomToolModal('${c.id}')">Run</button>
+               </div>`
+            : `<div class="btn-group">
+                <button class="btn btn-sm" onclick="openCustomToolModal('${c.id}')">Edit</button>
+                <button class="btn btn-sm" onclick="runCustomToolModal('${c.id}')">Run</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteCustomTool('${c.id}')">Delete</button>
+               </div>`;
           return `<tr>
-          <td><strong>${esc(c.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(c.description||'')}</span>${tagBadges ? '<br>'+tagBadges : ''}</td>
+          <td>${pluginBadge}<strong>${esc(c.name)}</strong><br><span style="font-size:12px;color:var(--muted)">${esc(c.description||'')}</span>${tagBadges ? '<br>'+tagBadges : ''}</td>
           <td>${statusBadge(c.is_enabled ? 'active' : 'halted')}</td>
           <td>${fmtDate(c.created_at)}</td>
-          <td><div class="btn-group">
-            <button class="btn btn-sm" onclick="openCustomToolModal('${c.id}')">Edit</button>
-            <button class="btn btn-sm" onclick="runCustomToolModal('${c.id}')">Run</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteCustomTool('${c.id}')">Delete</button>
-          </div></td>
+          <td>${actions}</td>
         </tr>`;
         }).join('')
       : '<tr><td colspan="5" class="empty-state">No custom tools. Create one to run python tools natively.</td></tr>';

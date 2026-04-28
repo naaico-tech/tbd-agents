@@ -14,6 +14,7 @@ def client():
         patch.object(app_main, "init_db", new_callable=AsyncMock),
         patch.object(app_main, "init_telemetry"),
         patch.object(app_main, "Instrumentator") as mock_instr,
+        patch.object(app_main.plugin_loader, "load_plugins_from_config", new_callable=AsyncMock),
     ):
         mock_inst = MagicMock()
         mock_inst.instrument.return_value = mock_inst

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ── Event loop ───────────────────────────────────────────────────────────────
 
 
@@ -48,6 +47,8 @@ def app_client():
         patch("app.main.init_db", new_callable=AsyncMock),
         patch("app.main.init_telemetry"),
         patch("app.main.Instrumentator") as mock_instr,
+        # Prevent plugin loader from hitting uninitialised Beanie collections
+        patch("app.main.plugin_loader.load_plugins_from_config", new_callable=AsyncMock),
     ):
         mock_instr.return_value.instrument.return_value.expose = MagicMock()
         from app.main import app

@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     otel_service_name: str = "tbd-agents"
     # Internal API base URL (used by memory MCP server subprocess)
     api_base_url: str = "http://app:8000"
+    # Plugin system
+    plugins_dir: str = "app/plugins"
+    plugins_config: str = "app/plugins.yaml"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

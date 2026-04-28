@@ -29,7 +29,7 @@ from app.api.routes import (
     workflows,
 )
 from app.config import settings
-from app.core import tools_loader
+from app.core import plugin_loader
 from app.db import init_db
 from app.observability import celery_queue_length, init_telemetry
 from app.services import memory_stm
@@ -113,11 +113,11 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized.")
 
-    # Auto-load disk-based tools
+    # Load plugins from app/plugins.yaml registry
     try:
-        await tools_loader.load_tools_from_disk()
+        await plugin_loader.load_plugins_from_config()
     except Exception as exc:
-        logger.error("Failed to auto-load custom tools: %s", exc)
+        logger.error("Failed to load plugins: %s", exc)
 
     # Warm up Short-Term Memory cache from MongoDB → Redis
     try:

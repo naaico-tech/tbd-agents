@@ -34,6 +34,7 @@ class CustomToolResponse(BaseModel):
     env_config: dict[str, str]
     tags: list[str]
     is_enabled: bool
+    is_plugin: bool
     created_at: datetime
     updated_at: datetime
 

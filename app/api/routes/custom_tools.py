@@ -46,6 +46,7 @@ def _to_response(tool: CustomTool) -> CustomToolResponse:
         env_config=tool.env_config,
         tags=tool.tags,
         is_enabled=tool.is_enabled,
+        is_plugin=tool.is_plugin,
         created_at=tool.created_at,
         updated_at=tool.updated_at,
     )

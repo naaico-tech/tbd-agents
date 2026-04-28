@@ -18,9 +18,15 @@ Design decisions
 import asyncio
 import json
 import logging
+import os
+import pathlib
 import sys
 import textwrap
 from typing import Any
+
+# Project root directory – injected into subprocess PYTHONPATH so that plugin
+# source code can import from app.* packages.
+_PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parent.parent.parent)
 
 logger = logging.getLogger(__name__)
 
@@ -89,16 +95,23 @@ async def infer_schema(source_code: str, func_name: str) -> dict:
         print(json.dumps(schema))
     """)
 
+    # Build env with project root so plugin source can do `from app.* import ...`
+    _infer_env = dict(os.environ)
+    _pypath = _infer_env.get("PYTHONPATH", "")
+    _infer_env["PYTHONPATH"] = f"{_PROJECT_ROOT}{os.pathsep}{_pypath}" if _pypath else _PROJECT_ROOT
+    _infer_env["TBD_PROJECT_ROOT"] = _PROJECT_ROOT
+
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-c", script,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_infer_env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"type": "object", "properties": {}}
 
@@ -157,16 +170,25 @@ async def validate_tool(source_code: str, func_name: str) -> dict:
             print(json.dumps({{"valid": False, "error": str(exc)}}))
     """)
 
+    # Build env with project root so plugin source can do `from app.* import ...`
+    _validate_env = dict(os.environ)
+    _pypath = _validate_env.get("PYTHONPATH", "")
+    _validate_env["PYTHONPATH"] = (
+        f"{_PROJECT_ROOT}{os.pathsep}{_pypath}" if _pypath else _PROJECT_ROOT
+    )
+    _validate_env["TBD_PROJECT_ROOT"] = _PROJECT_ROOT
+
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-c", script,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_validate_env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"valid": False, "error": "Validation timed out"}
 
@@ -190,7 +212,6 @@ async def run_tool(source_code: str, func_name: str, arguments: dict, env: dict[
     Returns the JSON-encoded result string (ready to use as a tool message).
     Both sync and async functions are supported.
     """
-    import os
     args_json = json.dumps(arguments)
 
     # The runner script is eval-safe: source_code + func_name are embedded
@@ -220,8 +241,16 @@ async def run_tool(source_code: str, func_name: str, arguments: dict, env: dict[
             print(json.dumps({{"result": str(result) if result is not None else ""}}))
     """)
 
-    # Merge host environment variables with the tools specific env dict
+    # Merge host environment variables with the tool's specific env dict.
+    # Inject project root into PYTHONPATH first so plugin source code can do
+    # `from app.* import …`. Tool-supplied env is applied afterwards so it can
+    # still override other variables, but PYTHONPATH is pre-populated.
     merged_env = dict(os.environ)
+    _existing_pypath = merged_env.get("PYTHONPATH", "")
+    merged_env["PYTHONPATH"] = (
+        f"{_PROJECT_ROOT}{os.pathsep}{_existing_pypath}" if _existing_pypath else _PROJECT_ROOT
+    )
+    merged_env["TBD_PROJECT_ROOT"] = _PROJECT_ROOT
     if env:
         merged_env.update(env)
 
@@ -235,7 +264,7 @@ async def run_tool(source_code: str, func_name: str, arguments: dict, env: dict[
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=CUSTOM_TOOL_TIMEOUT_SECONDS
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         logger.warning("Custom tool '%s' timed out after %ds", func_name, CUSTOM_TOOL_TIMEOUT_SECONDS)
         return json.dumps({"error": f"Tool '{func_name}' timed out after {CUSTOM_TOOL_TIMEOUT_SECONDS}s"})
