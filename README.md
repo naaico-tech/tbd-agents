@@ -20,53 +20,69 @@
   ⚡ Built by <a href="https://www.naaico.com"><strong>NAAICO</strong></a> ⚡
 </p>
 
+<p align="center">
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" alt="License: Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/Celery-distributed-37814A?style=flat-square&logo=celery&logoColor=white" alt="Celery">
+  <img src="https://img.shields.io/badge/Redis-pub%2Fsub-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/MongoDB-beanie-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
+  <img src="https://img.shields.io/badge/GitHub%20Copilot-SDK-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub Copilot SDK">
+  <img src="https://img.shields.io/badge/MCP-compatible-6236FF?style=flat-square" alt="MCP Compatible">
+</p>
+
 ---
 
-```
-╔══════════════════════════════════════════════════════════════════════╗
-║  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ║
-║  ░  TBD Agent lets you build, control, and trigger your own     ░  ║
-║  ░  custom AI agents over the web — no black boxes, no vendor   ░  ║
-║  ░  lock-in, just a clean API backed by the GitHub Copilot SDK  ░  ║
-║  ░  that you run on your own infrastructure.                    ░  ║
-║  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  ║
-╚══════════════════════════════════════════════════════════════════════╝
-```
-
-Spin up purpose-built agents with distinct system prompts, wire them to any MCP tool server, send a prompt over HTTP, and watch them work in real-time through streaming Server-Sent Events. Need to scale? Celery workers distribute agent execution across as many nodes as you want.
-
 > 🎮 **TBD** — *To Be Decided* by you: what your agents do, which tools they use, and how far they go.
+
+Build, control, and trigger custom AI agents over the web — no black boxes, no vendor lock-in. A clean REST API backed by the GitHub Copilot SDK that runs entirely on **your** infrastructure.
+
+<p align="center">
+  <!-- Replace the src below with your actual demo GIF once recorded -->
+  <img src="docs/demo.gif" alt="TBD Agents demo" width="800">
+  <br>
+  <sub><em>↑ Record a demo and drop the GIF at <code>docs/demo.gif</code> to show it here</em></sub>
+</p>
 
 ---
 
 ## ★ Highlights
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  ██ POWER-UPS UNLOCKED ██                                          │
-└─────────────────────────────────────────────────────────────────────┘
-```
+<table>
+<tr>
+<td width="50%">
 
-- 🏠 **Fully self-hosted** — runs on your infra via Docker Compose; no SaaS dependency beyond GitHub Copilot billing
-- 🤖 **Custom agents over HTTP** — create, configure, and trigger agents with a simple REST API or the built-in dashboard
-- ⚡ **Real-time streaming** — SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client
-- 🔀 **Distributed workers** — Celery + Redis architecture lets you scale agent execution horizontally; add workers to handle load
-- 🔧 **MCP tool ecosystem** — connect any MCP-compatible tool server (Datadog, Jira, Notion, Slack, and hundreds more) via stdio or SSE
-- ♾️ **Infinite sessions** — automatic context compaction keeps long-running agents alive without hitting context limits
-- 📊 **Usage & cost tracking** — per-workflow token counts, premium request quotas, and cost data from the Copilot SDK
-- 🧩 **Skills system** — modular instruction sets that can be installed per workflow to shape agent behaviour
-- 📤 **Output destinations** — agents autonomously decide when to push results to Notion pages or Slack channels
-- 📚 **Knowledge bases** — attach vector databases (Qdrant) or upload files/text tagged for retrieval; agents pull relevant knowledge into their context automatically
+🏠 **Fully self-hosted**<br>Runs on your infra via Docker Compose; no SaaS dependency beyond GitHub Copilot billing.
+
+⚡ **Real-time streaming**<br>SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client.
+
+🔧 **MCP tool ecosystem**<br>Connect any MCP-compatible tool server (Datadog, Jira, Notion, Slack, and hundreds more) via stdio or SSE.
+
+📊 **Usage & cost tracking**<br>Per-workflow token counts, premium request quotas, and cost data from the Copilot SDK.
+
+📤 **Output destinations**<br>Agents autonomously push results to Notion pages or Slack channels.
+
+</td>
+<td width="50%">
+
+🤖 **Custom agents over HTTP**<br>Create, configure, and trigger agents with a simple REST API or the built-in dashboard.
+
+🔀 **Distributed workers**<br>Celery + Redis architecture lets you scale agent execution horizontally; add workers to handle load.
+
+♾️ **Infinite sessions**<br>Automatic context compaction keeps long-running agents alive without hitting context limits.
+
+🧩 **Skills system**<br>Modular instruction sets that can be installed per workflow to shape agent behaviour.
+
+📚 **Knowledge bases**<br>Attach Qdrant vector DBs or upload files/text tagged for retrieval; agents pull relevant knowledge automatically.
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🚀 Quick Start
-
-```
- ╔═══════════════════════════════╗
- ║  PRESS START ► ► ► ► ► ► ►  ║
- ╚═══════════════════════════════╝
-```
 
 ```bash
 git clone <repo-url> && cd tbd-agents
@@ -79,16 +95,12 @@ docker-compose up --build
 
 Your GitHub PAT needs the `copilot` scope — [create one here](https://github.com/settings/tokens).
 
-```
- ┌──────────────────────────────────────────────────┐
- │  ► Legacy UI ── http://localhost:8000/dashboard  │
- │  ► New UI ───── http://localhost:8000/dashboard-new-ui │
- │  ► API docs  ─── http://localhost:8000/docs       │
- │  ► API base  ─── http://localhost:8000/api        │
- └──────────────────────────────────────────────────┘
-```
-
-`/dashboard` serves the legacy dashboard. `/dashboard-new-ui` serves the built Flutter web app from the FastAPI container, and `/dashboard-legacy` remains as a compatibility alias for the legacy UI.
+| URL | Description |
+|---|---|
+| `http://localhost:8000/dashboard` | Legacy UI |
+| `http://localhost:8000/dashboard-new-ui` | New Flutter UI |
+| `http://localhost:8000/docs` | Swagger / API docs |
+| `http://localhost:8000/api` | API base path |
 
 See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for detailed local development instructions.
 
@@ -96,25 +108,68 @@ See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) f
 
 ## 📖 Documentation
 
-```
- ╔═══════════════════════════════════════╗
- ║  SELECT YOUR QUEST                    ║
- ╠═══════════════════════════════════════╣
- ║                                       ║
- ║  [1] Local Setup                      ║
- ║  [2] Architecture                     ║
- ║  [3] Features                         ║
- ║  [4] Contributing                     ║
- ║                                       ║
- ╚═══════════════════════════════════════╝
-```
-
 | Document | Description |
 |---|---|
 | [Local Setup](docs/getting-started/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
 | [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
 | [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
 | [Contributing](CONTRIBUTING.md) | How to contribute: setup, coding standards, PR guidelines |
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph TB
+    subgraph Clients
+        Dashboard([Dashboard])
+        CLI([curl / CLI])
+        Apps([Applications])
+    end
+
+    subgraph API["API Layer (FastAPI :8000)"]
+        FastAPI[FastAPI + Uvicorn]
+    end
+
+    subgraph Broker["Message Broker"]
+        Redis[(Redis\nBroker + Pub/Sub)]
+    end
+
+    subgraph Workers["Worker Pool (Celery)"]
+        W1[Worker 1]
+        W2[Worker 2]
+        WN[Worker N]
+    end
+
+    subgraph External["External Services"]
+        SDK[Copilot SDK\nJSON-RPC]
+        Models[Copilot Models API]
+        MCP1[MCP: Jira]
+        MCP2[MCP: Datadog]
+        MCPN[MCP: ...]
+    end
+
+    subgraph Storage
+        Mongo[(MongoDB)]
+        Qdrant[(Qdrant\nvector DB)]
+    end
+
+    Dashboard & CLI & Apps -->|HTTP + Auth| FastAPI
+    FastAPI -->|Enqueue tasks| Redis
+    FastAPI -->|Subscribe events| Redis
+    FastAPI -->|SSE stream| Dashboard & CLI & Apps
+    FastAPI -->|Read / Write| Mongo
+
+    Redis -->|Deliver tasks| W1 & W2 & WN
+    W1 & W2 & WN -->|Publish events| Redis
+    W1 & W2 & WN -->|Persist state| Mongo
+    W1 & W2 & WN -->|SDK session| SDK
+
+    SDK --> Models
+    SDK --> MCP1 & MCP2 & MCPN
+
+    FastAPI -.->|Optional| Qdrant
+```
 
 ---
 
@@ -199,7 +254,7 @@ DELETE /api/workflows/{id}/skills/{skill_id} ← Remove skill from workflow
 
 ## 🕹️ Usage Examples
 
-### ► Stage 1 — Create an Agent
+### Stage 1 — Create an Agent
 
 ```bash
 curl -X POST http://localhost:8000/api/agents \
@@ -212,7 +267,7 @@ curl -X POST http://localhost:8000/api/agents \
   }'
 ```
 
-### ► Stage 2 — Register an MCP Server
+### Stage 2 — Register an MCP Server
 
 ```bash
 curl -X POST http://localhost:8000/api/mcps \
@@ -229,7 +284,7 @@ curl -X POST http://localhost:8000/api/mcps \
   }'
 ```
 
-### ► Stage 3 — Create a Workflow and Send a Prompt
+### Stage 3 — Create a Workflow and Send a Prompt
 
 ```bash
 # Create workflow with Notion output + infinite session
@@ -256,13 +311,13 @@ curl -X POST "http://localhost:8000/api/workflows/$WORKFLOW_ID/prompt" \
   -d '{"prompt": "Investigate the spike in p99 latency on the payments service over the last 24 hours."}'
 ```
 
-### ► Stage 4 — Stream Results in Real-Time
+### Stage 4 — Stream Results in Real-Time
 
 ```bash
 curl -N "http://localhost:8000/api/workflows/$WORKFLOW_ID/stream"
 ```
 
-### ► Stage 5 — Add a Knowledge Base
+### Stage 5 — Add a Knowledge Base
 
 ```bash
 # Register a local MongoDB-backed knowledge source
@@ -301,7 +356,7 @@ curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
   -d '{"knowledge_tags": ["docs"]}'
 ```
 
-### ► Stage 6 — Connect a Qdrant Vector Database
+### Stage 6 — Connect a Qdrant Vector Database
 
 To use an external Qdrant instance as a knowledge source:
 
@@ -348,50 +403,37 @@ For local development, uncomment the `qdrant` service in `docker-compose.yml` an
 
 ## 🧠 Supported Models
 
-```
- ┌─────────────────────────────────────────────────┐
- │  ▓▓ MODEL SELECT ▓▓                             │
- │                                                  │
- │  ► gpt-4.1  ► gpt-4.1-mini  ► gpt-4.1-nano     │
- │  ► gpt-4o   ► gpt-4o-mini                       │
- │  ► o3       ► o3-mini       ► o4-mini            │
- │  ► claude-sonnet-4.5 (if available via Copilot)  │
- │                                                  │
- └─────────────────────────────────────────────────┘
-```
+Any model available through GitHub Copilot is supported. Currently includes:
 
-Any model available through GitHub Copilot is supported.
+| Family | Models |
+|---|---|
+| GPT-4.1 | `gpt-4.1` · `gpt-4.1-mini` · `gpt-4.1-nano` |
+| GPT-4o | `gpt-4o` · `gpt-4o-mini` |
+| OpenAI o-series | `o3` · `o3-mini` · `o4-mini` |
+| Claude | `claude-sonnet-4.5` *(if available via Copilot)* |
 
 ---
 
 ## 🏗️ Tech Stack
 
-```
- ┌────────────────┬───────────────────────────────────┐
- │  ░░ COMPONENT  │  ░░ TECHNOLOGY                    │
- ├────────────────┼───────────────────────────────────┤
- │  API           │  FastAPI + Uvicorn                │
- │  Agent engine  │  GitHub Copilot SDK (JSON-RPC)    │
- │  Task queue    │  Celery + Redis                   │
- │  Event bus     │  Redis Pub/Sub                    │
- │  Database      │  MongoDB + Beanie ODM             │
- │  Vector DB     │  Qdrant (optional, for knowledge)  │
- │  Frontend      │  Flutter web + legacy HTML dashboard │
- │  Containers    │  Docker Compose                   │
- └────────────────┴───────────────────────────────────┘
-```
+| Component | Technology |
+|---|---|
+| API | ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white&style=flat-square) FastAPI + Uvicorn |
+| Agent engine | ![GitHub](https://img.shields.io/badge/GitHub%20Copilot-SDK-181717?logo=github&logoColor=white&style=flat-square) GitHub Copilot SDK (JSON-RPC) |
+| Task queue | ![Celery](https://img.shields.io/badge/Celery-37814A?logo=celery&logoColor=white&style=flat-square) Celery + Redis |
+| Event bus | ![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white&style=flat-square) Redis Pub/Sub |
+| Database | ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white&style=flat-square) MongoDB + Beanie ODM |
+| Vector DB | ![Qdrant](https://img.shields.io/badge/Qdrant-optional-6236FF?style=flat-square) Qdrant *(optional, for knowledge)* |
+| Frontend | ![Flutter](https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white&style=flat-square) Flutter web + legacy HTML dashboard |
+| Containers | ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white&style=flat-square) Docker Compose |
 
 ---
 
 ## 📜 License
 
-MIT
+[Apache 2.0](LICENSE) — © [NAAICO](https://www.naaico.com)
 
 ---
-
-```
-═══════════════════════════════════════════════════════════════════
-```
 
 <p align="center">
 
@@ -408,4 +450,11 @@ MIT
 
 <p align="center">
   ⬛⬜⬛ A <a href="https://www.naaico.com"><strong>NAAICO</strong></a> Product ⬛⬜⬛
+</p>
+
+<p align="center">
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/GitHub%20Copilot-Powered-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub Copilot">
 </p>
