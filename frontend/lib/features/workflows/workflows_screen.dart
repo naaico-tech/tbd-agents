@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/design_tokens.dart';
+import '../../core/widgets/export_import_dialog.dart';
 import '../../core/widgets/retro_card.dart';
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,26 @@ class WorkflowsScreen extends StatelessWidget {
             title: 'WORKFLOWS',
             subtitle: 'Multi-step agent workflows',
             actions: [
+              RetroButton(
+                label: 'EXPORT',
+                onPressed: () => showExportDialog(
+                  context,
+                  apiPath: '/workflows/export',
+                  resourceLabel: 'WORKFLOWS',
+                ),
+                icon: Icons.download_outlined,
+                color: accentLavender,
+              ),
+              RetroButton(
+                label: 'IMPORT',
+                onPressed: () => showImportDialog(
+                  context,
+                  apiPath: '/workflows/import',
+                  resourceLabel: 'WORKFLOWS',
+                ),
+                icon: Icons.upload_outlined,
+                color: accentLavender,
+              ),
               RetroButton(
                 label: 'NEW WORKFLOW',
                 onPressed: () {},
