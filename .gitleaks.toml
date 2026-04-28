@@ -1,0 +1,19 @@
+# gitleaks configuration — https://github.com/gitleaks/gitleaks
+title = "tbd-agents gitleaks config"
+
+[allowlist]
+  description = "Known test fixtures and historical non-sensitive values"
+  commits = [
+    # Old dummy base64 key used in early CI (decodes to "test-encryption-key-32bytes!!")
+    "2184724",
+  ]
+  paths = [
+    # Test files intentionally use fake token-format strings for mock assertions
+    '''tests/.*\.py''',
+  ]
+  regexes = [
+    # Fake GitHub tokens used only in unit-test mock patches
+    '''ghp_(abc123|env_token|test|stored_token|[a-z_]+)''',
+    # Fake OpenAI keys in test fixtures
+    '''sk-(test|test-123|[a-z]+-[0-9]+)''',
+  ]

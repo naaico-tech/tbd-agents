@@ -112,7 +112,7 @@ jobs:
       - name: Run integration tests
         env:
           TEST_MONGO_URI: mongodb://localhost:27018
-          TOKEN_ENCRYPTION_KEY: M6x0gSx-0KcqQyAdkG0eS5ja8CtmSlFZf62WtGKKZXM=
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.CI_TOKEN_ENCRYPTION_KEY }}
         run: pytest tests/integration/ -v --tb=short -x
 
       - name: Run unit tests
