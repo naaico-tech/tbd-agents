@@ -1,12 +1,17 @@
-# Production compose file — pulls pre-built images from the registry.
-# For local development (build from source) use docker-compose-dev.yml instead.
-# Usage: TBD_IMAGE=ghcr.io/naaico-tech/tbd-agents:v0.1.0 docker compose up
+# Default image for all app services.
+# In development:   docker compose up --build  (builds from source; overrides the pulled image)
+# In production:    TBD_IMAGE=ghcr.io/naaico-tech/tbd-agents:v0.1.0 docker compose up
 x-app-image: &app-image
   image: ${TBD_IMAGE:-ghcr.io/naaico-tech/tbd-agents:latest}
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
 
 services:
   app:
     <<: *app-image
+    build: *app-build
     ports:
       - "8000:8000"
     env_file:
