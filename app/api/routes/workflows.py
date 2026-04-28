@@ -17,6 +17,12 @@ from app.models.workflow import (
     WorkflowStatus,
 )
 from app.observability import sse_connections_active
+from app.schemas.export_import import (
+    ExportedWorkflow,
+    ImportResult,
+    WorkflowExportBundle,
+    WorkflowImportBundle,
+)
 from app.schemas.workflow import (
     LogEntryResponse,
     MessageResponse,
@@ -263,6 +269,85 @@ async def stream_workflow(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _to_exported_wf(wf: Workflow) -> ExportedWorkflow:
+    return ExportedWorkflow(
+        title=wf.title,
+        agent_id=wf.agent_id,
+        model=wf.model,
+        max_turns=wf.max_turns,
+        skill_ids=wf.skill_ids,
+        skill_tags=wf.skill_tags,
+        output_format=wf.output_format,
+        infinite_session=wf.infinite_session,
+        caveman=wf.caveman,
+        bypass_memory=wf.bypass_memory,
+        auto_memory=wf.auto_memory,
+        tsv_tool_results=wf.tsv_tool_results,
+        reasoning_effort=wf.reasoning_effort,
+        guardrail_ids=wf.guardrail_ids,
+        guardrail_tags=wf.guardrail_tags,
+        repo_url=wf.repo_url,
+        repo_branch=wf.repo_branch,
+        repo_token_name=wf.repo_token_name,
+    )
+
+
+@router.get("/export", response_model=WorkflowExportBundle)
+async def export_workflows(user=Depends(get_current_user)):
+    workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    return WorkflowExportBundle(items=[_to_exported_wf(wf) for wf in workflows])
+
+
+@router.get("/{workflow_id}/export", response_model=WorkflowExportBundle)
+async def export_workflow(workflow_id: str, user=Depends(get_current_user)):
+    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your workflow")
+    return WorkflowExportBundle(items=[_to_exported_wf(wf)])
+
+
+@router.post("/import", response_model=ImportResult, status_code=201)
+async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_user)):
+    result = ImportResult()
+    for item in body.items:
+        try:
+            agent = await Agent.get(PydanticObjectId(item.agent_id))
+            if not agent:
+                result.errors.append(
+                    f"{item.title or 'untitled'}: agent_id {item.agent_id!r} not found"
+                )
+                continue
+            wf = Workflow(
+                title=item.title,
+                agent_id=item.agent_id,
+                github_user=user["login"],
+                model=item.model,
+                max_turns=item.max_turns,
+                skill_ids=item.skill_ids,
+                skill_tags=item.skill_tags,
+                output_format=OutputFormat(item.output_format),
+                infinite_session=item.infinite_session,
+                caveman=item.caveman,
+                bypass_memory=item.bypass_memory,
+                auto_memory=item.auto_memory,
+                tsv_tool_results=item.tsv_tool_results,
+                reasoning_effort=item.reasoning_effort,
+                guardrail_ids=item.guardrail_ids,
+                guardrail_tags=item.guardrail_tags,
+                repo_url=item.repo_url,
+                repo_branch=item.repo_branch,
+                repo_token_name=item.repo_token_name,
+            )
+            await wf.insert()
+            result.ids.append(str(wf.id))
+            result.created += 1
+        except Exception as exc:
+            result.errors.append(f"{item.title or 'untitled'}: {exc}")
+    return result
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
