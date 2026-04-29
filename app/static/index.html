@@ -470,7 +470,7 @@
       </div>
       <div class="card">
         <div class="card-body"><table><thead><tr>
-          <th>Title</th><th>Agent</th><th>Model</th><th>Status</th><th>Tasks</th><th>Last Task</th><th>Created</th><th></th>
+          <th>Title</th><th>Agent</th><th>Model</th><th>Status</th><th>Tasks</th><th>Last Task</th><th>Output MCPs</th><th>Created</th><th></th>
         </tr></thead><tbody id="workflows-body"></tbody></table></div>
       </div>
     </div>
@@ -506,6 +506,11 @@
           <button class="btn btn-primary" id="wf-detail-send" onclick="sendTaskFromDetail()">▶ Send Task</button>
           <button class="btn btn-danger" id="wf-detail-halt" onclick="haltTaskFromDetail()" style="display:none">⏹ Stop</button>
         </div>
+      </div>
+      <!-- Output MCPs card for this workflow -->
+      <div class="card" style="margin-top:16px" id="wf-detail-output-mcps-card" style="display:none">
+        <div class="card-header"><h2>Output MCPs</h2></div>
+        <div class="card-body" id="wf-detail-output-mcps-body"></div>
       </div>
       <!-- Task history for this workflow -->
       <div class="card">
@@ -1984,6 +1989,86 @@ async function deleteGuardrail(id) {
   catch(e) { toast(e.message, 'error'); }
 }
 
+// ── Output MCP helpers ──
+let _outputMcpDraft = [];
+let _outputMcpPrefix = '';
+
+function _initOutputMcpSection(prefix, existingConfigs) {
+  _outputMcpPrefix = prefix;
+  _outputMcpDraft = (existingConfigs || []).map(c => ({
+    mcp_server_id: c.mcp_server_id || '',
+    tool_name: c.tool_name || '',
+    metadata_str: (c.metadata && Object.keys(c.metadata).length) ? JSON.stringify(c.metadata, null, 2) : '{}'
+  }));
+  _renderOutputMcpRows();
+}
+
+function _renderOutputMcpRows() {
+  const container = document.getElementById(_outputMcpPrefix + '-output-mcps');
+  if (!container) return;
+  if (_outputMcpDraft.length === 0) {
+    container.innerHTML = '<span style="color:var(--muted);font-size:13px">No output MCPs configured.</span>';
+    return;
+  }
+  container.innerHTML = _outputMcpDraft.map((entry, idx) => `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:start;margin-bottom:8px;padding:10px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
+      <div>
+        <label style="font-size:11px;color:var(--muted);margin-bottom:4px;display:block">MCP Server</label>
+        <select class="omcp-server" data-idx="${idx}" style="width:100%">
+          ${mcps.map(m => `<option value="${esc(m.id)}" ${entry.mcp_server_id === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);margin-bottom:4px;display:block">Tool Name <span style="font-weight:400">(optional)</span></label>
+        <input class="omcp-tool" data-idx="${idx}" value="${esc(entry.tool_name)}" placeholder="auto-detect first tool" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);margin-bottom:4px;display:block">Metadata JSON <span style="font-weight:400">(optional)</span></label>
+        <textarea class="omcp-meta" data-idx="${idx}" rows="2" placeholder="{}" style="width:100%;font-size:12px;font-family:monospace">${esc(entry.metadata_str)}</textarea>
+      </div>
+      <button class="btn btn-sm btn-danger" style="margin-top:18px" onclick="_removeOutputMcpRow(${idx})">✕</button>
+    </div>`).join('');
+}
+
+function _syncOutputMcpDraft() {
+  document.querySelectorAll('.omcp-server').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    if (_outputMcpDraft[idx] !== undefined) _outputMcpDraft[idx].mcp_server_id = el.value;
+  });
+  document.querySelectorAll('.omcp-tool').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    if (_outputMcpDraft[idx] !== undefined) _outputMcpDraft[idx].tool_name = el.value;
+  });
+  document.querySelectorAll('.omcp-meta').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    if (_outputMcpDraft[idx] !== undefined) _outputMcpDraft[idx].metadata_str = el.value;
+  });
+}
+
+function _addOutputMcpRow() {
+  _syncOutputMcpDraft();
+  _outputMcpDraft.push({ mcp_server_id: mcps[0]?.id || '', tool_name: '', metadata_str: '{}' });
+  _renderOutputMcpRows();
+}
+
+function _removeOutputMcpRow(idx) {
+  _syncOutputMcpDraft();
+  _outputMcpDraft.splice(idx, 1);
+  _renderOutputMcpRows();
+}
+
+function _collectOutputMcps() {
+  _syncOutputMcpDraft();
+  const result = [];
+  for (const entry of _outputMcpDraft) {
+    if (!entry.mcp_server_id) continue;
+    let metadata = {};
+    try { metadata = JSON.parse(entry.metadata_str || '{}'); } catch { metadata = {}; }
+    result.push({ mcp_server_id: entry.mcp_server_id, tool_name: entry.tool_name || null, metadata });
+  }
+  return result;
+}
+
 // ── Workflows ──
 async function loadWorkflows() {
   try {
@@ -1996,6 +2081,7 @@ async function loadWorkflows() {
           <td>${w.status === 'active' ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-muted">Inactive</span>'}</td>
           <td><span class="badge badge-purple">${w.task_count || 0}</span></td>
           <td>${w.last_task_status ? statusBadge(w.last_task_status) : '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${(w.output_mcps?.length) ? `<span class="badge badge-cyan" title="Output MCPs configured">📤 ${w.output_mcps.length}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
           <td>${fmtDate(w.created_at)}</td>
           <td><div class="btn-group">
             <button class="btn btn-sm" onclick="viewWorkflowDetail('${w.id}')">View</button>
@@ -2003,7 +2089,7 @@ async function loadWorkflows() {
             <button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${w.id}')">Delete</button>
           </div></td>
         </tr>`).join('')
-      : '<tr><td colspan="8" class="empty-state">No workflows yet.</td></tr>';
+      : '<tr><td colspan="9" class="empty-state">No workflows yet.</td></tr>';
   } catch(e) { toast(e.message, 'error'); }
 }
 
@@ -2099,6 +2185,11 @@ function openWorkflowModal() {
         <input id="f-wf-repo-token" placeholder="e.g. github-pat">
         <div class="hint">Name of a token in the Token Store for private repos. Leave blank for public repos.</div>
       </div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <label style="font-size:14px;font-weight:600;margin-bottom:12px;display:block">Output MCPs <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — forward final output to MCP servers)</span></label>
+      <div id="f-wf-output-mcps"></div>
+      <button class="btn btn-sm" style="margin-top:8px" type="button" onclick="_addOutputMcpRow()">+ Add Output MCP</button>
     </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
@@ -2110,6 +2201,9 @@ function openWorkflowModal() {
 
   // Load models from the SDK (or show text input for custom provider)
   _swapModelField('f-wf', '');
+
+  // Init output MCPs section
+  _initOutputMcpSection('f-wf', []);
 }
 
 let _cachedModels = new Map();
@@ -2235,6 +2329,7 @@ async function saveWorkflow() {
     repo_url: document.getElementById('f-wf-repo-url').value || null,
     repo_branch: document.getElementById('f-wf-repo-branch').value || null,
     repo_token_name: document.getElementById('f-wf-repo-token').value || null,
+    output_mcps: _collectOutputMcps(),
   };
 
   try {
@@ -2338,6 +2433,11 @@ function openEditWorkflowModal(id) {
       <div class="form-group"><label>Auth Token (Token Store key)</label>
         <input id="f-wf-edit-repo-token" value="${esc(w.repo_token_name||'')}" placeholder="e.g. github-pat">
       </div>
+    </div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <label style="font-size:13px;font-weight:600;margin-bottom:8px;display:block">Output MCPs <span style="font-weight:400;color:var(--muted);font-size:12px">(optional — forward final output to MCP servers)</span></label>
+      <div id="f-wf-edit-output-mcps"></div>
+      <button class="btn btn-sm" style="margin-top:8px" type="button" onclick="_addOutputMcpRow()">+ Add Output MCP</button>
     </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
@@ -2357,6 +2457,9 @@ function openEditWorkflowModal(id) {
       if (rSel) rSel.value = w.reasoning_effort;
     }
   }, 500);
+
+  // Init output MCPs section with existing configs
+  _initOutputMcpSection('f-wf-edit', w.output_mcps || []);
 }
 
 async function updateWorkflow(id) {
@@ -2385,6 +2488,7 @@ async function updateWorkflow(id) {
     repo_url: document.getElementById('f-wf-edit-repo-url').value || null,
     repo_branch: document.getElementById('f-wf-edit-repo-branch').value || null,
     repo_token_name: document.getElementById('f-wf-edit-repo-token').value || null,
+    output_mcps: _collectOutputMcps(),
   };
   // Remove undefined keys so they're not sent (leave workflow values unchanged)
   Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
@@ -2452,6 +2556,22 @@ async function loadWorkflowDetail(id) {
           <td><button class="btn btn-sm" onclick="openTaskLogsPage('${t.id}','workflow-detail')">View Logs</button></td>
         </tr>`).join('')
       : '<tr><td colspan="7" class="empty-state">No tasks yet. Run one above.</td></tr>';
+
+    // Output MCPs card
+    const outputMcpsCard = document.getElementById('wf-detail-output-mcps-card');
+    const outputMcpsBody = document.getElementById('wf-detail-output-mcps-body');
+    if (w.output_mcps?.length) {
+      outputMcpsCard.style.display = '';
+      const mcpMap = Object.fromEntries((mcps || []).map(m => [m.id, m.name]));
+      outputMcpsBody.innerHTML = w.output_mcps.map(c => `
+        <div style="padding:10px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:start">
+          <div><span style="font-size:11px;color:var(--muted);display:block">MCP Server</span><strong>${esc(mcpMap[c.mcp_server_id] || c.mcp_server_id)}</strong></div>
+          <div><span style="font-size:11px;color:var(--muted);display:block">Tool</span>${c.tool_name ? `<code style="font-size:12px">${esc(c.tool_name)}</code>` : '<span style="color:var(--muted)">auto-detect</span>'}</div>
+          <div><span style="font-size:11px;color:var(--muted);display:block">Metadata</span><code style="font-size:11px;white-space:pre-wrap">${esc(Object.keys(c.metadata||{}).length ? JSON.stringify(c.metadata, null, 2) : '{}')}</code></div>
+        </div>`).join('');
+    } else {
+      outputMcpsCard.style.display = 'none';
+    }
   } catch(e) { toast(e.message, 'error'); }
 }
 

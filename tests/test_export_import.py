@@ -101,6 +101,7 @@ def _fake_workflow(github_user: str = "testuser"):
         repo_url=None,
         repo_branch=None,
         repo_token_name=None,
+        output_mcps=[],
         usage=None,
         logs=[],
         messages=[],

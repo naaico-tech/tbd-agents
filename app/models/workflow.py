@@ -47,6 +47,13 @@ class OutputDestination(BaseModel):
     slack_user_id: str | None = None
 
 
+class OutputMcpConfig(BaseModel):
+    """Configures an MCP server that receives the agent's final output."""
+    mcp_server_id: str
+    tool_name: str | None = None  # If None, first available tool is used
+    metadata: dict[str, Any] = Field(default_factory=dict)  # e.g. destination, title
+
+
 class Workflow(Document):
     title: str | None = None
     agent_id: str
@@ -81,6 +88,7 @@ class Workflow(Document):
     repo_url: str | None = None  # GitHub repo URL to clone for agent access
     repo_branch: str | None = None  # Branch to checkout (default: main)
     repo_token_name: str | None = None  # Token Store key for private repo auth
+    output_mcps: list[OutputMcpConfig] = Field(default_factory=list)  # MCPs to receive final output
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

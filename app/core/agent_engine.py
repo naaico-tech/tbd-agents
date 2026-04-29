@@ -51,6 +51,7 @@ from app.models.workflow import (
     LogEntry,
     Message,
     OutputFormat,
+    OutputMcpConfig,
     UsageStats,
     Workflow,
     WorkflowStatus,
@@ -2424,6 +2425,81 @@ async def _run_with_custom_provider(
     return final_text
 
 
+# ── Output MCP Dispatch ───────────────────────────────────────────────────────
+
+
+async def _dispatch_output_mcps(
+    workflow: Workflow,
+    final_output: str,
+    task_exec: TaskExecution | None,
+) -> None:
+    """Dispatch the agent's final output to all configured Output MCPs.
+
+    For each OutputMcpConfig on the workflow:
+    - Resolves the McpServer from MongoDB
+    - Determines the tool to call (explicit tool_name, or first available tool)
+    - Calls the tool with ``output`` + any user-defined metadata fields
+    - Logs success/failure without failing the overall task
+    """
+    from beanie import PydanticObjectId
+
+    from app.services.mcp_manager import mcp_manager
+
+    for omc in workflow.output_mcps:
+        server: McpServer | None = None
+        try:
+            server = await McpServer.get(PydanticObjectId(omc.mcp_server_id))
+            if not server:
+                await _log(
+                    workflow,
+                    "output_mcp_error",
+                    f"MCP server {omc.mcp_server_id!r} not found",
+                    task_exec,
+                )
+                continue
+
+            # Resolve tool name
+            tool_name = omc.tool_name
+            if not tool_name:
+                tools = await mcp_manager.list_tools(server)
+                if not tools:
+                    await _log(
+                        workflow,
+                        "output_mcp_error",
+                        f"MCP server {server.name!r} has no tools",
+                        task_exec,
+                    )
+                    continue
+                tool_name = tools[0]["name"]
+
+            # Build arguments: output + metadata
+            arguments: dict = {"output": final_output}
+            if omc.metadata:
+                arguments.update(omc.metadata)
+
+            result = await mcp_manager.call_tool(server, tool_name, arguments)
+            await _log(
+                workflow,
+                "output_mcp_sent",
+                f"Sent to {server.name!r}.{tool_name} → {str(result)[:200]}",
+                task_exec,
+            )
+        except Exception as exc:
+            name = server.name if server else omc.mcp_server_id
+            logger.warning(
+                "Output MCP dispatch failed for workflow %s → %s: %s",
+                workflow.id,
+                name,
+                exc,
+            )
+            await _log(
+                workflow,
+                "output_mcp_error",
+                f"Failed to send to {name!r}: {exc}",
+                task_exec,
+            )
+
+
 # ── Main Execution ───────────────────────────────────────────────────────────
 
 
@@ -3170,6 +3246,10 @@ async def run_agent(
                     await task_exec.save()
 
                 await workflow.save()
+
+                # Dispatch final output to configured Output MCPs
+                if final_text and workflow.output_mcps:
+                    await _dispatch_output_mcps(workflow, final_text, task_exec)
 
     except Exception as e:
         await _log(workflow, "error", str(e), task_exec)

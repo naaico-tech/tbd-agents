@@ -13,6 +13,7 @@ from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
 from app.models.workflow import (
     OutputFormat,
+    OutputMcpConfig,
     Workflow,
     WorkflowStatus,
 )
@@ -26,6 +27,7 @@ from app.schemas.export_import import (
 from app.schemas.workflow import (
     LogEntryResponse,
     MessageResponse,
+    OutputMcpConfigSchema,
     PromptRequest,
     PromptResponse,
     UsageStatsResponse,
@@ -77,6 +79,9 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        output_mcps=[
+            OutputMcpConfigSchema(**omc.model_dump()) for omc in wf.output_mcps
+        ],
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
@@ -120,6 +125,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
+        output_mcps=[OutputMcpConfig(**omc.model_dump()) for omc in body.output_mcps],
     )
     await wf.insert()
     return await _to_response(wf)
@@ -291,6 +297,7 @@ def _to_exported_wf(wf: Workflow) -> ExportedWorkflow:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        output_mcps=[omc.model_dump() for omc in wf.output_mcps],
     )
 
 
@@ -341,6 +348,7 @@ async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_
                 repo_url=item.repo_url,
                 repo_branch=item.repo_branch,
                 repo_token_name=item.repo_token_name,
+                output_mcps=[OutputMcpConfig(**omc) for omc in item.output_mcps],
             )
             await wf.insert()
             result.ids.append(str(wf.id))
@@ -384,6 +392,11 @@ async def update_workflow(
         if updates["status"] not in ("active", "inactive"):
             raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
         updates["status"] = WorkflowStatus(updates["status"])
+    if "output_mcps" in updates and updates["output_mcps"] is not None:
+        updates["output_mcps"] = [
+            OutputMcpConfig(**omc) if isinstance(omc, dict) else omc
+            for omc in updates["output_mcps"]
+        ]
     for k, v in updates.items():
         setattr(wf, k, v)
     from datetime import UTC, datetime
