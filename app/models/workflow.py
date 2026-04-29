@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 class WorkflowStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+    FAILED = "failed"
 
 
 class OutputFormat(StrEnum):

@@ -2424,6 +2424,114 @@ async def _run_with_custom_provider(
     return final_text
 
 
+async def _run_with_auto_provider(
+    workflow: Workflow,
+    user_prompt: str,
+    system_prompt: str,
+    auto_provider: Provider,
+    task_exec: TaskExecution | None,
+    *,
+    repo_path: str | None = None,
+    mcp_config: dict | None = None,
+    allowed_tools_set: set[str] | None = None,
+) -> str | None:
+    """Execute a prompt using an AUTO provider, trying sub-providers in priority order.
+
+    Iterates over ``auto_provider.aggregated_providers`` sorted by ascending
+    ``priority`` (lower = tried first). For each entry it resolves the
+    sub-provider and its API key, then delegates to
+    ``_run_with_custom_provider``. Returns on the first successful (non-None)
+    result; logs a fallback warning and continues to the next sub-provider on
+    failure. Returns ``None`` and marks the workflow failed if every
+    sub-provider is exhausted without a successful response.
+    """
+    from beanie import PydanticObjectId as _AutoObjId
+
+    sorted_entries = sorted(auto_provider.aggregated_providers, key=lambda e: e.priority)
+
+    for entry in sorted_entries:
+        # ── Resolve sub-provider ─────────────────────────────────────────────
+        try:
+            sub_provider = await Provider.get(_AutoObjId(entry.provider_id))
+        except Exception:
+            sub_provider = None
+        if not sub_provider:
+            await _log(
+                workflow,
+                "auto_provider_warning",
+                f"Sub-provider '{entry.provider_id}' not found — skipping",
+                task_exec,
+            )
+            continue
+
+        # ── Resolve sub-provider API key ─────────────────────────────────────
+        resolved_key = await token_manager.get_token_value(sub_provider.api_key_token_name)
+        if not resolved_key:
+            await _log(
+                workflow,
+                "auto_provider_warning",
+                f"Sub-provider '{sub_provider.name}' token '{sub_provider.api_key_token_name}' "
+                "not found in token store — skipping",
+                task_exec,
+            )
+            continue
+
+        await _log(
+            workflow,
+            "auto_provider_attempt",
+            f"AUTO provider trying sub-provider '{sub_provider.name}' "
+            f"({sub_provider.provider_type}) with model '{entry.model}' "
+            f"[priority={entry.priority}]",
+            task_exec,
+        )
+
+        # ── Temporarily override workflow model for this attempt ─────────────
+        original_model = workflow.model
+        workflow.model = entry.model
+        try:
+            result = await _run_with_custom_provider(
+                workflow,
+                user_prompt,
+                system_prompt,
+                sub_provider,
+                resolved_key,
+                task_exec,
+                repo_path=repo_path,
+                mcp_config=mcp_config,
+                allowed_tools_set=allowed_tools_set,
+            )
+        except Exception as exc:
+            logger.warning(
+                "AUTO provider: sub-provider '%s' raised an exception: %s",
+                sub_provider.name,
+                exc,
+            )
+            result = None
+        finally:
+            workflow.model = original_model
+
+        if result is not None:
+            return result
+
+        await _log(
+            workflow,
+            "auto_provider_fallback",
+            f"Sub-provider '{sub_provider.name}' failed — trying next",
+            task_exec,
+        )
+
+    # ── All sub-providers exhausted ──────────────────────────────────────────
+    await _log(
+        workflow,
+        "auto_provider_exhausted",
+        "All sub-providers in AUTO provider exhausted — execution failed",
+        task_exec,
+    )
+    workflow.status = WorkflowStatus.FAILED
+    await workflow.save()
+    return None
+
+
 # ── Main Execution ───────────────────────────────────────────────────────────
 
 
@@ -2490,34 +2598,47 @@ async def run_agent(
             )
             provider = None
         if provider:
-            resolved_key = await token_manager.get_token_value(provider.api_key_token_name)
-            if resolved_key:
-                if provider.provider_type == ProviderType.GITHUB_COPILOT:
-                    # Override the caller-supplied GitHub token with the stored one
-                    github_token = resolved_key
-                    await _log(
-                        workflow,
-                        "provider_resolved",
-                        f"Using BYOK github_copilot provider '{provider.name}'",
-                        task_exec,
-                    )
-                else:
-                    custom_provider = provider
-                    custom_provider_key = resolved_key
-                    await _log(
-                        workflow,
-                        "provider_resolved",
-                        f"Using BYOK provider '{provider.name}' ({provider.provider_type})",
-                        task_exec,
-                    )
-            else:
+            if provider.provider_type == ProviderType.AUTO:
+                # AUTO provider: sub-provider keys are resolved lazily inside
+                # _run_with_auto_provider; no outer api_key_token_name is needed.
+                custom_provider = provider
+                custom_provider_key = "__auto__"  # sentinel — not a real key
                 await _log(
                     workflow,
-                    "provider_warning",
-                    f"Provider '{provider.name}' token '{provider.api_key_token_name}' "
-                    "not found in token store — falling back to default execution",
+                    "provider_resolved",
+                    f"Using AUTO provider '{provider.name}' with "
+                    f"{len(provider.aggregated_providers)} sub-provider(s)",
                     task_exec,
                 )
+            else:
+                resolved_key = await token_manager.get_token_value(provider.api_key_token_name)
+                if resolved_key:
+                    if provider.provider_type == ProviderType.GITHUB_COPILOT:
+                        # Override the caller-supplied GitHub token with the stored one
+                        github_token = resolved_key
+                        await _log(
+                            workflow,
+                            "provider_resolved",
+                            f"Using BYOK github_copilot provider '{provider.name}'",
+                            task_exec,
+                        )
+                    else:
+                        custom_provider = provider
+                        custom_provider_key = resolved_key
+                        await _log(
+                            workflow,
+                            "provider_resolved",
+                            f"Using BYOK provider '{provider.name}' ({provider.provider_type})",
+                            task_exec,
+                        )
+                else:
+                    await _log(
+                        workflow,
+                        "provider_warning",
+                        f"Provider '{provider.name}' token '{provider.api_key_token_name}' "
+                        "not found in token store — falling back to default execution",
+                        task_exec,
+                    )
         else:
             await _log(
                 workflow,
@@ -2705,6 +2826,18 @@ async def run_agent(
 
     # ── Route to custom provider if set ──────────────────────────────────────
     if custom_provider and custom_provider_key:
+        # Route AUTO providers to the fallback-capable auto runner
+        if custom_provider.provider_type == ProviderType.AUTO:
+            return await _run_with_auto_provider(
+                workflow,
+                user_prompt,
+                system_prompt,
+                custom_provider,
+                task_exec,
+                repo_path=repo_path,
+                mcp_config=mcp_config,
+                allowed_tools_set=allowed_tools_set,
+            )
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
             return await _run_with_claude_sdk(

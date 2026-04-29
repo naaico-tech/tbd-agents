@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from beanie import Document, Indexed
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
 class ProviderType(StrEnum):
@@ -11,13 +11,34 @@ class ProviderType(StrEnum):
     ANTHROPIC = "anthropic"
     AZURE_OPENAI = "azure_openai"
     CUSTOM = "custom"
+    AUTO = "auto"
 
+
+# Provider types that use the HTTP /chat/completions path (BYOK HTTP).
+# These are the only types allowed as sub-providers inside an AUTO provider.
+BYOK_HTTP_PROVIDER_TYPES: frozenset[ProviderType] = frozenset({
+    ProviderType.OPENAI,
+    ProviderType.AZURE_OPENAI,
+    ProviderType.CUSTOM,
+})
 
 # Default base URLs for built-in provider types
 PROVIDER_DEFAULT_BASE_URLS: dict[str, str] = {
     ProviderType.OPENAI: "https://api.openai.com/v1",
     ProviderType.ANTHROPIC: "https://api.anthropic.com/v1",
 }
+
+
+class AggregatedProviderEntry(BaseModel):
+    """A single sub-provider entry within an AUTO provider.
+
+    ``priority`` controls the order in which sub-providers are tried:
+    lower values are tried first (0 = highest priority).
+    """
+
+    provider_id: str
+    model: str
+    priority: int = 0
 
 
 class Provider(Document):
@@ -32,15 +53,20 @@ class Provider(Document):
     - ``openai`` / ``anthropic`` / ``azure_openai`` / ``custom``: issues
       requests directly to the provider's OpenAI-compatible chat completions
       endpoint using the resolved API key.
+    - ``auto``: aggregates multiple BYOK HTTP sub-providers. The agent engine
+      tries them in ascending ``priority`` order, falling back to the next
+      entry on retryable failures. ``api_key_token_name`` is unused for this
+      type; use ``aggregated_providers`` instead.
     """
 
     name: Indexed(str, unique=True)
     provider_type: ProviderType
-    api_key_token_name: str  # name of a Token document in the token store
+    api_key_token_name: str | None = None  # not used for AUTO type
     base_url: str | None = None  # required for azure_openai and custom types
     azure_api_version: str = "2024-12-01-preview"  # Azure OpenAI API version
     azure_deployment: str | None = None  # Azure deployment name (defaults to workflow model)
     description: str = ""
+    aggregated_providers: list[AggregatedProviderEntry] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
