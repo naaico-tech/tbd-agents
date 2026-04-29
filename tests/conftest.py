@@ -115,6 +115,7 @@ def sample_workflow(sample_agent, github_user):
         "repo_url": None,
         "repo_branch": None,
         "repo_token_name": None,
+        "output_mcps": [],
         "usage": None,
         "created_at": datetime.now(UTC),
         "updated_at": datetime.now(UTC),

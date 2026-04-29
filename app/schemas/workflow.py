@@ -13,6 +13,13 @@ class UsageStatsResponse(BaseModel):
     total_cost: float = 0.0
 
 
+class OutputMcpConfigSchema(BaseModel):
+    """Schema for an Output MCP configuration on a workflow."""
+    mcp_server_id: str
+    tool_name: str | None = None  # If None, first available tool is used
+    metadata: dict[str, Any] = {}  # e.g. {"destination": "...", "title": "..."}
+
+
 class WorkflowCreate(BaseModel):
     title: str | None = None
     agent_id: str
@@ -32,6 +39,7 @@ class WorkflowCreate(BaseModel):
     repo_url: str | None = None  # GitHub repo URL
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
+    output_mcps: list[OutputMcpConfigSchema] = []  # MCPs to receive final output
 
 
 class WorkflowUpdate(BaseModel):
@@ -54,6 +62,7 @@ class WorkflowUpdate(BaseModel):
     repo_branch: str | None = None
     repo_token_name: str | None = None
     status: str | None = None  # active | inactive
+    output_mcps: list[OutputMcpConfigSchema] | None = None  # MCPs to receive final output
 
 
 class PromptRequest(BaseModel):
@@ -115,6 +124,7 @@ class WorkflowResponse(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    output_mcps: list[OutputMcpConfigSchema] = []
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

@@ -45,6 +45,7 @@ class ExportedWorkflow(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    output_mcps: list[dict[str, Any]] = []  # OutputMcpConfig dicts
 
 
 class ExportedKnowledgeSource(BaseModel):
