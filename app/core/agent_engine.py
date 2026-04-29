@@ -22,11 +22,11 @@ import logging
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from io import StringIO
-from datetime import datetime, timezone
 
 # Compatibility: UTC alias for Python 3.9-3.10 support
-UTC = timezone.utc
+UTC = UTC
 
 import httpx
 
@@ -105,6 +105,38 @@ _CAVEMAN_REPLACEMENTS = (
         "",
     ),
 )
+
+# Known context window sizes per model family (tokens).
+# Used as fallback when workflow.context_window is not explicitly set.
+_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "gpt-4.1": 1_047_576,
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000,
+    "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_385,
+    "o1": 200_000,
+    "o1-mini": 128_000,
+    "o3": 200_000,
+    "o4-mini": 200_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-5-haiku": 200_000,
+    "claude-3-opus": 200_000,
+    "claude-3-sonnet": 200_000,
+    "claude-3-haiku": 200_000,
+    "claude-sonnet-4": 200_000,
+    "claude-haiku-4": 200_000,
+    "claude-opus-4": 200_000,
+}
+
+
+def _get_model_context_window(model: str) -> int:
+    """Return the known context window size for *model*, falling back to 128 K."""
+    model_lower = model.lower()
+    for key, size in _MODEL_CONTEXT_WINDOWS.items():
+        if key in model_lower:
+            return size
+    return 128_000
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -496,6 +528,55 @@ async def _update_progress(
             "percent_complete": progress.percent_complete,
         },
     )
+
+
+async def _run_single_tool(
+    tc: dict,
+    workflow: "Workflow",
+    task_exec,
+    custom_python_tool_map: dict,
+    custom_tool_runtime_env: dict,
+    tool_server_map: dict,
+) -> tuple[str, str, str]:
+    """Execute a single tool call and return (tool_call_id, tool_name, result_str).
+
+    Designed to be called concurrently via ``asyncio.gather`` for tool calls
+    that arrive in the same assistant message.
+    """
+    func = tc.get("function", {})
+    tool_name = func.get("name", "unknown")
+    raw_args = func.get("arguments", "{}")
+    try:
+        tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+    except json.JSONDecodeError:
+        tool_args = {}
+
+    # Parse TODO progress from manage_todo_list calls
+    if tool_name == "manage_todo_list":
+        progress = _parse_todo_list(tool_args)
+        if progress:
+            await _update_progress(workflow, task_exec, progress)
+
+    await _log(
+        workflow, "tool_call", tool_name, task_exec,
+        tool_input=json.dumps(tool_args)[:500],
+    )
+
+    try:
+        if tool_name == "store_memory":
+            result = await _handle_store_memory(workflow.agent_id, tool_args)
+        elif tool_name in custom_python_tool_map:
+            result = await _execute_custom_tool(
+                tool_name, tool_args, custom_python_tool_map,
+                runtime_env=custom_tool_runtime_env,
+            )
+        else:
+            result = await _execute_mcp_tool(tool_name, tool_args, tool_server_map)
+    except Exception as exc:
+        result = f"Tool execution error: {exc}"
+        logger.warning("Tool '%s' raised an exception: %s", tool_name, exc)
+
+    return tc.get("id", ""), tool_name, str(result)
 
 
 async def _build_system_prompt(
@@ -981,6 +1062,65 @@ def _compact_messages(
         ),
     }
     return kept_head + [compaction_note] + kept_tail
+
+
+async def _summarize_dropped_messages(
+    dropped_messages: list[dict],
+    http: "httpx.AsyncClient",
+    url: str,
+    headers: dict,
+    model: str,
+    max_chars: int = 1500,
+) -> str:
+    """Call the LLM to summarise messages that were dropped during compaction.
+
+    Returns an empty string on any failure so callers degrade gracefully.
+    """
+    if not dropped_messages:
+        return ""
+
+    content_parts: list[str] = []
+    for m in dropped_messages:
+        role = m.get("role", "unknown")
+        content = m.get("content", "")
+        if not content or content == "[tool result cleared for context efficiency]":
+            continue
+        if isinstance(content, list):
+            content = " ".join(
+                p.get("text", "") for p in content if isinstance(p, dict)
+            )
+        content_parts.append(f"{role.upper()}: {str(content)[:400]}")
+
+    if not content_parts:
+        return ""
+
+    body: dict = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a concise summarizer. Given the following conversation excerpt, "
+                    "produce a bullet-point summary (max 200 words) capturing key facts, "
+                    "decisions, tool results, and important context the agent should remember. "
+                    "Be precise and omit filler."
+                ),
+            },
+            {
+                "role": "user",
+                "content": "\n".join(content_parts),
+            },
+        ],
+    }
+    try:
+        result = await _stream_chat_completion(http, url, headers, body, "compaction-summary")
+        choices = result.get("choices") or []
+        if choices:
+            summary = choices[0].get("message", {}).get("content", "") or ""
+            return summary[:max_chars]
+    except Exception as exc:
+        logger.warning("Compaction summarisation LLM call failed: %s", exc)
+    return ""
 
 
 def _resolve_provider_url(provider: Provider, model: str = "") -> str:
@@ -2104,10 +2244,14 @@ async def _run_with_custom_provider(
         # Context compaction thresholds
         _raw_cw = getattr(workflow, "context_window", None)
         try:
-            context_window = int(_raw_cw) if _raw_cw is not None else 128_000
+            context_window = int(_raw_cw) if _raw_cw is not None else _get_model_context_window(model)
         except (TypeError, ValueError):
-            context_window = 128_000
+            context_window = _get_model_context_window(model)
         compaction_threshold = settings.compaction_token_threshold_pct
+        # Reserve a fraction of the context window for the model's completion output.
+        # This prevents the model from being cut off mid-response when context is near-full.
+        _reserve = settings.compaction_completion_reserve_pct
+        effective_context_window = int(context_window * (1.0 - _reserve))
 
         # ── Agentic loop ────────────────────────────────────────────────────
         async with httpx.AsyncClient(timeout=settings.session_timeout) as http:
@@ -2118,7 +2262,7 @@ async def _run_with_custom_provider(
                 # If the current request context exceeds the compaction threshold,
                 # prune older intermediate messages to free context space.
                 current_prompt_tokens = _estimate_request_tokens(messages, openai_tools, model)
-                if iteration == 1 or current_prompt_tokens > context_window * compaction_threshold:
+                if iteration == 1 or current_prompt_tokens > effective_context_window * compaction_threshold:
                     await _log(
                         workflow,
                         "request_context",
@@ -2130,7 +2274,7 @@ async def _run_with_custom_provider(
                     )
                 if (
                     settings.compaction_enabled
-                    and current_prompt_tokens > context_window * compaction_threshold
+                    and current_prompt_tokens > effective_context_window * compaction_threshold
                     and len(messages) > 4
                 ):
                     await _log(
@@ -2139,8 +2283,19 @@ async def _run_with_custom_provider(
                         f"messages={len(messages)}, tools={len(openai_tools)})",
                         task_exec,
                     )
+                    # Capture messages that will be dropped (for optional summarisation)
+                    _will_summarize = (
+                        settings.compaction_summarization_enabled and len(messages) > 4
+                    )
+                    if _will_summarize:
+                        _keep_head = 2  # system + first user
+                        _keep_tail = settings.compaction_keep_recent_turns
+                        _drop_end = max(_keep_head, len(messages) - _keep_tail)
+                        _messages_to_summarize = messages[_keep_head:_drop_end]
+                    else:
+                        _messages_to_summarize = []
                     _msgs_before = len(messages)
-                    messages = _compact_messages(messages, model=model, context_window=context_window)
+                    messages = _compact_messages(messages, model=model, context_window=effective_context_window)
                     compacted_count = len(messages)
                     _dropped = _msgs_before - compacted_count + 1  # +1 for injected compaction note
                     context_compactions_total.labels(model=model).inc()
@@ -2151,6 +2306,26 @@ async def _run_with_custom_provider(
                         f"(request≈{_estimate_request_tokens(messages, openai_tools, model)} tokens)",
                         task_exec,
                     )
+                    # Optionally replace the structural compaction note with an LLM summary
+                    if _will_summarize and _messages_to_summarize and _dropped > 0:
+                        _summary = await _summarize_dropped_messages(
+                            _messages_to_summarize, http, url, headers, model,
+                            max_chars=settings.compaction_summary_max_chars,
+                        )
+                        if _summary:
+                            for _i, _m in enumerate(messages):
+                                if (
+                                    _m.get("role") == "system"
+                                    and "[Context compacted:" in _m.get("content", "")
+                                ):
+                                    messages[_i] = {
+                                        "role": "system",
+                                        "content": (
+                                            f"[Summary of {_dropped} compacted messages]:\n"
+                                            + _summary
+                                        ),
+                                    }
+                                    break
 
                 body: dict = {"model": model, "messages": messages}
                 if openai_tools:
@@ -2204,71 +2379,42 @@ async def _run_with_custom_provider(
                 # ── Handle tool calls ────────────────────────────────────────
                 tool_calls = message.get("tool_calls")
                 if tool_calls and finish_reason != "stop":
-                    # Append assistant message with tool_calls to conversation
+                    # Append assistant message with tool_calls FIRST (before results)
                     messages.append(message)
 
-                    for tc in tool_calls:
+                    # Execute all tool calls in this turn concurrently
+                    _tool_tasks = [
+                        _run_single_tool(
+                            tc, workflow, task_exec,
+                            custom_python_tool_map, custom_tool_runtime_env, tool_server_map,
+                        )
+                        for tc in tool_calls
+                    ]
+                    _tool_outcomes = await asyncio.gather(*_tool_tasks, return_exceptions=True)
+
+                    # Append results in original order (tool_call_id must match)
+                    for _outcome in _tool_outcomes:
+                        if isinstance(_outcome, Exception):
+                            _tc_id, _tool_name, _tool_result = "", "unknown", f"Tool execution error: {_outcome}"
+                        else:
+                            _tc_id, _tool_name, _tool_result = _outcome
                         tool_call_count += 1
-                        func = tc.get("function", {})
-                        tool_name = func.get("name", "unknown")
-                        raw_args = func.get("arguments", "{}")
-                        try:
-                            tool_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                        except json.JSONDecodeError:
-                            tool_args = {}
 
-                        # Parse TODO progress from manage_todo_list calls
-                        if tool_name == "manage_todo_list":
-                            progress = _parse_todo_list(tool_args)
-                            if progress:
-                                await _update_progress(workflow, task_exec, progress)
-
+                        _tool_result_for_model = _format_tool_result_for_context(
+                            _tool_result, prefer_tsv=workflow.tsv_tool_results,
+                        )
                         await _log(
-                            workflow, "tool_call", tool_name, task_exec,
-                            tool_input=json.dumps(tool_args)[:500],
+                            workflow, "tool_result", f"{_tool_name} completed", task_exec,
+                            tool_output=_tool_result_for_model[:500],
                         )
+                        if _tool_name == "store_memory":
+                            await _log_store_memory_result(workflow, task_exec, _tool_result)
 
-                        # Execute the tool — built-in memory, custom Python, or MCP
-                        try:
-                            if tool_name == "store_memory":
-                                tool_result = await _handle_store_memory(
-                                    workflow.agent_id, tool_args
-                                )
-                            elif tool_name in custom_python_tool_map:
-                                tool_result = await _execute_custom_tool(
-                                    tool_name,
-                                    tool_args,
-                                    custom_python_tool_map,
-                                    runtime_env=custom_tool_runtime_env,
-                                )
-                            else:
-                                tool_result = await _execute_mcp_tool(
-                                    tool_name, tool_args, tool_server_map
-                                )
-                        except Exception as tool_exc:
-                            tool_result = f"Tool execution error: {tool_exc}"
-                            logger.warning(
-                                "Tool '%s' raised an exception: %s", tool_name, tool_exc
-                            )
-
-                        tool_result_for_model = _format_tool_result_for_context(
-                            tool_result,
-                            prefer_tsv=workflow.tsv_tool_results,
-                        )
-
-                        await _log(
-                            workflow, "tool_result", f"{tool_name} completed", task_exec,
-                            tool_output=tool_result_for_model[:500],
-                        )
-                        if tool_name == "store_memory":
-                            await _log_store_memory_result(workflow, task_exec, tool_result)
-
-                        # Append tool result to conversation
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tc.get("id", ""),
+                            "tool_call_id": _tc_id,
                             "content": _truncate_tool_result(
-                                tool_result_for_model,
+                                _tool_result_for_model,
                                 settings.tool_result_context_max_chars,
                             ),
                         })

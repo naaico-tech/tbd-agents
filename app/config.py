@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     tool_result_clearing_keep_recent: int = 4
     tool_result_context_max_chars: int = 4000
     tool_definition_description_max_chars: int = 240
+    # Memory relevance filtering: minimum Qdrant cosine similarity score (0.0 = no filter)
+    memory_retrieval_min_score: float = 0.0
+    # Knowledge relevance filtering: minimum Qdrant cosine similarity score (0.0 = no filter)
+    knowledge_retrieval_min_score: float = 0.0
+    # Completion token reserve: fraction of context window reserved for model output
+    compaction_completion_reserve_pct: float = 0.15
+    # Enable LLM-based abstractive summarization during compaction (adds latency/cost)
+    compaction_summarization_enabled: bool = False
+    # Use importance-score-weighted LTM eviction instead of pure FIFO
+    ltm_importance_weighted_eviction: bool = True
     # Fernet encryption key for token store
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None

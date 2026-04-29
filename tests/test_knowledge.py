@@ -444,6 +444,7 @@ class TestKnowledgeManager:
             patch("qdrant_client.AsyncQdrantClient", return_value=mock_client),
         ):
             mock_settings.embeddings_enabled = True
+            mock_settings.knowledge_retrieval_min_score = 0.0
             mock_emb.embed_one = AsyncMock(return_value=[0.1, 0.2, 0.3])
             results = await manager.query_vector_db(source, limit=5, query="semantic search")
         assert results[0]["text"] == "semantic result"

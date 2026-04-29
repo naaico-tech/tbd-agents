@@ -5,13 +5,13 @@ from xml.sax.saxutils import escape, quoteattr
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 
+from app.config import settings
 from app.models.knowledge_item import KnowledgeContentType, KnowledgeItem
 from app.models.knowledge_source import (
     KnowledgeSource,
     KnowledgeSourceStatus,
     KnowledgeSourceType,
 )
-from app.config import settings
 from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import token_manager
 from app.services.embeddings import embeddings_service
@@ -137,6 +137,17 @@ class KnowledgeManager:
                         }
                         for point in results.points
                     ]
+                    # Filter by minimum relevance score
+                    min_score = settings.knowledge_retrieval_min_score
+                    if min_score > 0:
+                        before = len(hits)
+                        hits = [h for h in hits if h.get("score", 0.0) >= min_score]
+                        if before > len(hits):
+                            logger.debug(
+                                "Knowledge vector search: filtered %d low-score results"
+                                " (min_score=%.2f)",
+                                before - len(hits), min_score,
+                            )
                     semantic_retrieval_results.labels(type="knowledge").observe(len(hits))
                     if hits:
                         semantic_retrieval_hits_total.labels(type="knowledge").inc()

@@ -17,6 +17,7 @@ class Memory(Document):
     key: str
     value: str
     embedding: list[float] | None = None
+    importance_score: float = Field(default=0.5)
     metadata: dict = Field(default_factory=dict)
     ttl: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -24,3 +25,7 @@ class Memory(Document):
 
     class Settings:
         name = "memories"
+        indexes = [
+            [("agent_id", 1), ("scope", 1), ("key", 1)],
+            [("agent_id", 1), ("importance_score", -1)],
+        ]
