@@ -25,7 +25,12 @@ from app.config import settings
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
-from app.models.provider import PROVIDER_DEFAULT_BASE_URLS, Provider, ProviderType
+from app.models.provider import (
+    BYOK_HTTP_PROVIDER_TYPES,
+    PROVIDER_DEFAULT_BASE_URLS,
+    Provider,
+    ProviderType,
+)
 from app.observability import chat_messages_total, chat_response_duration_seconds
 from app.services import token_manager
 from app.services.chat_context import build_chat_context
@@ -84,7 +89,10 @@ def _resolve_url(provider: Provider | None, model: str) -> str:
         azure_deployments_path = "/openai/deployments/"
         if azure_deployments_path not in base:
             base = base.rstrip("/")
-            return f"{base}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+            return (
+                f"{base}/openai/deployments/{deployment}"
+                f"/chat/completions?api-version={api_version}"
+            )
         return f"{base.rstrip('/')}/chat/completions?api-version={api_version}"
 
     if provider_type == ProviderType.ANTHROPIC:
@@ -131,6 +139,140 @@ def _build_headers(provider: Provider | None, api_key: str) -> dict[str, str]:
     }
 
 
+# ── Auto-provider helpers ────────────────────────────────────────────────────
+
+
+async def _resolve_auto_sub_providers(
+    auto_provider: Provider,
+) -> list[tuple[Provider, str, str]]:
+    """Resolve ``(sub_provider, api_key, model)`` tuples for an AUTO provider.
+
+    Returns entries sorted by ascending ``priority``, silently skipping any
+    that are unavailable (DB miss, empty/missing API key, or unsupported
+    provider type such as Anthropic).
+    """
+    results: list[tuple[Provider, str, str]] = []
+    sorted_entries = sorted(auto_provider.aggregated_providers, key=lambda e: e.priority)
+
+    for entry in sorted_entries:
+        try:
+            sub_prov = await Provider.get(PydanticObjectId(entry.provider_id))
+        except Exception as exc:
+            logger.warning(
+                "chat: AUTO: failed to load sub-provider %s: %s", entry.provider_id, exc
+            )
+            continue
+
+        if sub_prov is None:
+            logger.warning("chat: AUTO: sub-provider %s not found in DB", entry.provider_id)
+            continue
+
+        if sub_prov.provider_type not in BYOK_HTTP_PROVIDER_TYPES:
+            logger.warning(
+                "chat: AUTO: sub-provider '%s' has unsupported type '%s' — skipping",
+                sub_prov.name,
+                sub_prov.provider_type,
+            )
+            continue
+
+        if not sub_prov.api_key_token_name:
+            logger.warning(
+                "chat: AUTO: sub-provider '%s' has no api_key_token_name — skipping",
+                sub_prov.name,
+            )
+            continue
+
+        try:
+            sub_key = await token_manager.get_token_value(sub_prov.api_key_token_name)
+        except Exception as exc:
+            logger.warning(
+                "chat: AUTO: failed to get API key for sub-provider '%s': %s",
+                sub_prov.name,
+                exc,
+            )
+            continue
+
+        if not sub_key:
+            logger.warning(
+                "chat: AUTO: API key for sub-provider '%s' is empty — skipping",
+                sub_prov.name,
+            )
+            continue
+
+        results.append((sub_prov, sub_key, entry.model))
+
+    return results
+
+
+async def _stream_from_provider(
+    provider: Provider | None,
+    api_key: str,
+    model: str,
+    messages: list[dict],
+    session_id: str,
+) -> AsyncGenerator[ChatEvent, None]:
+    """Async generator for a single streaming LLM call.
+
+    Yields:
+        - ``{"type": "delta", "content": ...}`` — one per token chunk.
+        - ``{"type": "_usage", "usage": {...}}`` — internal; caller extracts
+          usage data and does **not** forward this event type to the client.
+
+    Raises:
+        httpx.HTTPStatusError: when the server returns HTTP >= 400.  This is
+            raised *before* any delta/usage event is yielded, so the AUTO
+            fallback loop can safely skip to the next sub-provider.
+        httpx.RequestError: on connection or network failure.
+        ValueError: if the provider configuration is invalid (e.g. an
+            unsupported provider type reaches ``_resolve_url``).
+    """
+    url = _resolve_url(provider, model)
+    headers = _build_headers(provider, api_key)
+    body = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+
+    async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
+        async with client.stream("POST", url, headers=headers, json=body) as response:
+            if response.status_code >= 400:
+                body_bytes = await response.aread()
+                body_text = body_bytes.decode(errors="replace")[:500]
+                logger.error(
+                    "chat: LLM HTTP %s for session %s url=%s body=%s",
+                    response.status_code,
+                    session_id,
+                    url,
+                    body_text,
+                )
+                response.raise_for_status()  # raises httpx.HTTPStatusError
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:") :].lstrip()
+                if payload == "[DONE]":
+                    return
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+
+                if "usage" in chunk and chunk["usage"]:
+                    yield {"type": "_usage", "usage": chunk["usage"]}
+
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+
+                delta = choices[0].get("delta", {})
+                content_delta = delta.get("content")
+                if content_delta:
+                    yield _delta_event(content_delta)
+
+
 # ── Main handler ─────────────────────────────────────────────────────────────
 
 
@@ -158,25 +300,33 @@ async def handle_chat(
     # ── Resolve provider & API key ────────────────────────────────────────
     provider: Provider | None = None
     api_key: str | None = github_token
+    is_auto_provider = False
+    auto_provider: Provider | None = None
 
     if agent.provider_id:
         try:
             prov = await Provider.get(PydanticObjectId(agent.provider_id))
             if prov:
-                resolved_key = await token_manager.get_token_value(
-                    prov.api_key_token_name
-                )
-                if resolved_key:
-                    if prov.provider_type == ProviderType.GITHUB_COPILOT:
-                        # Treat stored github_copilot token as the GitHub token
-                        api_key = resolved_key
-                    else:
-                        provider = prov
-                        api_key = resolved_key
+                if prov.provider_type == ProviderType.AUTO:
+                    # AUTO providers carry no top-level api_key_token_name —
+                    # each sub-provider manages its own key.
+                    is_auto_provider = True
+                    auto_provider = prov
+                else:
+                    resolved_key = await token_manager.get_token_value(
+                        prov.api_key_token_name
+                    )
+                    if resolved_key:
+                        if prov.provider_type == ProviderType.GITHUB_COPILOT:
+                            # Treat stored github_copilot token as the GitHub token
+                            api_key = resolved_key
+                        else:
+                            provider = prov
+                            api_key = resolved_key
         except Exception as exc:
             logger.warning("chat: provider resolution failed: %s", exc)
 
-    if not api_key:
+    if not is_auto_provider and not api_key:
         yield _error_event(
             "No API key available — configure GITHUB_TOKEN or attach a provider."
         )
@@ -239,69 +389,148 @@ async def handle_chat(
 
     # ── LLM streaming call ────────────────────────────────────────────────
     model = agent.model or settings.default_model
-    try:
-        url = _resolve_url(provider, model)
-        headers = _build_headers(provider, api_key)
-    except ValueError as exc:
-        logger.warning("chat: provider configuration error for session %s: %s", session_id, exc)
-        yield _error_event(str(exc))
-        return
-    body = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-
     response_parts: list[str] = []
     usage_data: dict = {}
     start_time = datetime.now(UTC)
 
-    try:
-        async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-            async with client.stream(
-                "POST", url, headers=headers, json=body
-            ) as response:
-                if response.status_code >= 400:
-                    body_bytes = await response.aread()
-                    body_text = body_bytes.decode(errors="replace")[:500]
-                    logger.error(
-                        "chat: LLM HTTP %s for session %s url=%s body=%s",
-                        response.status_code,
-                        session_id,
-                        url,
-                        body_text,
-                    )
-                    yield _error_event("LLM request failed. Please try again.")
-                    return
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    payload = line[len("data:"):].lstrip()
-                    if payload == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
+    if is_auto_provider and auto_provider is not None:
+        # ── AUTO: try sub-providers in ascending priority order ───────────
+        try:
+            sub_providers = await _resolve_auto_sub_providers(auto_provider)
+        except Exception as exc:
+            logger.exception(
+                "chat: AUTO: failed to resolve sub-providers for session %s: %s",
+                session_id,
+                exc,
+            )
+            yield _error_event("AUTO provider configuration error. Please try again.")
+            return
 
-                    if "usage" in chunk and chunk["usage"]:
-                        usage_data = chunk["usage"]
+        if not sub_providers:
+            yield _error_event(
+                "AUTO provider has no available sub-providers configured."
+            )
+            return
 
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        continue
+        succeeded = False
+        for sub_prov, sub_key, sub_model in sub_providers:
+            gen = _stream_from_provider(sub_prov, sub_key, sub_model, messages, session_id)
+            try:
+                # Peek at the first item.  If the provider is unreachable or
+                # returns HTTP >= 400, the generator raises *before* yielding
+                # anything, so we can safely move on to the next sub-provider.
+                first_item = await gen.__anext__()
+            except StopAsyncIteration:
+                logger.warning(
+                    "chat: AUTO: sub-provider '%s' returned empty response — trying next",
+                    sub_prov.name,
+                )
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "chat: AUTO: sub-provider '%s' failed (%s) — trying next",
+                    sub_prov.name,
+                    exc,
+                )
+                await gen.aclose()
+                continue
 
-                    delta = choices[0].get("delta", {})
-                    content_delta = delta.get("content")
-                    if content_delta:
-                        response_parts.append(content_delta)
-                        yield _delta_event(content_delta)
+            # First item received — process it, then stream the rest.
+            if first_item.get("type") == "_usage":
+                usage_data = first_item["usage"]
+            elif first_item.get("type") == "delta":
+                response_parts.append(first_item["content"])
+                yield first_item
 
-    except Exception:
-        logger.exception("chat: LLM call failed for session %s", session_id)
-        yield _error_event("LLM request failed. Please try again.")
-        return
+            try:
+                async for item in gen:
+                    if item.get("type") == "_usage":
+                        usage_data = item["usage"]
+                    elif item.get("type") == "delta":
+                        response_parts.append(item["content"])
+                        yield item
+            except Exception as exc:
+                logger.exception(
+                    "chat: AUTO: sub-provider '%s' failed mid-stream for session %s: %s",
+                    sub_prov.name,
+                    session_id,
+                    exc,
+                )
+                yield _error_event("LLM request failed mid-stream. Please try again.")
+                return
+
+            succeeded = True
+            break
+
+        if not succeeded:
+            yield _error_event(
+                "All AUTO sub-providers failed. Please try again later."
+            )
+            return
+
+    else:
+        # ── Single provider / default GitHub Copilot path ────────────────
+        try:
+            url = _resolve_url(provider, model)
+            headers = _build_headers(provider, api_key)  # type: ignore[arg-type]
+        except ValueError as exc:
+            logger.warning(
+                "chat: provider configuration error for session %s: %s", session_id, exc
+            )
+            yield _error_event(str(exc))
+            return
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
+                async with client.stream(
+                    "POST", url, headers=headers, json=body
+                ) as response:
+                    if response.status_code >= 400:
+                        body_bytes = await response.aread()
+                        body_text = body_bytes.decode(errors="replace")[:500]
+                        logger.error(
+                            "chat: LLM HTTP %s for session %s url=%s body=%s",
+                            response.status_code,
+                            session_id,
+                            url,
+                            body_text,
+                        )
+                        yield _error_event("LLM request failed. Please try again.")
+                        return
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[len("data:") :].lstrip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_data = chunk["usage"]
+
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+
+                        delta = choices[0].get("delta", {})
+                        content_delta = delta.get("content")
+                        if content_delta:
+                            response_parts.append(content_delta)
+                            yield _delta_event(content_delta)
+
+        except Exception:
+            logger.exception("chat: LLM call failed for session %s", session_id)
+            yield _error_event("LLM request failed. Please try again.")
+            return
 
     # ── Record duration metric ────────────────────────────────────────────
     elapsed = (datetime.now(UTC) - start_time).total_seconds()

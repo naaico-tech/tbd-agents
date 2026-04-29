@@ -1551,7 +1551,9 @@ async function loadProviders() {
       ? providers.map(p => `<tr>
           <td><strong>${esc(p.name)}</strong>${p.description ? `<br><span style="font-size:12px;color:var(--muted)">${esc(p.description)}</span>` : ''}</td>
           <td><span class="badge badge-blue">${esc(p.provider_type)}</span></td>
-          <td><code style="font-size:12px;color:var(--accent)">${esc(p.api_key_token_name)}</code></td>
+          <td>${p.provider_type === 'auto'
+            ? `<span class="badge badge-purple">${p.aggregated_providers?.length || 0} sub-provider${(p.aggregated_providers?.length || 0) !== 1 ? 's' : ''}</span>`
+            : `<code style="font-size:12px;color:var(--accent)">${esc(p.api_key_token_name)}</code>`}</td>
           <td>${p.base_url ? `<span style="font-size:12px">${esc(p.base_url)}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
           <td>${fmtDate(p.created_at)}</td>
           <td><div class="btn-group">
@@ -1563,37 +1565,105 @@ async function loadProviders() {
   } catch(e) { toast(e.message, 'error'); }
 }
 
+function _renderProviderTypeFields(type) {
+  const keyGroup = document.getElementById('f-prov-key-group');
+  const urlGroup = document.getElementById('f-prov-url-group');
+  const subGroup = document.getElementById('f-prov-sub-group');
+  if (!keyGroup || !urlGroup || !subGroup) return;
+  const isAuto = type === 'auto';
+  keyGroup.style.display = isAuto ? 'none' : '';
+  urlGroup.style.display = isAuto ? 'none' : '';
+  subGroup.style.display = isAuto ? '' : 'none';
+}
+
+function _addSubProviderRow(provId, model, priority) {
+  const byokProviders = providers.filter(x =>
+    ['openai','azure_openai','custom'].includes(x.provider_type));
+  const editingId = document.getElementById('f-prov-editing-id')?.value || '';
+  const opts = byokProviders
+    .filter(x => x.id !== editingId)
+    .map(x => `<option value="${esc(x.id)}" ${x.id === provId ? 'selected' : ''}>${esc(x.name)} (${esc(x.provider_type)})</option>`)
+    .join('');
+  if (!opts) return; // no eligible providers
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><select class="sub-prov-id" style="width:100%">${opts}</select></td>
+    <td><input class="sub-prov-model" value="${esc(model||'')}" placeholder="e.g. gpt-4o" style="width:100%"></td>
+    <td><input class="sub-prov-priority" type="number" min="0" value="${priority ?? 0}" style="width:64px"></td>
+    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>`;
+  document.getElementById('sub-provider-rows').appendChild(tr);
+}
+
 function openProviderModal(id) {
   const p = id ? providers.find(x => x.id === id) : null;
-  const typeOpts = ['github_copilot','openai','anthropic','azure_openai','custom'].map(t =>
+  const typeOpts = ['github_copilot','openai','anthropic','azure_openai','custom','auto'].map(t =>
     `<option value="${t}" ${p?.provider_type===t?'selected':''}>${t}</option>`).join('');
   document.getElementById('modal-title').textContent = p ? 'Edit Provider' : 'Create Provider';
   document.getElementById('modal-body').innerHTML = `
+    <input type="hidden" id="f-prov-editing-id" value="${esc(id||'')}">
     <div class="form-group"><label>Name</label><input id="f-prov-name" value="${esc(p?.name||'')}" placeholder="e.g. my-openai"></div>
-    <div class="form-group"><label>Provider Type</label><select id="f-prov-type">${typeOpts}</select></div>
-    <div class="form-group"><label>API Key Token Name</label>
+    <div class="form-group"><label>Provider Type</label>
+      <select id="f-prov-type" onchange="_renderProviderTypeFields(this.value)">${typeOpts}</select></div>
+    <div class="form-group" id="f-prov-key-group"><label>API Key Token Name</label>
       <input id="f-prov-token" value="${esc(p?.api_key_token_name||'')}" placeholder="e.g. openai-api-key">
       <div class="hint">Name of a token in the Token Store that holds the API key.</div></div>
-    <div class="form-group"><label>Base URL <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional for openai/anthropic)</span></label>
+    <div class="form-group" id="f-prov-url-group"><label>Base URL <span style="font-weight:400;font-size:11px;color:var(--muted)">(optional for openai/anthropic)</span></label>
       <input id="f-prov-url" value="${esc(p?.base_url||'')}" placeholder="https://api.openai.com/v1">
       <div class="hint">Required for azure_openai and custom types. Leave blank to use the default.</div></div>
+    <div class="form-group" id="f-prov-sub-group" style="display:none">
+      <label>Sub-Providers</label>
+      <div class="hint" style="margin-bottom:8px">Aggregate BYOK providers (openai, azure_openai, custom). Lower priority number = higher priority.</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;padding:4px 6px;font-size:12px">Provider</th>
+          <th style="text-align:left;padding:4px 6px;font-size:12px">Model</th>
+          <th style="text-align:left;padding:4px 6px;font-size:12px">Priority</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="sub-provider-rows"></tbody>
+      </table>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="_addSubProviderRow()">+ Add Sub-Provider</button>
+    </div>
     <div class="form-group"><label>Description</label><input id="f-prov-desc" value="${esc(p?.description||'')}" placeholder="Optional description"></div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn" onclick="closeModal()">Cancel</button>
     <button class="btn btn-primary" onclick="saveProvider('${id||''}')">${p?'Update':'Create'}</button>`;
+  // Apply initial field visibility
+  _renderProviderTypeFields(p?.provider_type || 'github_copilot');
+  // Pre-populate sub-providers if editing an AUTO provider
+  if (p?.provider_type === 'auto' && Array.isArray(p.aggregated_providers)) {
+    const sorted = [...p.aggregated_providers].sort((a, b) => a.priority - b.priority);
+    sorted.forEach(sp => _addSubProviderRow(sp.provider_id, sp.model, sp.priority));
+  }
   showModal();
 }
 
 async function saveProvider(id) {
+  const type = document.getElementById('f-prov-type').value;
   const body = {
     name: document.getElementById('f-prov-name').value.trim(),
-    provider_type: document.getElementById('f-prov-type').value,
-    api_key_token_name: document.getElementById('f-prov-token').value.trim(),
-    base_url: document.getElementById('f-prov-url').value.trim() || null,
+    provider_type: type,
     description: document.getElementById('f-prov-desc').value.trim(),
   };
   if (!body.name) return toast('Name is required', 'error');
-  if (!body.api_key_token_name) return toast('API Key Token Name is required', 'error');
+
+  if (type === 'auto') {
+    const rows = document.querySelectorAll('#sub-provider-rows tr');
+    const aggregated_providers = [];
+    for (const row of rows) {
+      const provId = row.querySelector('.sub-prov-id')?.value;
+      const model = row.querySelector('.sub-prov-model')?.value?.trim();
+      const priority = parseInt(row.querySelector('.sub-prov-priority')?.value || '0', 10);
+      if (!provId || !model) return toast('Each sub-provider needs a provider and model', 'error');
+      aggregated_providers.push({ provider_id: provId, model, priority });
+    }
+    if (!aggregated_providers.length) return toast('AUTO provider needs at least one sub-provider', 'error');
+    body.aggregated_providers = aggregated_providers;
+  } else {
+    body.api_key_token_name = document.getElementById('f-prov-token').value.trim();
+    body.base_url = document.getElementById('f-prov-url').value.trim() || null;
+    if (!body.api_key_token_name) return toast('API Key Token Name is required', 'error');
+  }
   try {
     if (id) await api(`/api/providers/${id}`, { method:'PUT', body:JSON.stringify(body) });
     else await api('/api/providers', { method:'POST', body:JSON.stringify(body) });
