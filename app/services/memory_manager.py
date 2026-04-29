@@ -80,6 +80,13 @@ class MemoryManager:
                 metadata=metadata or {},
                 ttl=ttl,
             )
+            # Set importance score heuristic
+            _importance = 0.5
+            if (metadata or {}).get("important"):
+                _importance = 0.9
+            elif scope == MemoryScope.SESSION:
+                _importance = 0.3
+            mem.importance_score = _importance
             await mem.insert()
 
         # ── Enforce LTM cap ──────────────────────────────────────────────
@@ -169,12 +176,21 @@ class MemoryManager:
             return
 
         excess = total - cap
-        oldest = (
-            await Memory.find({"agent_id": agent_id})
-            .sort("updated_at")
-            .limit(excess)
-            .to_list()
-        )
+        if settings.ltm_importance_weighted_eviction:
+            # Evict lowest-importance memories first, then oldest among equal scores
+            oldest = (
+                await Memory.find({"agent_id": agent_id})
+                .sort([("importance_score", 1), ("updated_at", 1)])
+                .limit(excess)
+                .to_list()
+            )
+        else:
+            oldest = (
+                await Memory.find({"agent_id": agent_id})
+                .sort("updated_at")
+                .limit(excess)
+                .to_list()
+            )
         for mem in oldest:
             await mem.delete()
 
@@ -235,7 +251,7 @@ class MemoryManager:
 
         try:
             from qdrant_client import AsyncQdrantClient
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
 
             client = AsyncQdrantClient(
                 url=qdrant_url,
@@ -257,10 +273,21 @@ class MemoryManager:
                     with_payload=True,
                 )
                 hits = [
-                    point.payload
+                    {**point.payload, "_score": point.score}
                     for point in results.points
                     if point.payload
                 ]
+                # Filter by minimum relevance score
+                min_score = settings.memory_retrieval_min_score
+                if min_score > 0:
+                    before = len(hits)
+                    hits = [h for h in hits if float(h.get("_score", 0.0)) >= min_score]
+                    if before > len(hits):
+                        logger.debug(
+                            "Memory semantic search: filtered %d low-score results"
+                            " (min_score=%.2f)",
+                            before - len(hits), min_score,
+                        )
                 semantic_retrieval_results.labels(type="memory").observe(len(hits))
                 if hits:
                     semantic_retrieval_hits_total.labels(type="memory").inc()
