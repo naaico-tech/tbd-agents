@@ -5,6 +5,7 @@ from app.config import settings
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
+from app.models.code_repository import CodeRepository
 from app.models.custom_tool import CustomTool
 from app.models.guardrail import Guardrail
 from app.models.knowledge_item import KnowledgeItem
@@ -24,8 +25,8 @@ async def init_db() -> None:
     await init_beanie(
         database=client[settings.mongo_db_name],
         document_models=[
-            Agent, ChatMessage, ChatSession, CustomTool, Guardrail, KnowledgeItem,
-            KnowledgeSource, McpServer, Memory, Provider, ScheduledAgent, Skill,
-            TaskExecution, Token, Workflow,
+            Agent, ChatMessage, ChatSession, CodeRepository, CustomTool, Guardrail,
+            KnowledgeItem, KnowledgeSource, McpServer, Memory, Provider,
+            ScheduledAgent, Skill, TaskExecution, Token, Workflow,
         ],
     )
