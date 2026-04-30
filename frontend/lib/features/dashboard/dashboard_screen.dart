@@ -77,6 +77,7 @@ class DashboardSnapshot {
     required this.tokensCount,
     required this.providersCount,
     required this.knowledgeSourcesCount,
+    required this.codeRepositoriesCount,
     required this.workflowsCount,
     required this.scheduledAgentsCount,
     required this.taskExecutionsCount,
@@ -89,6 +90,7 @@ class DashboardSnapshot {
   final int tokensCount;
   final int providersCount;
   final int knowledgeSourcesCount;
+  final int codeRepositoriesCount;
   final int workflowsCount;
   final int scheduledAgentsCount;
   final int taskExecutionsCount;
@@ -130,6 +132,10 @@ Future<DashboardSnapshot> fetchDashboardSnapshot(http.Client client) async {
     client,
     '/knowledge-sources',
   );
+  final codeRepositories = await _fetchListOrEmpty(
+    client,
+    '/code-repositories',
+  );
   final scheduledAgents = await _fetchListOrEmpty(client, '/scheduled-agents');
 
   final agents = coreResponses[0];
@@ -166,6 +172,7 @@ Future<DashboardSnapshot> fetchDashboardSnapshot(http.Client client) async {
     tokensCount: tokens.length,
     providersCount: providers.length,
     knowledgeSourcesCount: knowledgeSources.length,
+    codeRepositoriesCount: codeRepositories.length,
     workflowsCount: workflows.length,
     scheduledAgentsCount: scheduledAgents.length,
     taskExecutionsCount: tasks.length,
@@ -386,6 +393,12 @@ class _DashboardContent extends StatelessWidget {
         value: snapshot.knowledgeSourcesCount,
         icon: Icons.library_books_outlined,
         accent: accentTeal,
+      ),
+      _DashboardStat(
+        label: 'Code Repositories',
+        value: snapshot.codeRepositoriesCount,
+        icon: Icons.source_outlined,
+        accent: accentSlate,
       ),
       _DashboardStat(
         label: 'Workflows',
