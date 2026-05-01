@@ -30,6 +30,7 @@ services:
       - ATLASSIAN_URL=${ATLASSIAN_URL:-}
       # Token store encryption key — must be the same across app + worker
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - GITNEXUS_URL=${GITNEXUS_URL:-http://gitnexus-server:4747}
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-api
@@ -41,6 +42,8 @@ services:
         condition: service_started
       otel-collector:
         condition: service_started
+      gitnexus-server:
+        condition: service_healthy
     volumes:
       - repos_data:/repos
     restart: unless-stopped
@@ -65,6 +68,7 @@ services:
       - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
       - ATLASSIAN_URL=${ATLASSIAN_URL:-}
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - GITNEXUS_URL=${GITNEXUS_URL:-http://gitnexus-server:4747}
       # OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-worker
@@ -80,6 +84,8 @@ services:
         condition: service_started
       otel-collector:
         condition: service_started
+      gitnexus-server:
+        condition: service_healthy
     volumes:
       - repos_data:/repos
     restart: unless-stopped
@@ -104,6 +110,7 @@ services:
       - ATLASSIAN_EMAIL=${ATLASSIAN_EMAIL:-}
       - ATLASSIAN_URL=${ATLASSIAN_URL:-}
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - GITNEXUS_URL=${GITNEXUS_URL:-http://gitnexus-server:4747}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-beat
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.1.0,deployment.environment=docker
@@ -141,6 +148,26 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
+
+  # ── Code Intelligence (GitNexus) ────────────────────────────────────────────
+
+  gitnexus-server:
+    image: ghcr.io/abhigyanpatwari/gitnexus:latest
+    ports:
+      - "4747:4747"
+    environment:
+      - DATA_DIR=/data/gitnexus
+      - WORKSPACE_DIR=/workspace
+    volumes:
+      - gitnexus_data:/data/gitnexus
+      - repos_data:/workspace:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsSI", "http://localhost:4747/api/heartbeat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   # ── Observability Stack ─────────────────────────────────────────────────────
 
@@ -231,3 +258,4 @@ volumes:
   tempo_data:
   loki_data:
   grafana_data:
+  gitnexus_data:

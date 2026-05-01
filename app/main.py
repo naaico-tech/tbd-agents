@@ -113,6 +113,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized.")
 
+    # Auto-register GitNexus MCP server if GITNEXUS_URL is configured
+    try:
+        from app.services.gitnexus_seeder import seed_gitnexus_mcp
+        await seed_gitnexus_mcp()
+    except Exception as exc:
+        logger.warning("GitNexus MCP seeding failed (non-fatal): %s", exc)
+
     # Load plugins from app/plugins.yaml registry
     try:
         await plugin_loader.load_plugins_from_config()

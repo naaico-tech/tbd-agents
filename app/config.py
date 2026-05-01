@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     otel_service_name: str = "tbd-agents"
     # Internal API base URL (used by memory MCP server subprocess)
     api_base_url: str = "http://app:8000"
+    # GitNexus code intelligence MCP server
+    # Set GITNEXUS_URL to enable; GitNexus MCP auto-registration is skipped without it.
+    gitnexus_url: str | None = None
     # Plugin system
     plugins_dir: str = "app/plugins"
     plugins_config: str = "app/plugins.yaml"
