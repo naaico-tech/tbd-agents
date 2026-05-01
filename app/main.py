@@ -12,6 +12,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.api.routes import (
     agents,
     chat,
+    code_repositories,
     custom_tools,
     export_import,
     guardrails,
@@ -180,6 +181,7 @@ app.include_router(models.router)
 app.include_router(tokens.router)
 app.include_router(tasks.router)
 app.include_router(workflows.router)
+app.include_router(code_repositories.router)
 
 app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 

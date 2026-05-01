@@ -651,14 +651,17 @@ def _build_anthropic_system_blocks(system_prompt: str, static_prefix_len: int) -
         return [{"type": "text", "text": system_prompt}]
 
 
-REPOS_BASE = "/repos"
+REPOS_BASE = settings.repos_base
 
 
 async def _sync_repo(workflow: Workflow) -> str | None:
-    """Clone or pull the workflow's configured repository.
+    """Clone or pull the workflow's configured legacy repository.
 
     Returns the local path to the repo checkout, or None if no repo configured.
     Uses shallow clone (--depth 1) for speed.
+
+    Note: this is the legacy single-repo code path.  New attachments come
+    through ``code_repository_manager.resolve_for_workflow``.
     """
     if not workflow.repo_url:
         return None
@@ -698,6 +701,59 @@ async def _sync_repo(workflow: Workflow) -> str | None:
         return None
 
     return repo_dir
+
+
+async def _resolve_workflow_repos(
+    workflow: Workflow,
+) -> list[tuple["CodeRepositoryRef", str]]:
+    """Resolve repositories attached to *workflow* (registered + legacy).
+
+    Returns ``[(repo, local_path), ...]``.  ``repo`` is either a
+    ``CodeRepository`` document or ``None`` for the legacy single-repo path.
+
+    Each registered repo is synced via ``code_repository_manager.sync`` (TTL
+    cached).  The legacy ``workflow.repo_url`` is appended only when it does
+    not duplicate an already-resolved registered repo (matched on
+    ``repo_url + branch``).
+    """
+    from app.services.code_repository_manager import code_repository_manager
+
+    resolved: list[tuple[object, str]] = []
+    seen_keys: set[tuple[str, str]] = set()
+
+    try:
+        repos = await code_repository_manager.resolve_for_workflow(workflow)
+    except Exception as exc:
+        logger.warning("Failed to resolve repos for workflow %s: %s", workflow.id, exc)
+        repos = []
+
+    for repo in repos:
+        try:
+            local_path = await code_repository_manager.sync(repo, force=False)
+        except Exception as exc:
+            logger.warning("Sync failed for repo %s: %s", repo.name, exc)
+            local_path = None
+        if local_path:
+            key = (repo.repo_url, repo.default_branch or "main")
+            if key not in seen_keys:
+                seen_keys.add(key)
+                resolved.append((repo, local_path))
+
+    if workflow.repo_url:
+        legacy_key = (workflow.repo_url, workflow.repo_branch or "main")
+        if legacy_key not in seen_keys:
+            legacy_path = await _sync_repo(workflow)
+            if legacy_path:
+                resolved.append((None, legacy_path))
+                seen_keys.add(legacy_key)
+
+    return resolved  # type: ignore[return-value]
+
+
+# Type alias forward-ref for clarity in signatures (the manager returns
+# CodeRepository instances; we keep the engine import-light).
+class CodeRepositoryRef:  # pragma: no cover - typing helper only
+    pass
 
 
 # ── BYOK Custom Provider Execution ───────────────────────────────────────────
@@ -1328,6 +1384,97 @@ STORE_MEMORY_TOOL_CLAUDE = {
 }
 
 
+# OpenAI-format tool definition for code_search (semantic code retrieval)
+CODE_SEARCH_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": "code_search",
+        "description": (
+            "Semantic search across attached code repositories. Returns the "
+            "most relevant code snippets with file path, line range, and "
+            "match score. Pass repository_id to restrict the search to a "
+            "single attached repo (otherwise searches across all)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language query describing what you're looking for",
+                },
+                "repository_id": {
+                    "type": "string",
+                    "description": "Optional: limit to a single repository by id",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of snippets to return (default 8)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+# Claude-format tool definition for code_search
+CODE_SEARCH_TOOL_CLAUDE = {
+    "type": "custom",
+    "name": "code_search",
+    "description": (
+        "Semantic search across attached code repositories. Returns the "
+        "most relevant code snippets with file path, line range, and "
+        "match score."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Natural-language query describing what you're looking for",
+            },
+            "repository_id": {
+                "type": "string",
+                "description": "Optional: limit to a single repository by id",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of snippets to return (default 8)",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+async def _handle_code_search(resolved_repos: list, arguments: dict) -> str:
+    """Execute the built-in code_search tool against resolved CodeRepositories."""
+    from app.services.code_repository_manager import code_repository_manager
+
+    query = (arguments or {}).get("query", "")
+    if not query:
+        return json.dumps({"error": "'query' is required"})
+    target_id = (arguments or {}).get("repository_id")
+    limit = (arguments or {}).get("limit") or settings.code_search_top_k
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = settings.code_search_top_k
+
+    repos = list(resolved_repos or [])
+    if target_id:
+        repos = [r for r in repos if r is not None and str(getattr(r, "id", "")) == target_id]
+    else:
+        repos = [r for r in repos if r is not None]
+    if not repos:
+        return json.dumps({"results": [], "note": "no_repositories_attached"})
+
+    try:
+        hits = await code_repository_manager.search(repos, query, limit=limit)
+    except Exception as exc:
+        return json.dumps({"error": f"code_search failed: {exc}"})
+    return json.dumps({"results": hits})
+
+
 async def _execute_mcp_tool(
     tool_name: str,
     arguments: dict,
@@ -1559,6 +1706,7 @@ async def _run_with_claude_sdk(
     task_exec: TaskExecution | None,
     *,
     repo_path: str | None = None,
+    resolved_repos: list | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
     builtin_tools: list[str] | None = None,
@@ -1652,6 +1800,16 @@ async def _run_with_claude_sdk(
                     "repo_inspector exposed for repository-aware file inspection",
                     task_exec,
                 )
+
+        # ── Built-in code_search tool (semantic search across repos) ─────────
+        if resolved_repos and settings.embeddings_enabled:
+            custom_tools.append(CODE_SEARCH_TOOL_CLAUDE)
+            await _log(
+                workflow,
+                "code_search_loaded",
+                f"code_search exposed across {len(resolved_repos)} repository(ies)",
+                task_exec,
+            )
 
         # ── Build native MCP servers for URL-based transports ────────────────
         native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
@@ -1766,6 +1924,10 @@ async def _run_with_claude_sdk(
                     if tool_name == "store_memory":
                         tool_result = await _handle_store_memory(
                             workflow.agent_id, tool_args
+                        )
+                    elif tool_name == "code_search":
+                        tool_result = await _handle_code_search(
+                            resolved_repos or [], tool_args
                         )
                     elif tool_name in custom_python_tool_map_claude:
                         tool_result = await _execute_custom_tool(
@@ -1997,6 +2159,7 @@ async def _run_with_custom_provider(
     task_exec: TaskExecution | None,
     *,
     repo_path: str | None = None,
+    resolved_repos: list | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
 ) -> str | None:
@@ -2089,6 +2252,16 @@ async def _run_with_custom_provider(
                     "repo_inspector exposed for repository-aware file inspection",
                     task_exec,
                 )
+
+        # ── Built-in code_search tool (semantic search across repos) ─────────
+        if resolved_repos and settings.embeddings_enabled:
+            openai_tools.append(CODE_SEARCH_TOOL_OPENAI)
+            await _log(
+                workflow,
+                "code_search_loaded",
+                f"code_search exposed across {len(resolved_repos)} repository(ies)",
+                task_exec,
+            )
 
         # Always add the store_memory built-in tool
         openai_tools.append(STORE_MEMORY_TOOL_OPENAI)
@@ -2233,6 +2406,10 @@ async def _run_with_custom_provider(
                             if tool_name == "store_memory":
                                 tool_result = await _handle_store_memory(
                                     workflow.agent_id, tool_args
+                                )
+                            elif tool_name == "code_search":
+                                tool_result = await _handle_code_search(
+                                    resolved_repos or [], tool_args
                                 )
                             elif tool_name in custom_python_tool_map:
                                 tool_result = await _execute_custom_tool(
@@ -2672,22 +2849,60 @@ async def run_agent(
     )
     assembled_system_chars = len(system_prompt)
 
-    # Sync repository if configured
-    repo_path = await _sync_repo(workflow)
+    # Sync repositories — registered (via ids/tags) + legacy single repo
+    resolved_repos_with_paths = await _resolve_workflow_repos(workflow)
+    repo_path = resolved_repos_with_paths[0][1] if resolved_repos_with_paths else None
+    resolved_repos = [r for r, _ in resolved_repos_with_paths if r is not None]
     repo_context = ""
-    if repo_path:
+    if resolved_repos_with_paths:
         repo_sync_total.labels(status="success").inc()
-        await _log(workflow, "repo_synced", f"Repository synced to {repo_path}", task_exec)
-        repo_context = (
-            f"\n\n<repository>\n"
-            f"A git repository has been cloned and is available at: {repo_path}\n"
-            f"URL: {workflow.repo_url}\n"
-            f"Branch: {workflow.repo_branch or 'main'}\n"
-            f"Use repository-aware tools to inspect this path when available. "
-            f"If the repo_inspector tool is exposed, prefer it for listing, searching, and reading files instead of attempting shell access.\n"
-            f"</repository>"
+        await _log(
+            workflow,
+            "repos_synced",
+            f"{len(resolved_repos_with_paths)} repository(ies) ready",
+            task_exec,
         )
-        system_prompt += repo_context
+        from xml.sax.saxutils import escape as _xml_escape
+        from xml.sax.saxutils import quoteattr as _xml_quoteattr
+
+        per_item_limit = settings.prompt_context_item_char_limit
+        total_budget = settings.prompt_repo_char_budget
+        sections: list[str] = []
+        used = len("<repositories>\n\n</repositories>")
+        for repo, local_path in resolved_repos_with_paths:
+            if repo is None:
+                name = "(legacy)"
+                url = workflow.repo_url or ""
+                branch = workflow.repo_branch or "main"
+            else:
+                name = repo.name
+                url = repo.repo_url
+                branch = repo.default_branch or "main"
+            block = (
+                f"<repo name={_xml_quoteattr(name)} url={_xml_quoteattr(url)} "
+                f"branch={_xml_quoteattr(branch)}>\n"
+                f"local_path: {_xml_escape(local_path)}\n"
+                f"</repo>"
+            )
+            if len(block) > per_item_limit:
+                block = block[:per_item_limit].rstrip() + "</repo>"
+            if used + len(block) + 1 > total_budget:
+                break
+            sections.append(block)
+            used += len(block) + 1
+        if sections:
+            repo_context = (
+                "\n\n<repositories>\n"
+                + "\n".join(sections)
+                + "\nUse repository-aware tools to inspect these paths when "
+                "available. If the repo_inspector tool is exposed, prefer it "
+                "for listing, searching, and reading files instead of "
+                "attempting shell access. When the code_search tool is "
+                "available, use it to retrieve relevant code snippets "
+                "semantically across attached repositories.\n"
+                "</repositories>"
+            )
+            system_prompt += repo_context
     elif workflow.repo_url:
         repo_sync_total.labels(status="failure").inc()
         await _log(workflow, "repo_sync_failed", f"Failed to sync {workflow.repo_url}", task_exec)
@@ -2698,7 +2913,8 @@ async def run_agent(
         "Prompt context assembled "
         f"(base_system={len(agent.system_prompt)} chars, assembled_system={assembled_system_chars} chars, "
         f"knowledge={len(knowledge_context)} chars, memory={len(memory_context)} chars, "
-        f"repo={len(repo_context)} chars, total={len(system_prompt)} chars, "
+        f"repos={len(repo_context)} chars [{len(resolved_repos_with_paths)} repo(s)], "
+        f"total={len(system_prompt)} chars, "
         f"~{_estimate_text_tokens(system_prompt, workflow.model)} tokens)",
         task_exec,
     )
@@ -2715,7 +2931,8 @@ async def run_agent(
                 custom_provider,
                 custom_provider_key,
                 task_exec,
-                    repo_path=repo_path,
+                repo_path=repo_path,
+                resolved_repos=resolved_repos,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
                 builtin_tools=agent.builtin_tools or None,
@@ -2728,6 +2945,7 @@ async def run_agent(
             custom_provider_key,
             task_exec,
             repo_path=repo_path,
+            resolved_repos=resolved_repos,
             mcp_config=mcp_config,
             allowed_tools_set=allowed_tools_set,
         )

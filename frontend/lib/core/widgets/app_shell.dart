@@ -69,6 +69,12 @@ class AppShell extends StatelessWidget {
       accentColor: accentTeal,
     ),
     NavDestination(
+      route: AppLinks.codeRepositories,
+      label: 'Code Repos',
+      icon: Icons.source_outlined,
+      accentColor: accentSlate,
+    ),
+    NavDestination(
       route: AppLinks.guardrails,
       label: 'Guardrails',
       icon: Icons.shield_outlined,
@@ -440,6 +446,7 @@ class _TopBar extends StatelessWidget {
       AppLinks.customTools: 'Custom Tools',
       AppLinks.skills: 'Skills',
       AppLinks.knowledge: 'Knowledge',
+      AppLinks.codeRepositories: 'Code Repositories',
       AppLinks.guardrails: 'Guardrails',
       AppLinks.tokens: 'Tokens',
       AppLinks.providers: 'Providers',

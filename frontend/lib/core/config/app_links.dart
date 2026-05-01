@@ -6,6 +6,7 @@ class AppLinks {
   static const String customTools = '$dashboardRoot/custom-tools';
   static const String skills = '$dashboardRoot/skills';
   static const String knowledge = '$dashboardRoot/knowledge';
+  static const String codeRepositories = '$dashboardRoot/code-repositories';
   static const String guardrails = '$dashboardRoot/guardrails';
   static const String tokens = '$dashboardRoot/tokens';
   static const String providers = '$dashboardRoot/providers';
@@ -28,6 +29,7 @@ class AppLinks {
     customTools,
     skills,
     knowledge,
+    codeRepositories,
     guardrails,
     tokens,
     providers,
@@ -45,6 +47,7 @@ class AppLinks {
     customTools: 'custom-tools',
     skills: 'skills',
     knowledge: 'knowledge',
+    codeRepositories: 'repositories',
     guardrails: 'guardrails',
     tokens: 'tokens',
     providers: 'providers',

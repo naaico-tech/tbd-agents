@@ -45,6 +45,8 @@ class ExportedWorkflow(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    repository_ids: list[str] = []
+    repository_tags: list[str] = []
 
 
 class ExportedKnowledgeSource(BaseModel):
@@ -53,6 +55,16 @@ class ExportedKnowledgeSource(BaseModel):
     source_type: str
     connection_config: dict[str, Any] = {}
     tags: list[str] = []
+
+
+class ExportedCodeRepository(BaseModel):
+    name: str
+    description: str = ""
+    repo_url: str
+    default_branch: str = "main"
+    token_name: str | None = None
+    tags: list[str] = []
+    indexing: dict[str, Any] = {}
 
 
 # ── Per-resource bundles ─────────────────────────────────────────────────────
@@ -84,6 +96,13 @@ class KnowledgeSourceExportBundle(BaseModel):
     exported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resource_type: str = "knowledge_source"
     items: list[ExportedKnowledgeSource]
+
+
+class CodeRepositoryExportBundle(BaseModel):
+    version: str = "1.0"
+    exported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    resource_type: str = "code_repository"
+    items: list[ExportedCodeRepository]
 
 
 # ── Full bundle (all resources) ───────────────────────────────────────────────
@@ -122,6 +141,10 @@ class WorkflowImportBundle(BaseModel):
 
 class KnowledgeSourceImportBundle(BaseModel):
     items: list[ExportedKnowledgeSource]
+
+
+class CodeRepositoryImportBundle(BaseModel):
+    items: list[ExportedCodeRepository]
 
 
 class BundleImportResult(BaseModel):

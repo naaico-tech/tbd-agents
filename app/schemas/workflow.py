@@ -32,6 +32,8 @@ class WorkflowCreate(BaseModel):
     repo_url: str | None = None  # GitHub repo URL
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
+    repository_ids: list[str] = []  # Attached CodeRepository IDs
+    repository_tags: list[str] = []  # Tag-based CodeRepository selection
 
 
 class WorkflowUpdate(BaseModel):
@@ -53,6 +55,8 @@ class WorkflowUpdate(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    repository_ids: list[str] | None = None
+    repository_tags: list[str] | None = None
     status: str | None = None  # active | inactive
 
 
@@ -115,6 +119,8 @@ class WorkflowResponse(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    repository_ids: list[str] = []
+    repository_tags: list[str] = []
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

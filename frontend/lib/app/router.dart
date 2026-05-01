@@ -5,6 +5,7 @@ import '../core/widgets/app_shell.dart';
 import '../core/widgets/legacy_dashboard_host.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/agents/agents_screen.dart';
+import '../features/code_repositories/code_repositories_screen.dart';
 import '../features/workflows/workflows_exports.dart';
 import '../features/run_task/run_task_screen.dart';
 import '../features/chat/chat_screen.dart';
@@ -54,6 +55,10 @@ GoRouter createAppRouter({WidgetBuilder? dashboardBuilder}) {
           _buildShellChildRoute(
             path: AppLinks.knowledge,
             builder: (_) => const KnowledgeScreen(),
+          ),
+          _buildShellChildRoute(
+            path: AppLinks.codeRepositories,
+            builder: (_) => const CodeRepositoriesScreen(),
           ),
           _buildShellChildRoute(
             path: AppLinks.guardrails,

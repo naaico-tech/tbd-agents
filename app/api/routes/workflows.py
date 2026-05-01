@@ -77,6 +77,8 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        repository_ids=getattr(wf, "repository_ids", []) or [],
+        repository_tags=getattr(wf, "repository_tags", []) or [],
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
@@ -120,6 +122,8 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
+        repository_ids=body.repository_ids,
+        repository_tags=body.repository_tags,
     )
     await wf.insert()
     return await _to_response(wf)
@@ -291,6 +295,8 @@ def _to_exported_wf(wf: Workflow) -> ExportedWorkflow:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        repository_ids=getattr(wf, "repository_ids", []) or [],
+        repository_tags=getattr(wf, "repository_tags", []) or [],
     )
 
 
@@ -341,6 +347,8 @@ async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_
                 repo_url=item.repo_url,
                 repo_branch=item.repo_branch,
                 repo_token_name=item.repo_token_name,
+                repository_ids=getattr(item, "repository_ids", []) or [],
+                repository_tags=getattr(item, "repository_tags", []) or [],
             )
             await wf.insert()
             result.ids.append(str(wf.id))

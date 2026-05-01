@@ -258,6 +258,48 @@ DELETE /api/knowledge-items/{id}           ← Delete item
 POST   /api/knowledge-items/query          ← Query items by tags
 ```
 
+### 📦 Code Repositories
+
+Register git codebases once, sync + index them as semantic search corpora, and
+attach them to any workflow via `repository_ids` and/or `repository_tags` (same
+pattern as skills, knowledge sources, and MCP servers). Synced repos are
+exposed to agents alongside the legacy single-repo workflow path; when
+embeddings are enabled, an in-process `code_search` tool lets agents retrieve
+relevant code snippets across all attached repos.
+
+```
+POST   /api/code-repositories                ← Register a code repository
+GET    /api/code-repositories                ← List repos (optional ?tags=a,b filter)
+GET    /api/code-repositories/{id}           ← Get repo
+PUT    /api/code-repositories/{id}           ← Update repo (owner only)
+DELETE /api/code-repositories/{id}           ← Delete repo + drop vector collection
+POST   /api/code-repositories/{id}/sync      ← Force-sync (clone or fetch+checkout)
+POST   /api/code-repositories/{id}/index     ← Walk, chunk, embed, upsert to Qdrant
+POST   /api/code-repositories/{id}/search    ← Semantic search across this repo
+GET    /api/code-repositories/export         ← Export bundle (no secrets)
+GET    /api/code-repositories/{id}/export    ← Export single repo
+POST   /api/code-repositories/import         ← Bulk import bundle
+```
+
+Attaching repos to a workflow:
+
+```bash
+curl -X POST http://localhost:8000/api/workflows \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "...",
+    "prompt": "Where do we validate billing webhooks?",
+    "repository_ids": ["6601...."],
+    "repository_tags": ["billing"]
+  }'
+```
+
+Inside agent runs the synced repos are listed in a `<repositories>` block of the
+system prompt with their local checkout paths. Agents can use the existing
+`repo_inspector` tool for filesystem inspection and (when embeddings are
+enabled) `code_search` for cross-repo semantic retrieval.
+
 ### ⚙️ Workflows
 
 ```
