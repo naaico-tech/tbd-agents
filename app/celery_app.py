@@ -97,15 +97,25 @@ def _init_worker_telemetry(**_kwargs):
 
 @worker_process_init.connect(weak=False)
 def _warm_embeddings(**_kwargs):
-    """Pre-load fastembed model weights before the first task runs."""
+    """Pre-load fastembed model weights in the background before the first task runs.
+
+    Runs in a daemon thread so it never blocks the worker_process_init signal
+    (which Celery uses to confirm the process has started — a long block causes
+    the main process to send SIGKILL).
+    """
     import asyncio
+    import threading
 
     from app.services.embeddings import EmbeddingsService
 
-    async def _run():
-        try:
-            await EmbeddingsService()._ensure_loaded()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Embeddings warmup failed (non-fatal): %s", exc)
+    def _run_in_thread():
+        async def _load():
+            try:
+                await EmbeddingsService()._ensure_loaded()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Embeddings warmup failed (non-fatal): %s", exc)
 
-    asyncio.run(_run())
+        asyncio.run(_load())
+
+    t = threading.Thread(target=_run_in_thread, daemon=True, name="embeddings-warmup")
+    t.start()

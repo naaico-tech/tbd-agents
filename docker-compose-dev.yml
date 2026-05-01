@@ -55,6 +55,7 @@ services:
 
   worker:
     <<: *app-image
+    build: *app-build
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4
     env_file:
       - .env
@@ -97,6 +98,7 @@ services:
 
   beat:
     <<: *app-image
+    build: *app-build
     command: celery -A app.celery_app beat --loglevel=info --scheduler redbeat.RedBeatScheduler
     env_file:
       - .env
