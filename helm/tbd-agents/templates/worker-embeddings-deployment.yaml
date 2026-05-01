@@ -1,0 +1,72 @@
+{{- if .Values.workerEmbeddings.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tbd-agents.fullname" . }}-worker-embeddings
+  labels:
+    {{- include "tbd-agents.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-embeddings
+spec:
+  replicas: {{ .Values.workerEmbeddings.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "tbd-agents.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker-embeddings
+  template:
+    metadata:
+      labels:
+        {{- include "tbd-agents.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker-embeddings
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker-embeddings
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Dedicated CPU-bound worker pool for the ``embeddings`` Celery
+          # queue. Tune ``workerEmbeddings.concurrency`` to the CPU count
+          # of the underlying node pool (≈ ``nproc``).
+          command:
+            - celery
+            - -A
+            - app.celery_app
+            - worker
+            - --loglevel=info
+            - -Q
+            - {{ .Values.workerEmbeddings.queues | default "embeddings" | quote }}
+            - --concurrency={{ .Values.workerEmbeddings.concurrency }}
+            - -n
+            - embeddings@%h
+          envFrom:
+            - secretRef:
+                name: {{ include "tbd-agents.fullname" . }}-env
+            - configMapRef:
+                name: {{ include "tbd-agents.fullname" . }}-config
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: tbd-agents-worker-embeddings
+          resources:
+            {{- toYaml .Values.workerEmbeddings.resources | nindent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: repos
+              mountPath: /repos
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: repos
+          persistentVolumeClaim:
+            claimName: {{ include "tbd-agents.fullname" . }}-repos
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

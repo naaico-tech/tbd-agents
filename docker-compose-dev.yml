@@ -254,6 +254,22 @@ services:
       - loki
     restart: unless-stopped
 
+  gitnexus-web:
+    image: ${WEB_IMAGE:-ghcr.io/abhigyanpatwari/gitnexus-web:latest}
+    container_name: ${WEB_CONTAINER_NAME:-gitnexus-web}
+    ports:
+      - '${WEB_HOST_PORT:-4173}:4173'
+    depends_on:
+      gitnexus-server:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4173/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   mongo_data:
   redis_data:

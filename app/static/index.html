@@ -109,6 +109,7 @@
   .badge-teal { background: rgba(54,224,224,.18); color: var(--cyan); border: 1px solid rgba(54,224,224,.4); font-weight: 700; }
   .badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
   .badge-gray { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .repo-job-strip { font-size: 11px; color: var(--muted); padding: 2px 0; min-height: 14px; }
   .tag { display: inline-block; padding: 1px 7px; border-radius: 2px; font-size: 11px; background: var(--surface2);
     color: var(--cyan); margin-right: 3px; border: 1px solid rgba(54,224,224,.2); }
 
@@ -991,6 +992,9 @@ function applyRoute(rawRoute = {}, { updateUrl = false, replace = false } = {}) 
   if (updateUrl) syncRouteUrl(route, { replace });
   if (previousPage === 'task-logs' && route.page !== 'task-logs') disconnectTaskLogsSSE();
   if (previousPage === 'chat' && route.page !== 'chat') disconnectChatStream();
+  if (previousPage === 'repositories' && route.page !== 'repositories') {
+    Array.from(activeJobs.keys()).forEach(repoId => detachJob(repoId));
+  }
 
   setActivePage(route);
 
@@ -1881,6 +1885,84 @@ async function deleteKnowledgeItem(id) {
 }
 
 // ── Code Repositories ──
+// ── Repo job-progress live tracking ──────────────────────────────────────────
+const activeJobs = new Map(); // repoId -> { jobId, es, pollTimer, lastSnapshot, gotDone }
+
+function attachJob(repoId, jobId) {
+  detachJob(repoId); // clean up any prior tracker for this repo
+  const info = { jobId, es: null, pollTimer: null, lastSnapshot: null, gotDone: false };
+  activeJobs.set(repoId, info);
+
+  const es = new EventSource(`/api/code-repositories/${repoId}/jobs/${jobId}/events`);
+  info.es = es;
+
+  es.addEventListener('progress', ev => {
+    try {
+      const snap = JSON.parse(ev.data);
+      if (snap && snap.id) info.lastSnapshot = snap;
+      renderJobProgress(repoId, snap);
+    } catch {}
+  });
+
+  es.addEventListener('done', ev => {
+    info.gotDone = true;
+    es.close(); // silence auto-reconnect before we forget the entry
+    let snap;
+    try { snap = JSON.parse(ev.data); } catch {}
+    renderJobProgress(repoId, info.lastSnapshot || { id: jobId });
+    clearInterval(info.pollTimer);
+    activeJobs.delete(repoId);
+    loadRepositories();
+  });
+
+  es.onerror = () => {
+    if (info.gotDone) return; // trailing browser-fired error after normal done — ignore
+    if (es.readyState === EventSource.CLOSED) return; // already closed
+    // SSE failed mid-stream: fall back to polling
+    es.close();
+    pollJobUntilTerminal(repoId, jobId);
+  };
+}
+
+function detachJob(repoId) {
+  const info = activeJobs.get(repoId);
+  if (!info) return;
+  info.es && info.es.close();
+  clearInterval(info.pollTimer);
+  activeJobs.delete(repoId);
+}
+
+function renderJobProgress(repoId, snap) {
+  const el = document.getElementById(`repo-progress-${repoId}`);
+  if (!el) return;
+  if (!snap) { el.innerHTML = ''; return; }
+  const phase = snap.current_phase || snap.state || '';
+  const pct = snap.progress_pct != null ? ` ${Math.round(snap.progress_pct)}%` : '';
+  el.innerHTML = `<span class="repo-job-strip">${esc(phase)}${pct}</span>`;
+}
+
+function pollJobUntilTerminal(repoId, jobId) {
+  detachJob(repoId); // detach any existing tracker before installing the new one
+  const info = { jobId, es: null, pollTimer: null, lastSnapshot: null, gotDone: false };
+  activeJobs.set(repoId, info);
+
+  async function tick() {
+    const cur = activeJobs.get(repoId);
+    if (!cur || cur.jobId !== jobId) return; // dismissed or replaced
+    try {
+      const snap = await api(`/api/code-repositories/${repoId}/jobs/${jobId}`);
+      renderJobProgress(repoId, snap);
+      if (snap.is_terminal) {
+        detachJob(repoId);
+        loadRepositories();
+      }
+    } catch {}
+  }
+
+  tick();
+  info.pollTimer = setInterval(tick, 3000);
+}
+
 async function loadRepositories() {
   try {
     const tagFilter = (document.getElementById('repo-tag-filter')?.value || '').trim();
@@ -1895,7 +1977,7 @@ async function loadRepositories() {
           <td><strong>${esc(r.name)}</strong>${r.description ? `<br><span style="font-size:12px;color:var(--muted)">${esc(r.description)}</span>` : ''}</td>
           <td style="font-family:monospace;font-size:12px"><a href="${esc(r.repo_url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(r.repo_url)}</a></td>
           <td>${esc(r.default_branch)}</td>
-          <td>${statusBadge(r.status)}${r.last_error ? `<br><span style="color:#e44;font-size:11px" title="${esc(r.last_error)}">⚠ error</span>` : ''}</td>
+          <td>${statusBadge(r.status)}${r.last_error ? `<br><span style="color:#e44;font-size:11px" title="${esc(r.last_error)}">⚠ error</span>` : ''}<div id="repo-progress-${r.id}"></div></td>
           <td>${(r.tags||[]).map(t => `<span class="tag">${esc(t)}</span>`).join(' ') || '<span style="color:var(--muted)">—</span>'}</td>
           <td>${r.file_count ?? 0}</td>
           <td>${r.chunk_count ?? 0}</td>
@@ -2000,23 +2082,21 @@ async function saveRepository(id) {
 
 async function syncRepository(id) {
   try {
-    toast('Syncing repository…');
+    toast('Syncing…');
     const res = await api(`/api/code-repositories/${id}/sync`, { method:'POST' });
-    toast(`Sync ${res.status}${res.last_commit_sha ? ` @ ${res.last_commit_sha.slice(0,7)}` : ''}`);
-    loadRepositories();
+    toast('Sync job queued');
+    if (res.job_id) attachJob(id, res.job_id);
+    else loadRepositories();
   } catch(e) { toast(e.message, 'error'); }
 }
 
 async function indexRepository(id) {
   try {
-    toast('Indexing repository…');
+    toast('Queuing index job…');
     const res = await api(`/api/code-repositories/${id}/index`, { method:'POST' });
-    if (res.indexed) {
-      toast(`Indexed ${res.file_count} files / ${res.chunk_count} chunks`);
-    } else {
-      toast(`Index skipped: ${res.reason || 'no changes'}`, 'info');
-    }
-    loadRepositories();
+    toast('Index job queued');
+    if (res.job_id) attachJob(id, res.job_id);
+    else loadRepositories();
   } catch(e) { toast(e.message, 'error'); }
 }
 

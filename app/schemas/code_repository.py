@@ -1,6 +1,7 @@
 """Pydantic schemas for the CodeRepository API."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -60,3 +61,55 @@ class CodeRepositoryIndexResponse(BaseModel):
     gitnexus_job_id: str | None = None
     reason: str | None = None
     last_error: str | None = None
+
+
+# ── Index Job schemas ─────────────────────────────────────────────────────────
+
+
+class IndexJobEnqueueResponse(BaseModel):
+    """Returned by POST /{repo_id}/index."""
+
+    job_id: str
+    state: str
+    idempotent: bool  # True when an in-progress job already existed
+
+
+class IndexJobSummaryResponse(BaseModel):
+    """One entry in GET /{repo_id}/jobs list."""
+
+    id: str
+    repo_id: str
+    state: str
+    kind: str
+    shard_count: int
+    shards_done: int
+    head_commit_sha: str | None
+    base_commit_sha: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IndexJobDetailResponse(BaseModel):
+    """Returned by GET /{repo_id}/jobs/{job_id} (with Redis overlay)."""
+
+    id: str
+    repo_id: str
+    state: str
+    kind: str
+    shard_count: int
+    shards_done: int
+    head_commit_sha: str | None
+    base_commit_sha: str | None
+    current_phase: str
+    current_file: str | None
+    counters: dict[str, Any]
+    progress_pct: float
+    is_terminal: bool
+    eta_seconds: float | None
+    error: dict[str, Any] | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

@@ -9,17 +9,28 @@ import os
 
 from celery import Celery
 from celery.signals import worker_process_init
+from kombu import Queue
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ── Queue-routing constants (used by index pipeline and tests) ───────────────
+
+INDEX_ORCHESTRATOR_TASK_NAME = "run_index_repository_job"
+INDEX_SHARD_TASK_NAME = "app.tasks.index_repository_task.index_shard"
+
 celery = Celery(
     "copilot_agent_hub",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.agent_task", "app.tasks.scheduled_trigger"],
+    include=[
+        "app.tasks.agent_task",
+        "app.tasks.scheduled_trigger",
+        "app.tasks.index_repository_task",
+        "app.tasks.sync_repository_task",
+    ],
 )
 
 celery.conf.update(
@@ -40,6 +51,17 @@ celery.conf.update(
     redbeat_redis_url=settings.redis_url,
     beat_scheduler="redbeat.RedBeatScheduler",
     beat_max_loop_interval=5,  # seconds between Beat scheduler iterations
+    # ── Queue topology ──────────────────────────────────────────────────────
+    task_default_queue="default",
+    task_queues=[
+        Queue("default"),
+        Queue("indexing"),
+        Queue("embeddings"),
+    ],
+    task_routes={
+        INDEX_ORCHESTRATOR_TASK_NAME: {"queue": "indexing"},
+        INDEX_SHARD_TASK_NAME: {"queue": "embeddings"},
+    },
 )
 
 celery.autodiscover_tasks(["app.tasks"])
@@ -67,6 +89,23 @@ def _init_worker_telemetry(**_kwargs):
         MultiProcessCollector(registry)
         start_http_server(port, registry=registry)
         logger.info("Worker Prometheus metrics server started on :%d", port)
-    except OSError:
-        # Port already bound by another worker process — expected with prefork.
+    except (OSError, ValueError):
+        # OSError: port already bound by another worker process — expected with prefork.
+        # ValueError: PROMETHEUS_MULTIPROC_DIR not set — metrics disabled in this env.
         pass
+
+
+@worker_process_init.connect(weak=False)
+def _warm_embeddings(**_kwargs):
+    """Pre-load fastembed model weights before the first task runs."""
+    import asyncio
+
+    from app.services.embeddings import EmbeddingsService
+
+    async def _run():
+        try:
+            await EmbeddingsService()._ensure_loaded()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Embeddings warmup failed (non-fatal): %s", exc)
+
+    asyncio.run(_run())

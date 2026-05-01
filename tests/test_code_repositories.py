@@ -184,16 +184,34 @@ async def test_manager_index_not_synced():
 
 @pytest.mark.asyncio
 async def test_manager_index_no_gitnexus_url(tmp_path, monkeypatch):
+    """When gitnexus_url is unset the compat shim falls back to the embedding pipeline."""
     from app.services import code_repository_manager as mod
 
     monkeypatch.setattr(mod.settings, "gitnexus_url", None)
     mgr = CodeRepositoryManager()
     repo = _fake_repo()
     repo.local_path = str(tmp_path)
+    repo.last_commit_sha = "abc123"  # short-circuits rev-parse
 
-    result = await mgr.index(repo)
-    assert result["indexed"] is False
-    assert result["reason"] == "gitnexus_unavailable"
+    from app.services.code_repository_manager import Manifest
+
+    fake_manifest = Manifest(head_sha="abc123", base_sha=None, changes=[])
+
+    with (
+        patch(
+            "app.services.code_repository_manager.discover_changes",
+            new=AsyncMock(return_value=fake_manifest),
+        ),
+        patch.object(
+            mgr,
+            "index_changes",
+            new=AsyncMock(return_value={"indexed": True, "file_count": 0, "chunk_count": 0}),
+        ),
+    ):
+        result = await mgr.index(repo)
+
+    assert result["indexed"] is True
+    assert "file_count" in result
 
 
 @pytest.mark.asyncio
@@ -499,23 +517,29 @@ def test_index_code_repository_ok(app_client):
     repo = _route_repo()
     repo.local_path = "/repos/abc123"
 
+    inserted = MagicMock()
+    inserted.id = FAKE_ID
+    inserted.state = "queued"
+    inserted.insert = AsyncMock(return_value=inserted)
+
+    job_cls = MagicMock(return_value=inserted)
+    job_cls.find_one = AsyncMock(return_value=None)
+    delay_mock = MagicMock()
+
     with (
         patch.object(CodeRepository, "get", AsyncMock(return_value=repo)),
+        patch("app.api.routes.code_repositories.IndexJob", new=job_cls),
         patch(
-            "app.api.routes.code_repositories.code_repository_manager.index",
-            new=AsyncMock(return_value={
-                "indexed": True,
-                "reason": "indexing_started",
-                "gitnexus_job_id": "job-42",
-            }),
+            "app.tasks.index_repository_task.run_index_repository_job.delay",
+            delay_mock,
         ),
     ):
         resp = app_client.post(f"/api/code-repositories/{FAKE_ID}/index")
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert body["indexed"] is True
-    assert body["gitnexus_job_id"] == "job-42"
-    assert body["reason"] == "indexing_started"
+    assert body["job_id"] == FAKE_ID
+    assert body["state"] == "queued"
+    assert body["idempotent"] is False
 
 
 def test_index_status_route_polling(app_client):
