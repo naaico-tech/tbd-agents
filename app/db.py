@@ -8,6 +8,8 @@ from app.models.chat_session import ChatSession
 from app.models.code_repository import CodeRepository
 from app.models.custom_tool import CustomTool
 from app.models.guardrail import Guardrail
+from app.models.index_job import IndexJob
+from app.models.indexed_file import IndexedFile
 from app.models.knowledge_item import KnowledgeItem
 from app.models.knowledge_source import KnowledgeSource
 from app.models.mcp_server import McpServer
@@ -26,6 +28,7 @@ async def init_db() -> None:
         database=client[settings.mongo_db_name],
         document_models=[
             Agent, ChatMessage, ChatSession, CodeRepository, CustomTool, Guardrail,
+            IndexJob, IndexedFile,
             KnowledgeItem, KnowledgeSource, McpServer, Memory, Provider,
             ScheduledAgent, Skill, TaskExecution, Token, Workflow,
         ],
