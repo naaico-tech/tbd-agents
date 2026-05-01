@@ -514,6 +514,7 @@ class CodeRepositoryManager:
             job_id = data.get("jobId")
             repo.status = CodeRepositoryStatus.INDEXING
             repo.gitnexus_job_id = job_id
+            repo.last_error = None  # clear any stale error from a previous attempt
             return {"indexed": True, "gitnexus_job_id": job_id, "reason": "indexing_started"}
 
         # No GitNexus — run the embedding pipeline inline.
