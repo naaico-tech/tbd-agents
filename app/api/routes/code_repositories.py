@@ -9,18 +9,13 @@ from app.api.deps import get_current_user
 from app.models.code_repository import (
     CodeRepository,
     CodeRepositoryStatus,
-    IndexingConfig,
 )
 from app.schemas.code_repository import (
     CodeRepositoryCreate,
     CodeRepositoryIndexResponse,
     CodeRepositoryResponse,
-    CodeRepositorySearchRequest,
-    CodeRepositorySearchResponse,
-    CodeRepositorySearchResult,
     CodeRepositorySyncResponse,
     CodeRepositoryUpdate,
-    IndexingConfigSchema,
 )
 from app.schemas.export_import import (
     CodeRepositoryExportBundle,
@@ -48,10 +43,8 @@ def _to_response(repo: CodeRepository) -> CodeRepositoryResponse:
         last_commit_sha=repo.last_commit_sha,
         last_error=repo.last_error,
         local_path=repo.local_path,
-        indexing=IndexingConfigSchema(**repo.indexing.model_dump()),
-        vector_collection=repo.vector_collection,
         file_count=repo.file_count,
-        chunk_count=repo.chunk_count,
+        gitnexus_job_id=repo.gitnexus_job_id,
         github_user=repo.github_user,
         created_at=repo.created_at,
         updated_at=repo.updated_at,
@@ -66,7 +59,6 @@ def _to_exported(repo: CodeRepository) -> ExportedCodeRepository:
         default_branch=repo.default_branch,
         token_name=repo.token_name,
         tags=repo.tags,
-        indexing=repo.indexing.model_dump(),
     )
 
 
@@ -82,11 +74,6 @@ def _require_owner(repo: CodeRepository, user: dict) -> None:
 async def create_code_repository(
     body: CodeRepositoryCreate, user=Depends(get_current_user)
 ):
-    indexing = (
-        IndexingConfig(**body.indexing.model_dump())
-        if body.indexing is not None
-        else IndexingConfig()
-    )
     repo = CodeRepository(
         name=body.name,
         description=body.description,
@@ -94,7 +81,6 @@ async def create_code_repository(
         default_branch=body.default_branch,
         token_name=body.token_name,
         tags=body.tags,
-        indexing=indexing,
         github_user=user["login"],
     )
     await repo.insert()
@@ -137,8 +123,6 @@ async def import_code_repositories(
     result = ImportResult()
     for item in body.items:
         try:
-            indexing_data = item.indexing or {}
-            indexing = IndexingConfig(**indexing_data) if indexing_data else IndexingConfig()
             repo = CodeRepository(
                 name=item.name,
                 description=item.description,
@@ -146,7 +130,6 @@ async def import_code_repositories(
                 default_branch=item.default_branch,
                 token_name=item.token_name,
                 tags=item.tags,
-                indexing=indexing,
                 github_user=user["login"],
             )
             await repo.insert()
@@ -177,10 +160,6 @@ async def update_code_repository(
         raise HTTPException(status_code=404, detail="Code repository not found")
     _require_owner(repo, user)
     updates = body.model_dump(exclude_unset=True)
-    if "indexing" in updates and updates["indexing"] is not None:
-        repo.indexing = IndexingConfig(**updates.pop("indexing"))
-    elif "indexing" in updates:
-        updates.pop("indexing")
     for k, v in updates.items():
         setattr(repo, k, v)
     repo.updated_at = datetime.now(UTC)
@@ -230,7 +209,6 @@ async def index_code_repository(repo_id: str, user=Depends(get_current_user)):
             status=repo.status,
             indexed=False,
             file_count=repo.file_count,
-            chunk_count=repo.chunk_count,
             reason="sync_failed",
             last_error=repo.last_error,
         )
@@ -239,25 +217,25 @@ async def index_code_repository(repo_id: str, user=Depends(get_current_user)):
         status=repo.status,
         indexed=bool(result.get("indexed")),
         file_count=repo.file_count,
-        chunk_count=repo.chunk_count,
+        gitnexus_job_id=result.get("gitnexus_job_id"),
         reason=result.get("reason"),
         last_error=repo.last_error,
     )
 
 
-@router.post("/{repo_id}/search", response_model=CodeRepositorySearchResponse)
-async def search_code_repository(
-    repo_id: str,
-    body: CodeRepositorySearchRequest,
-    user=Depends(get_current_user),
-):
+@router.get("/{repo_id}/index/status", response_model=CodeRepositoryIndexResponse)
+async def get_index_status(repo_id: str, user=Depends(get_current_user)):
+    """Poll GitNexus for the current indexing job status and update the repo record."""
     repo = await CodeRepository.get(PydanticObjectId(repo_id))
     if not repo:
         raise HTTPException(status_code=404, detail="Code repository not found")
     _require_owner(repo, user)
-    hits = await code_repository_manager.search(
-        [repo], body.query, limit=body.limit
-    )
-    return CodeRepositorySearchResponse(
-        results=[CodeRepositorySearchResult(**hit) for hit in hits]
+    await code_repository_manager.check_index_status(repo)
+    return CodeRepositoryIndexResponse(
+        status=repo.status,
+        indexed=repo.status == CodeRepositoryStatus.INDEXED,
+        file_count=repo.file_count,
+        gitnexus_job_id=repo.gitnexus_job_id,
+        reason=None,
+        last_error=repo.last_error,
     )

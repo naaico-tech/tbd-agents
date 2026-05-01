@@ -180,13 +180,24 @@ class _CodeRepositoriesScreenState extends State<CodeRepositoriesScreen> {
         'POST',
         '/code-repositories/${repo['id']}/index',
       );
-      if (res?['indexed'] == true) {
-        _toast(
-          'Indexed ${res?['file_count'] ?? 0} files / '
-          '${res?['chunk_count'] ?? 0} chunks',
+      if (!mounted) return;
+      final status = res?['status'] ?? 'unknown';
+      final reason = res?['reason'] ?? '';
+      final jobId = res?['gitnexus_job_id'];
+      if (res != null && res['indexed'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              status == 'indexing'
+                  ? 'GitNexus indexing started${jobId != null ? " (job $jobId)" : ""}'
+                  : 'Indexed successfully',
+            ),
+          ),
         );
       } else {
-        _toast('Index skipped: ${res?['reason'] ?? 'no changes'}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Index failed: $reason')),
+        );
       }
       _reload();
     } catch (e) {
@@ -200,7 +211,7 @@ class _CodeRepositoriesScreenState extends State<CodeRepositoriesScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete repository?'),
         content: Text(
-          'Drop "${repo['name']}", its local checkout and vector index? '
+          'Drop "${repo['name']}" and its local checkout? '
           'This cannot be undone.',
         ),
         actions: [
@@ -226,24 +237,6 @@ class _CodeRepositoriesScreenState extends State<CodeRepositoriesScreen> {
     } catch (e) {
       _toast('Delete failed: $e', isError: true);
     }
-  }
-
-  Future<void> _search(Map<String, dynamic> repo) async {
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _RepositorySearchDialog(
-        repo: repo,
-        runSearch: (query, limit) async {
-          final res = await _request(
-            'POST',
-            '/code-repositories/${repo['id']}/search',
-            body: {'query': query, 'limit': limit},
-          );
-          final results = (res?['results'] as List?) ?? const [];
-          return results.whereType<Map<String, dynamic>>().toList();
-        },
-      ),
-    );
   }
 
   @override
@@ -366,7 +359,6 @@ class _CodeRepositoriesScreenState extends State<CodeRepositoriesScreen> {
                 onEdit: () => _createOrEdit(existing: repo),
                 onSync: () => _sync(repo),
                 onIndex: () => _index(repo),
-                onSearch: () => _search(repo),
                 onDelete: () => _delete(repo),
               ),
             ),
@@ -435,7 +427,6 @@ class _RepositoryCard extends StatelessWidget {
     required this.onEdit,
     required this.onSync,
     required this.onIndex,
-    required this.onSearch,
     required this.onDelete,
   });
 
@@ -443,7 +434,6 @@ class _RepositoryCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onSync;
   final VoidCallback onIndex;
-  final VoidCallback onSearch;
   final VoidCallback onDelete;
 
   @override
@@ -452,7 +442,6 @@ class _RepositoryCard extends StatelessWidget {
     final status = (repo['status'] ?? 'registered').toString();
     final lastError = repo['last_error']?.toString();
     final fileCount = repo['file_count'] ?? 0;
-    final chunkCount = repo['chunk_count'] ?? 0;
     final lastSynced = repo['last_synced_at']?.toString();
 
     return RetroCard(
@@ -528,7 +517,6 @@ class _RepositoryCard extends StatelessWidget {
             runSpacing: 4,
             children: [
               _InfoBit(label: 'FILES', value: '$fileCount'),
-              _InfoBit(label: 'CHUNKS', value: '$chunkCount'),
               _InfoBit(label: 'LAST SYNC', value: _relative(lastSynced)),
               if (repo['last_commit_sha'] != null)
                 _InfoBit(
@@ -583,12 +571,6 @@ class _RepositoryCard extends StatelessWidget {
                 onPressed: onIndex,
                 color: accentLavender,
                 icon: Icons.auto_awesome_outlined,
-              ),
-              RetroButton(
-                label: 'SEARCH',
-                onPressed: onSearch,
-                color: accentSlate,
-                icon: Icons.search,
               ),
               RetroButton(
                 label: 'DELETE',
@@ -686,19 +668,12 @@ class _RepositoryEditorDialogState extends State<_RepositoryEditorDialog> {
   late final TextEditingController _url;
   late final TextEditingController _branch;
   late final TextEditingController _tags;
-  late final TextEditingController _chunk;
-  late final TextEditingController _overlap;
-  late final TextEditingController _maxKb;
-  late final TextEditingController _include;
-  late final TextEditingController _exclude;
   String? _tokenName;
-  bool _indexingEnabled = true;
 
   @override
   void initState() {
     super.initState();
     final r = widget.initial;
-    final idx = (r?['indexing'] as Map<String, dynamic>?) ?? const {};
     _name = TextEditingController(text: r?['name']?.toString() ?? '');
     _desc = TextEditingController(text: r?['description']?.toString() ?? '');
     _url = TextEditingController(text: r?['repo_url']?.toString() ?? '');
@@ -709,50 +684,16 @@ class _RepositoryEditorDialogState extends State<_RepositoryEditorDialog> {
       text:
           ((r?['tags'] as List?)?.whereType<String>().toList() ?? []).join(', '),
     );
-    _chunk = TextEditingController(
-      text: (idx['chunk_chars'] ?? 1200).toString(),
-    );
-    _overlap = TextEditingController(
-      text: (idx['overlap_chars'] ?? 150).toString(),
-    );
-    _maxKb = TextEditingController(
-      text: (idx['max_file_kb'] ?? 256).toString(),
-    );
-    _include = TextEditingController(
-      text:
-          ((idx['include_globs'] as List?)?.whereType<String>().toList() ?? [])
-              .join('\n'),
-    );
-    _exclude = TextEditingController(
-      text:
-          ((idx['exclude_globs'] as List?)?.whereType<String>().toList() ?? [])
-              .join('\n'),
-    );
     _tokenName = r?['token_name']?.toString();
-    _indexingEnabled = idx['enabled'] != false;
   }
 
   @override
   void dispose() {
-    for (final c in [
-      _name,
-      _desc,
-      _url,
-      _branch,
-      _tags,
-      _chunk,
-      _overlap,
-      _maxKb,
-      _include,
-      _exclude,
-    ]) {
+    for (final c in [_name, _desc, _url, _branch, _tags]) {
       c.dispose();
     }
     super.dispose();
   }
-
-  List<String> _splitGlobs(String value) =>
-      value.split(RegExp(r'[\n,]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
   void _submit() {
     if (_name.text.trim().isEmpty || _url.text.trim().isEmpty) {
@@ -772,14 +713,6 @@ class _RepositoryEditorDialogState extends State<_RepositoryEditorDialog> {
           .map((t) => t.trim())
           .where((t) => t.isNotEmpty)
           .toList(),
-      'indexing': {
-        'enabled': _indexingEnabled,
-        'chunk_chars': int.tryParse(_chunk.text) ?? 1200,
-        'overlap_chars': int.tryParse(_overlap.text) ?? 150,
-        'max_file_kb': int.tryParse(_maxKb.text) ?? 256,
-        'include_globs': _splitGlobs(_include.text),
-        'exclude_globs': _splitGlobs(_exclude.text),
-      },
     };
     Navigator.of(context).pop(body);
   }
@@ -839,58 +772,6 @@ class _RepositoryEditorDialogState extends State<_RepositoryEditorDialog> {
               ),
               const SizedBox(height: sp12),
               _field('Tags (comma-separated)', _tags, hint: 'backend, infra'),
-              const Divider(height: sp24),
-              _label('Indexing'),
-              CheckboxListTile(
-                value: _indexingEnabled,
-                onChanged: (v) =>
-                    setState(() => _indexingEnabled = v ?? true),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text(
-                  'Enable semantic indexing (required for code_search tool)',
-                  style: TextStyle(fontFamily: fontBody, fontSize: 13),
-                ),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: _field(
-                      'Chunk chars',
-                      _chunk,
-                      keyboard: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: sp8),
-                  Expanded(
-                    child: _field(
-                      'Overlap chars',
-                      _overlap,
-                      keyboard: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: sp8),
-                  Expanded(
-                    child: _field(
-                      'Max file KB',
-                      _maxKb,
-                      keyboard: TextInputType.number,
-                    ),
-                  ),
-                ],
-              ),
-              _field(
-                'Include globs (comma- or newline-separated)',
-                _include,
-                hint: '**/*.py, **/*.md',
-                maxLines: 3,
-              ),
-              _field(
-                'Exclude globs (comma- or newline-separated)',
-                _exclude,
-                hint: '**/node_modules/**, **/.git/**',
-                maxLines: 3,
-              ),
             ],
           ),
         ),
@@ -956,230 +837,6 @@ class _RepositoryEditorDialogState extends State<_RepositoryEditorDialog> {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ── Search dialog ───────────────────────────────────────────────────────────
-typedef _SearchRunner =
-    Future<List<Map<String, dynamic>>> Function(String query, int limit);
-
-class _RepositorySearchDialog extends StatefulWidget {
-  const _RepositorySearchDialog({required this.repo, required this.runSearch});
-
-  final Map<String, dynamic> repo;
-  final _SearchRunner runSearch;
-
-  @override
-  State<_RepositorySearchDialog> createState() =>
-      _RepositorySearchDialogState();
-}
-
-class _RepositorySearchDialogState extends State<_RepositorySearchDialog> {
-  final _query = TextEditingController();
-  final _limit = TextEditingController(text: '10');
-  bool _loading = false;
-  Object? _error;
-  List<Map<String, dynamic>> _results = const [];
-
-  @override
-  void dispose() {
-    _query.dispose();
-    _limit.dispose();
-    super.dispose();
-  }
-
-  Future<void> _go() async {
-    final q = _query.text.trim();
-    if (q.isEmpty) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final hits = await widget.runSearch(q, int.tryParse(_limit.text) ?? 10);
-      if (!mounted) return;
-      setState(() {
-        _results = hits;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e;
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: cardBg,
-      shape: const RoundedRectangleBorder(borderRadius: borderRadiusNone),
-      title: Text(
-        'SEARCH ${(widget.repo['name'] ?? '').toString().toUpperCase()}',
-        style: const TextStyle(
-          fontFamily: fontDisplay,
-          fontSize: 12,
-          color: textPrimary,
-          letterSpacing: 1,
-        ),
-      ),
-      content: SizedBox(
-        width: 640,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _query,
-                    autofocus: true,
-                    onSubmitted: (_) => _go(),
-                    decoration: const InputDecoration(
-                      labelText: 'Query',
-                      border: OutlineInputBorder(
-                        borderRadius: borderRadiusNone,
-                      ),
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: sp12,
-                        vertical: sp12,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: sp8),
-                SizedBox(
-                  width: 80,
-                  child: TextField(
-                    controller: _limit,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Limit',
-                      border: OutlineInputBorder(
-                        borderRadius: borderRadiusNone,
-                      ),
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: sp8,
-                        vertical: sp12,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: sp8),
-                RetroButton(
-                  label: 'GO',
-                  onPressed: _go,
-                  icon: Icons.search,
-                  color: accentSlate,
-                ),
-              ],
-            ),
-            const SizedBox(height: sp16),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 420, minHeight: 80),
-              child: _buildResults(),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildResults() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(sp8),
-        child: Text(
-          'Search failed: $_error',
-          style: const TextStyle(
-            fontFamily: fontBody,
-            fontSize: 13,
-            color: accentPrimary,
-          ),
-        ),
-      );
-    }
-    if (_results.isEmpty) {
-      return const Center(
-        child: Text(
-          'No results yet. Enter a query and press GO.',
-          style: TextStyle(
-            fontFamily: fontBody,
-            fontSize: 13,
-            color: textMuted,
-          ),
-        ),
-      );
-    }
-    return ListView.separated(
-      itemCount: _results.length,
-      separatorBuilder: (_, _) => const SizedBox(height: sp8),
-      itemBuilder: (_, i) {
-        final h = _results[i];
-        final score = (h['score'] as num?)?.toStringAsFixed(3) ?? '—';
-        return Container(
-          padding: const EdgeInsets.all(sp8),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF7F1DD),
-            border: Border.all(color: borderColor, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${h['file_path']}:${h['line_start']}-${h['line_end']}',
-                      style: const TextStyle(
-                        fontFamily: fontBody,
-                        fontSize: 12,
-                        color: accentPrimary,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    'score $score',
-                    style: const TextStyle(
-                      fontFamily: fontBody,
-                      fontSize: 11,
-                      color: textMuted,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: sp4),
-              SelectableText(
-                (h['text'] ?? '').toString(),
-                style: const TextStyle(
-                  fontFamily: fontFallback,
-                  fontSize: 12,
-                  color: textPrimary,
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

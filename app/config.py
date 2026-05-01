@@ -59,7 +59,6 @@ class Settings(BaseSettings):
     # Code Repository Library
     repos_base: str = "/repos"
     repo_sync_ttl_seconds: int = 300
-    code_search_top_k: int = 8
     prompt_repo_char_budget: int = 4000
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}

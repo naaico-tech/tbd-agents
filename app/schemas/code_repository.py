@@ -2,22 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.models.code_repository import (
-    DEFAULT_EXCLUDE_GLOBS,
-    DEFAULT_INCLUDE_GLOBS,
-    CodeRepositoryStatus,
-)
-
-
-class IndexingConfigSchema(BaseModel):
-    enabled: bool = True
-    include_globs: list[str] = Field(default_factory=lambda: list(DEFAULT_INCLUDE_GLOBS))
-    exclude_globs: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE_GLOBS))
-    max_file_kb: int = 256
-    chunk_chars: int = 1200
-    overlap_chars: int = 150
+from app.models.code_repository import CodeRepositoryStatus
 
 
 class CodeRepositoryCreate(BaseModel):
@@ -27,7 +14,6 @@ class CodeRepositoryCreate(BaseModel):
     default_branch: str = "main"
     token_name: str | None = None
     tags: list[str] = []
-    indexing: IndexingConfigSchema | None = None
 
 
 class CodeRepositoryUpdate(BaseModel):
@@ -37,7 +23,6 @@ class CodeRepositoryUpdate(BaseModel):
     default_branch: str | None = None
     token_name: str | None = None
     tags: list[str] | None = None
-    indexing: IndexingConfigSchema | None = None
 
 
 class CodeRepositoryResponse(BaseModel):
@@ -54,32 +39,11 @@ class CodeRepositoryResponse(BaseModel):
     last_commit_sha: str | None
     last_error: str | None
     local_path: str | None
-    indexing: IndexingConfigSchema
-    vector_collection: str | None
     file_count: int
-    chunk_count: int
+    gitnexus_job_id: str | None
     github_user: str
     created_at: datetime
     updated_at: datetime
-
-
-class CodeRepositorySearchRequest(BaseModel):
-    query: str
-    limit: int | None = None
-
-
-class CodeRepositorySearchResult(BaseModel):
-    repo_id: str
-    repo_name: str
-    file_path: str
-    line_start: int
-    line_end: int
-    score: float
-    text: str
-
-
-class CodeRepositorySearchResponse(BaseModel):
-    results: list[CodeRepositorySearchResult]
 
 
 class CodeRepositorySyncResponse(BaseModel):
@@ -93,6 +57,6 @@ class CodeRepositoryIndexResponse(BaseModel):
     status: CodeRepositoryStatus
     indexed: bool
     file_count: int
-    chunk_count: int
+    gitnexus_job_id: str | None = None
     reason: str | None = None
     last_error: str | None = None
