@@ -377,7 +377,14 @@ async def get_index_job(
 async def cancel_index_job(
     repo_id: str, job_id: str, user=Depends(get_current_user)
 ):
-    """Request cancellation of a running index job."""
+    """Request cancellation of a running index job.
+
+    Sets a Redis cancel flag so active shards stop processing.
+    Also immediately transitions the job to ``cancelled`` in MongoDB so the
+    idempotency guard doesn't treat it as still-running.
+    """
+    from datetime import UTC, datetime
+
     repo = await CodeRepository.get(PydanticObjectId(repo_id))
     if not repo:
         raise HTTPException(status_code=404, detail="Code repository not found")
@@ -389,8 +396,13 @@ async def cancel_index_job(
 
     if job.state not in TERMINAL_STATES:
         await index_progress.request_cancel(job_id)
+        job.state = "cancelled"
+        job.current_phase = "cancelled"
+        job.finished_at = datetime.now(UTC)
+        job.updated_at = datetime.now(UTC)
+        await job.save()
 
-    return {"job_id": job_id, "state": job.state, "cancel_requested": job.state not in TERMINAL_STATES}
+    return {"job_id": job_id, "state": job.state, "cancel_requested": True}
 
 
 @router.get("/{repo_id}/jobs/{job_id}/events")
