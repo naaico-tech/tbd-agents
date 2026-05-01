@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # Plugin system
     plugins_dir: str = "app/plugins"
     plugins_config: str = "app/plugins.yaml"
+    # Code Repository Library
+    repos_base: str = "/repos"
+    repo_sync_ttl_seconds: int = 300
+    prompt_repo_char_budget: int = 4000
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

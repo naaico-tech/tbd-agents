@@ -12,6 +12,7 @@ Future<DashboardSnapshot> _dashboardSnapshot() async {
     tokensCount: 3,
     providersCount: 2,
     knowledgeSourcesCount: 1,
+    codeRepositoriesCount: 0,
     workflowsCount: 5,
     scheduledAgentsCount: 1,
     taskExecutionsCount: 9,
