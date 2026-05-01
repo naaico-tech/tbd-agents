@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     plugins_config: str = "app/plugins.yaml"
     # Code Repository Library
     repos_base: str = "/repos"
+    # Path prefix that GitNexus sees for the same repos volume (translate on send)
+    gitnexus_workspace_dir: str = "/workspace"
     repo_sync_ttl_seconds: int = 300
     prompt_repo_char_budget: int = 4000
 

@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
+import httpx
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -238,7 +239,13 @@ async def index_code_repository(
     if settings.gitnexus_url:
         if not repo.local_path:
             raise HTTPException(status_code=400, detail="Repository not synced yet")
-        result = await code_repository_manager.index(repo)
+        try:
+            result = await code_repository_manager.index(repo)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"GitNexus returned {exc.response.status_code}: {exc.response.text[:200]}",
+            ) from exc
         await repo.save()
         return IndexJobEnqueueResponse(
             job_id=result.get("gitnexus_job_id") or str(repo.id),

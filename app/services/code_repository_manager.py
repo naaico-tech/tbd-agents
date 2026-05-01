@@ -495,13 +495,21 @@ class CodeRepositoryManager:
 
         if settings.gitnexus_url:
             # GitNexus path: submit the repo for external analysis.
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{settings.gitnexus_url}/api/analyze",
-                    json={"repo_path": repo.local_path, "repo_id": str(repo.id)},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            # Translate the local path to the workspace dir as seen by GitNexus.
+            repo_path = repo.local_path
+            if settings.gitnexus_workspace_dir and repo_path.startswith(settings.repos_base):
+                repo_path = settings.gitnexus_workspace_dir + repo_path[len(settings.repos_base):]
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        f"{settings.gitnexus_url}/api/analyze",
+                        json={"path": repo_path, "repo_id": str(repo.id)},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except httpx.HTTPStatusError as exc:
+                logger.error("GitNexus analyze failed: %s – %s", exc.response.status_code, exc.response.text)
+                raise
 
             job_id = data.get("jobId")
             repo.status = CodeRepositoryStatus.INDEXING
