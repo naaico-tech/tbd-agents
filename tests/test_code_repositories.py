@@ -533,7 +533,9 @@ def test_index_code_repository_ok(app_client):
             "app.tasks.index_repository_task.run_index_repository_job.delay",
             delay_mock,
         ),
+        patch("app.api.routes.code_repositories.settings") as mock_settings,
     ):
+        mock_settings.gitnexus_url = None
         resp = app_client.post(f"/api/code-repositories/{FAKE_ID}/index")
     assert resp.status_code == 202, resp.text
     body = resp.json()

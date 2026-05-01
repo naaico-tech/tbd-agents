@@ -159,7 +159,9 @@ def test_post_index_enqueues_job(app_client):
             "app.tasks.index_repository_task.run_index_repository_job.delay",
             delay_mock,
         ),
+        patch("app.api.routes.code_repositories.settings") as mock_settings,
     ):
+        mock_settings.gitnexus_url = None
         resp = app_client.post(f"/api/code-repositories/{FAKE_REPO_ID}/index")
 
     assert resp.status_code == 202, resp.text
@@ -188,7 +190,9 @@ def test_post_index_is_idempotent(app_client):
             "app.tasks.index_repository_task.run_index_repository_job.delay",
             delay_mock,
         ),
+        patch("app.api.routes.code_repositories.settings") as mock_settings,
     ):
+        mock_settings.gitnexus_url = None
         resp = app_client.post(f"/api/code-repositories/{FAKE_REPO_ID}/index")
 
     assert resp.status_code == 202
@@ -218,7 +222,9 @@ def test_post_index_force_passes_flag(app_client):
             "app.tasks.index_repository_task.run_index_repository_job.delay",
             delay_mock,
         ),
+        patch("app.api.routes.code_repositories.settings") as mock_settings,
     ):
+        mock_settings.gitnexus_url = None
         resp = app_client.post(
             f"/api/code-repositories/{FAKE_REPO_ID}/index?force=true"
         )

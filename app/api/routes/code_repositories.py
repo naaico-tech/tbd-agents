@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.models.code_repository import (
     CodeRepository,
     CodeRepositoryStatus,
@@ -206,7 +207,7 @@ async def sync_code_repository(repo_id: str, user=Depends(get_current_user)):
     )
 
 
-# ── Index: enqueue via Celery ─────────────────────────────────────────────────
+# ── Index: GitNexus or Celery embedding pipeline ──────────────────────────────
 
 
 @router.post(
@@ -221,15 +222,31 @@ async def index_code_repository(
 ):
     """Enqueue an indexing job for the repository.
 
-    Returns 202 immediately.  If an in-progress job already exists the same
-    job is returned with ``idempotent=True`` and the Celery task is NOT
-    re-queued.
+    - When ``GITNEXUS_URL`` is configured: delegates directly to GitNexus and
+      returns the GitNexus job ID.  No Celery job is created.
+    - Otherwise: creates a Celery ``IndexJob`` and runs the local embedding
+      pipeline (discover → chunk → embed → Qdrant).
+
+    Returns 202 immediately in both cases.
     """
     repo = await CodeRepository.get(PydanticObjectId(repo_id))
     if not repo:
         raise HTTPException(status_code=404, detail="Code repository not found")
     _require_owner(repo, user)
 
+    # ── GitNexus path ──────────────────────────────────────────────────────────
+    if settings.gitnexus_url:
+        if not repo.local_path:
+            raise HTTPException(status_code=400, detail="Repository not synced yet")
+        result = await code_repository_manager.index(repo)
+        await repo.save()
+        return IndexJobEnqueueResponse(
+            job_id=result.get("gitnexus_job_id") or str(repo.id),
+            state="queued",
+            idempotent=False,
+        )
+
+    # ── Celery embedding pipeline path ─────────────────────────────────────────
     # Idempotency: return existing in-progress job without double-queuing.
     existing = await IndexJob.find_one(
         {"repo_id": PydanticObjectId(repo_id), "state": {"$nin": list(TERMINAL_STATES)}}
