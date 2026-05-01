@@ -9,17 +9,10 @@ import pytest
 from app.api.deps import get_current_user
 from app.main import app as _app
 from app.models.code_repository import (
-    DEFAULT_EXCLUDE_GLOBS,
-    DEFAULT_INCLUDE_GLOBS,
     CodeRepository,
     CodeRepositoryStatus,
-    IndexingConfig,
 )
-from app.services.code_repository_manager import (
-    CodeRepositoryManager,
-    _chunk_text,
-    _matches_any,
-)
+from app.services.code_repository_manager import CodeRepositoryManager
 
 FAKE_ID = "6601a1b2c3d4e5f607890abc"
 FAKE_ID_2 = "6601a1b2c3d4e5f607890abd"
@@ -54,16 +47,6 @@ def test_status_enum_values():
     assert CodeRepositoryStatus.ERROR == "error"
 
 
-def test_indexing_config_defaults():
-    cfg = IndexingConfig()
-    assert cfg.enabled is True
-    assert cfg.include_globs == DEFAULT_INCLUDE_GLOBS
-    assert cfg.exclude_globs == DEFAULT_EXCLUDE_GLOBS
-    assert cfg.max_file_kb == 256
-    assert cfg.chunk_chars == 1200
-    assert cfg.overlap_chars == 150
-
-
 def test_code_repository_model_defaults():
     repo = CodeRepository.model_construct(
         name="r", repo_url="https://github.com/x/y"
@@ -71,7 +54,7 @@ def test_code_repository_model_defaults():
     fields = CodeRepository.model_fields
     assert fields["status"].default == CodeRepositoryStatus.REGISTERED
     assert fields["file_count"].default == 0
-    assert fields["chunk_count"].default == 0
+    assert fields["gitnexus_job_id"].default is None
     assert fields["default_branch"].default == "main"
     assert repo.repo_url == "https://github.com/x/y"
 
@@ -79,35 +62,11 @@ def test_code_repository_model_defaults():
 # ── Manager unit tests ───────────────────────────────────────────────────────
 
 
-def test_chunk_text_short_returns_single_chunk():
-    assert _chunk_text("hello world", 1200, 150) == ["hello world"]
-
-
-def test_chunk_text_empty_returns_empty():
-    assert _chunk_text("", 1200, 150) == []
-
-
-def test_chunk_text_overlapping():
-    chunks = _chunk_text("a" * 3000, 1000, 200)
-    # Each chunk advances by 800 chars; should produce >=4 chunks
-    assert len(chunks) >= 4
-    assert all(len(c) <= 1000 for c in chunks)
-
-
-def test_matches_any_basename_match():
-    assert _matches_any("src/foo/bar.py", ["*.py"]) is True
-    assert _matches_any("src/foo/bar.txt", ["*.py"]) is False
-
-
-def test_matches_any_glob_match():
-    assert _matches_any("node_modules/x/y.js", ["node_modules/**"]) is True
-
-
 def _fake_repo(
     repo_id: str = FAKE_ID,
     name: str = "r1",
     tags: list[str] | None = None,
-    vector_collection: str | None = "code_abc123",
+    gitnexus_job_id: str | None = None,
 ):
     """A duck-typed CodeRepository sufficient for manager unit tests."""
     return SimpleNamespace(
@@ -124,10 +83,8 @@ def _fake_repo(
         last_commit_sha=None,
         last_error=None,
         local_path=None,
-        indexing=IndexingConfig(),
-        vector_collection=vector_collection,
+        gitnexus_job_id=gitnexus_job_id,
         file_count=0,
-        chunk_count=0,
         github_user="testuser",
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -149,7 +106,7 @@ async def test_manager_sync_clones(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.settings, "repos_base", str(tmp_path))
 
     mgr = CodeRepositoryManager()
-    repo = _fake_repo(vector_collection=None)
+    repo = _fake_repo()
 
     proc = AsyncMock()
     proc.returncode = 0
@@ -159,14 +116,11 @@ async def test_manager_sync_clones(tmp_path, monkeypatch):
         "app.services.code_repository_manager.asyncio.create_subprocess_shell",
         new=AsyncMock(return_value=proc),
     ):
-        # Make .git exist so capture-sha branch can run idempotently
-        # The clone branch is taken first (no .git initially) then sha branch.
         result = await mgr.sync(repo, force=True)
 
     assert result is not None
     assert repo.status == CodeRepositoryStatus.SYNCED
     assert repo.last_commit_sha == "abc123"
-    assert repo.vector_collection is not None
 
 
 @pytest.mark.asyncio
@@ -212,66 +166,116 @@ async def test_manager_sync_ttl_cache_skips_clone(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_manager_search_no_repos():
+async def test_manager_search_always_returns_empty():
+    """search() is stubbed — real search goes through GitNexus MCP."""
     mgr = CodeRepositoryManager()
     assert await mgr.search([], "anything") == []
-
-
-@pytest.mark.asyncio
-async def test_manager_search_disabled_when_embeddings_off(monkeypatch):
-    from app.services import code_repository_manager as mod
-
-    monkeypatch.setattr(mod.settings, "embeddings_enabled", False)
-    mgr = CodeRepositoryManager()
     assert await mgr.search([_fake_repo()], "anything") == []
 
 
 @pytest.mark.asyncio
-async def test_manager_search_merges_results(monkeypatch):
+async def test_manager_index_not_synced():
+    mgr = CodeRepositoryManager()
+    repo = _fake_repo()
+    result = await mgr.index(repo)
+    assert result["indexed"] is False
+    assert result["reason"] == "not_synced"
+
+
+@pytest.mark.asyncio
+async def test_manager_index_no_gitnexus_url(tmp_path, monkeypatch):
     from app.services import code_repository_manager as mod
 
-    monkeypatch.setattr(mod.settings, "embeddings_enabled", True)
-    monkeypatch.setattr(mod.settings, "code_search_top_k", 10)
+    monkeypatch.setattr(mod.settings, "gitnexus_url", None)
+    mgr = CodeRepositoryManager()
+    repo = _fake_repo()
+    repo.local_path = str(tmp_path)
 
-    fake_embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
-    monkeypatch.setattr(mod.embeddings_service, "embed_one", fake_embed)
+    result = await mgr.index(repo)
+    assert result["indexed"] is False
+    assert result["reason"] == "gitnexus_unavailable"
 
-    point_a = SimpleNamespace(
-        score=0.9,
-        payload={
-            "repo_id": "1", "repo_name": "r1", "file_path": "a.py",
-            "line_start": 1, "line_end": 5, "text": "alpha",
-        },
-    )
-    point_b = SimpleNamespace(
-        score=0.5,
-        payload={
-            "repo_id": "2", "repo_name": "r2", "file_path": "b.py",
-            "line_start": 7, "line_end": 9, "text": "beta",
-        },
-    )
+
+@pytest.mark.asyncio
+async def test_manager_index_triggers_gitnexus(tmp_path, monkeypatch):
+    from app.services import code_repository_manager as mod
+
+    monkeypatch.setattr(mod.settings, "gitnexus_url", "http://gitnexus:4747")
+    mgr = CodeRepositoryManager()
+    repo = _fake_repo()
+    repo.local_path = str(tmp_path)
+
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.json = MagicMock(return_value={"jobId": "job-abc", "status": "queued"})
+
     fake_client = AsyncMock()
-    fake_client.query_points = AsyncMock(
-        side_effect=[
-            SimpleNamespace(points=[point_a]),
-            SimpleNamespace(points=[point_b]),
-        ]
-    )
-    fake_client.close = AsyncMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.post = AsyncMock(return_value=fake_resp)
 
-    with patch(
-        "qdrant_client.AsyncQdrantClient", return_value=fake_client
-    ):
-        mgr = CodeRepositoryManager()
-        repos = [
-            _fake_repo(repo_id="1", name="r1", vector_collection="code_1"),
-            _fake_repo(repo_id="2", name="r2", vector_collection="code_2"),
-        ]
-        results = await mgr.search(repos, "query")
+    with patch("app.services.code_repository_manager.httpx.AsyncClient", return_value=fake_client):
+        result = await mgr.index(repo)
 
-    assert [r["score"] for r in results] == [0.9, 0.5]
-    assert results[0]["file_path"] == "a.py"
-    assert results[1]["repo_name"] == "r2"
+    assert result["indexed"] is True
+    assert result["gitnexus_job_id"] == "job-abc"
+    assert repo.status == CodeRepositoryStatus.INDEXING
+    assert repo.gitnexus_job_id == "job-abc"
+    fake_client.post.assert_awaited_once()
+    call_kwargs = fake_client.post.call_args
+    assert "/api/analyze" in call_kwargs[0][0]
+
+
+@pytest.mark.asyncio
+async def test_manager_check_index_status_complete(monkeypatch):
+    from app.services import code_repository_manager as mod
+
+    monkeypatch.setattr(mod.settings, "gitnexus_url", "http://gitnexus:4747")
+    mgr = CodeRepositoryManager()
+    repo = _fake_repo(gitnexus_job_id="job-xyz")
+    repo.status = CodeRepositoryStatus.INDEXING
+
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.json = MagicMock(return_value={"status": "complete"})
+
+    fake_client = AsyncMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.get = AsyncMock(return_value=fake_resp)
+
+    with patch("app.services.code_repository_manager.httpx.AsyncClient", return_value=fake_client):
+        result = await mgr.check_index_status(repo)
+
+    assert result["gitnexus_status"] == "complete"
+    assert repo.status == CodeRepositoryStatus.INDEXED
+    assert repo.gitnexus_job_id is None
+
+
+@pytest.mark.asyncio
+async def test_manager_check_index_status_failed(monkeypatch):
+    from app.services import code_repository_manager as mod
+
+    monkeypatch.setattr(mod.settings, "gitnexus_url", "http://gitnexus:4747")
+    mgr = CodeRepositoryManager()
+    repo = _fake_repo(gitnexus_job_id="job-fail")
+    repo.status = CodeRepositoryStatus.INDEXING
+
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.json = MagicMock(return_value={"status": "failed", "error": "boom"})
+
+    fake_client = AsyncMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.get = AsyncMock(return_value=fake_resp)
+
+    with patch("app.services.code_repository_manager.httpx.AsyncClient", return_value=fake_client):
+        result = await mgr.check_index_status(repo)
+
+    assert result["gitnexus_status"] == "failed"
+    assert repo.status == CodeRepositoryStatus.ERROR
+    assert "boom" in (repo.last_error or "")
 
 
 @pytest.mark.asyncio
@@ -325,10 +329,8 @@ def _route_repo(repo_id: str = FAKE_ID, github_user: str = "testuser"):
         last_commit_sha=None,
         last_error=None,
         local_path=None,
-        indexing=IndexingConfig(),
-        vector_collection=None,
+        gitnexus_job_id=None,
         file_count=0,
-        chunk_count=0,
         github_user=github_user,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -353,10 +355,8 @@ def test_create_code_repository(app_client):
     inserted.last_commit_sha = None
     inserted.last_error = None
     inserted.local_path = None
-    inserted.indexing = IndexingConfig()
-    inserted.vector_collection = None
+    inserted.gitnexus_job_id = None
     inserted.file_count = 0
-    inserted.chunk_count = 0
     inserted.github_user = "testuser"
     inserted.created_at = datetime.now(UTC)
     inserted.updated_at = datetime.now(UTC)
@@ -495,34 +495,52 @@ def test_sync_code_repository_ok(app_client):
     assert body["local_path"] == "/tmp/x"
 
 
-def test_search_code_repository(app_client):
+def test_index_code_repository_ok(app_client):
     repo = _route_repo()
-    hits = [
-        {
-            "repo_id": FAKE_ID,
-            "repo_name": "My Repo",
-            "file_path": "main.py",
-            "line_start": 1,
-            "line_end": 10,
-            "score": 0.85,
-            "text": "def main(): pass",
-        }
-    ]
+    repo.local_path = "/repos/abc123"
+
     with (
         patch.object(CodeRepository, "get", AsyncMock(return_value=repo)),
         patch(
-            "app.api.routes.code_repositories.code_repository_manager.search",
-            new=AsyncMock(return_value=hits),
+            "app.api.routes.code_repositories.code_repository_manager.index",
+            new=AsyncMock(return_value={
+                "indexed": True,
+                "reason": "indexing_started",
+                "gitnexus_job_id": "job-42",
+            }),
         ),
     ):
-        resp = app_client.post(
-            f"/api/code-repositories/{FAKE_ID}/search",
-            json={"query": "def main"},
-        )
+        resp = app_client.post(f"/api/code-repositories/{FAKE_ID}/index")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["indexed"] is True
+    assert body["gitnexus_job_id"] == "job-42"
+    assert body["reason"] == "indexing_started"
+
+
+def test_index_status_route_polling(app_client):
+    repo = _route_repo()
+    repo.status = CodeRepositoryStatus.INDEXING
+    repo.gitnexus_job_id = "job-42"
+
+    async def _do_check(r):
+        r.status = CodeRepositoryStatus.INDEXED
+        r.gitnexus_job_id = None
+        return {"status": CodeRepositoryStatus.INDEXED, "gitnexus_status": "complete"}
+
+    with (
+        patch.object(CodeRepository, "get", AsyncMock(return_value=repo)),
+        patch(
+            "app.api.routes.code_repositories.code_repository_manager.check_index_status",
+            new=AsyncMock(side_effect=_do_check),
+        ),
+    ):
+        resp = app_client.get(f"/api/code-repositories/{FAKE_ID}/index/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body["results"]) == 1
-    assert body["results"][0]["file_path"] == "main.py"
+    assert body["status"] == "indexed"
+    assert body["indexed"] is True
+    assert body["gitnexus_job_id"] is None
 
 
 def test_export_all_code_repositories(app_client):
