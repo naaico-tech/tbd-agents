@@ -207,3 +207,111 @@ class TestCopilotToolFiltering:
     def test_mcp_tools_also_skip_hook_level_allowlist(self):
         assert _copilot_tool_uses_mcp_allowlist("fetch_jira_issue") is False
         assert _copilot_tool_uses_mcp_allowlist("sql") is False
+
+
+class TestExecuteCustomToolCredentialOverrides:
+    """Tests for _execute_custom_tool credential_overrides feature."""
+
+    def _make_tool(self, env_config: dict) -> MagicMock:
+        tool = MagicMock()
+        tool.name = "my_tool"
+        tool.source_code = "print('hello')"
+        tool.env_config = env_config
+        return tool
+
+    @pytest.mark.asyncio
+    async def test_execute_custom_tool_credential_override_applied(self):
+        """Override redirects an existing env var to a different token."""
+        from app.core.agent_engine import _execute_custom_tool
+
+        tool = self._make_tool({"MY_KEY": "{{token:default-token}}"})
+        fn_map = {"my_tool": tool}
+
+        with (
+            patch(
+                "app.core.agent_engine.custom_tool_runner.run_tool",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
+            patch(
+                "app.services.token_manager.resolve_config",
+                new_callable=AsyncMock,
+                return_value={"MY_KEY": "override-secret"},
+            ) as mock_resolve,
+        ):
+            result = await _execute_custom_tool(
+                "my_tool",
+                {},
+                fn_map,
+                credential_overrides={"MY_KEY": "override-token"},
+            )
+
+        # resolve_config must have been called with the overridden token ref
+        mock_resolve.assert_awaited_once_with({"MY_KEY": "{{token:override-token}}"})
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_execute_custom_tool_credential_override_only_affects_declared_env_vars(self):
+        """An override for an env var NOT in env_config must NOT be injected."""
+        from app.core.agent_engine import _execute_custom_tool
+
+        tool = self._make_tool({"MY_KEY": "{{token:default-token}}"})
+        fn_map = {"my_tool": tool}
+
+        with (
+            patch(
+                "app.core.agent_engine.custom_tool_runner.run_tool",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
+            patch(
+                "app.services.token_manager.resolve_config",
+                new_callable=AsyncMock,
+                return_value={"MY_KEY": "default-secret"},
+            ) as mock_resolve,
+        ):
+            await _execute_custom_tool(
+                "my_tool",
+                {},
+                fn_map,
+                credential_overrides={
+                    "MY_KEY": "override-token",       # declared — should be applied
+                    "INJECTED_EXTRA": "evil-token",   # NOT declared — must be ignored
+                },
+            )
+
+        called_config = mock_resolve.call_args[0][0]
+        assert "INJECTED_EXTRA" not in called_config
+        assert called_config["MY_KEY"] == "{{token:override-token}}"
+
+    @pytest.mark.asyncio
+    async def test_execute_custom_tool_no_override_uses_default(self):
+        """When credential_overrides is None or empty, the tool's original env_config is used."""
+        from app.core.agent_engine import _execute_custom_tool
+
+        tool = self._make_tool({"MY_KEY": "{{token:default-token}}"})
+        fn_map = {"my_tool": tool}
+
+        for overrides in (None, {}):
+            with (
+                patch(
+                    "app.core.agent_engine.custom_tool_runner.run_tool",
+                    new_callable=AsyncMock,
+                    return_value="ok",
+                ),
+                patch(
+                    "app.services.token_manager.resolve_config",
+                    new_callable=AsyncMock,
+                    return_value={"MY_KEY": "default-secret"},
+                ) as mock_resolve,
+            ):
+                await _execute_custom_tool(
+                    "my_tool",
+                    {},
+                    fn_map,
+                    credential_overrides=overrides,
+                )
+
+            # Must use the original env_config, not any override
+            mock_resolve.assert_awaited_once_with({"MY_KEY": "{{token:default-token}}"})
+

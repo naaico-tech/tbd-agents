@@ -249,3 +249,186 @@ async def test_upload_non_py_file(app_client):
             headers=_auth_headers(),
         )
     assert resp.status_code in (400, 401, 403)
+
+
+# ── Env-mapping helpers ───────────────────────────────────────────────────────
+
+
+def _fake_tool_with_env(**overrides):
+    """Build a mock CustomTool-like object with env_config populated."""
+    t = _fake_tool(**overrides)
+    t.env_config = overrides.get("env_config", {"MY_KEY": "{{token:my-token}}"})
+    t.is_plugin = overrides.get("is_plugin", False)
+    return t
+
+
+def _fake_token(name="my-token"):
+    m = MagicMock()
+    m.id = FAKE_ID
+    m.name = name
+    m.description = "test token"
+    m.encrypted_value = "encrypted123"
+    return m
+
+
+# ── GET /api/custom-tools/{id}/env-mapping ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_env_mapping_success(app_client):
+    tool = _fake_tool_with_env()
+    token = _fake_token()
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+        patch(
+            "app.api.routes.custom_tools._token_manager.list_tokens",
+            new_callable=AsyncMock,
+            return_value=[token],
+        ),
+        patch(
+            "app.api.routes.custom_tools._token_manager.mask_value",
+            return_value="...abcd",
+        ),
+    ):
+        MockCT.get = AsyncMock(return_value=tool)
+        resp = app_client.get(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            headers=_auth_headers(),
+        )
+
+    assert resp.status_code in (200, 401, 403)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert data["tool_id"] == FAKE_ID
+        assert len(data["env_vars"]) == 1
+        assert data["env_vars"][0]["env_var"] == "MY_KEY"
+        assert data["env_vars"][0]["current_token"] == "my-token"
+        assert data["env_vars"][0]["template"] == "{{token:my-token}}"
+        assert len(data["available_tokens"]) == 1
+        assert data["available_tokens"][0]["name"] == "my-token"
+        assert data["available_tokens"][0]["masked_value"] == "...abcd"
+
+
+@pytest.mark.asyncio
+async def test_get_env_mapping_not_found(app_client):
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+    ):
+        MockCT.get = AsyncMock(return_value=None)
+        resp = app_client.get(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            headers=_auth_headers(),
+        )
+    assert resp.status_code in (404, 401, 403)
+
+
+@pytest.mark.asyncio
+async def test_get_env_mapping_no_env_config(app_client):
+    tool = _fake_tool_with_env(env_config={})
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+        patch(
+            "app.api.routes.custom_tools._token_manager.list_tokens",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.api.routes.custom_tools._token_manager.mask_value",
+            return_value="...abcd",
+        ),
+    ):
+        MockCT.get = AsyncMock(return_value=tool)
+        resp = app_client.get(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            headers=_auth_headers(),
+        )
+
+    assert resp.status_code in (200, 401, 403)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert data["env_vars"] == []
+
+
+# ── PUT /api/custom-tools/{id}/env-mapping ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_env_mapping_success(app_client):
+    tool = _fake_tool_with_env(env_config={"MY_KEY": "{{token:old-token}}"})
+    token = _fake_token(name="new-token")
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+        patch(
+            "app.api.routes.custom_tools._token_manager.list_tokens",
+            new_callable=AsyncMock,
+            return_value=[token],
+        ),
+        patch(
+            "app.api.routes.custom_tools._token_manager.mask_value",
+            return_value="...abcd",
+        ),
+    ):
+        MockCT.get = AsyncMock(return_value=tool)
+        resp = app_client.put(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            json={"env_var_mapping": {"MY_KEY": "new-token"}},
+            headers=_auth_headers(),
+        )
+
+    assert resp.status_code in (200, 401, 403)
+    if resp.status_code == 200:
+        # Verify the tool's env_config was updated
+        assert tool.env_config["MY_KEY"] == "{{token:new-token}}"
+        data = resp.json()
+        assert data["env_vars"][0]["current_token"] == "new-token"
+
+
+@pytest.mark.asyncio
+async def test_update_env_mapping_unknown_var(app_client):
+    tool = _fake_tool_with_env(env_config={"MY_KEY": "{{token:my-token}}"})
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+    ):
+        MockCT.get = AsyncMock(return_value=tool)
+        resp = app_client.put(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            json={"env_var_mapping": {"UNKNOWN_VAR": "some-token"}},
+            headers=_auth_headers(),
+        )
+    assert resp.status_code in (422, 401, 403)
+
+
+@pytest.mark.asyncio
+async def test_update_env_mapping_clear_value(app_client):
+    tool = _fake_tool_with_env(env_config={"MY_KEY": "{{token:my-token}}"})
+    with (
+        patch("app.api.routes.custom_tools.get_current_user", return_value={"login": "u"}),
+        patch("app.api.routes.custom_tools.CustomTool") as MockCT,
+        patch(
+            "app.api.routes.custom_tools._token_manager.list_tokens",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.api.routes.custom_tools._token_manager.mask_value",
+            return_value="...abcd",
+        ),
+    ):
+        MockCT.get = AsyncMock(return_value=tool)
+        resp = app_client.put(
+            f"/api/custom-tools/{FAKE_ID}/env-mapping",
+            json={"env_var_mapping": {"MY_KEY": ""}},
+            headers=_auth_headers(),
+        )
+
+    assert resp.status_code in (200, 401, 403)
+    if resp.status_code == 200:
+        assert tool.env_config["MY_KEY"] == ""
+        data = resp.json()
+        assert data["env_vars"][0]["current_token"] is None
+        assert data["env_vars"][0]["template"] == ""

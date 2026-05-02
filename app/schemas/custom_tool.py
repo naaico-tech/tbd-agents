@@ -59,3 +59,39 @@ class CustomToolValidateResponse(BaseModel):
     valid: bool
     inferred_schema: dict | None = None
     error: str | None = None
+
+
+class EnvVarEntry(BaseModel):
+    """A single env var and its current token assignment."""
+
+    env_var: str
+    current_token: str | None  # None if not yet mapped or uses raw value
+    template: str  # the raw {{token:name}} or plain value stored in env_config
+
+
+class TokenRef(BaseModel):
+    """A lightweight token reference for mapping dropdowns."""
+
+    id: str
+    name: str
+    description: str
+    masked_value: str
+
+
+class EnvMappingResponse(BaseModel):
+    """Response for GET /api/custom-tools/{id}/env-mapping."""
+
+    tool_id: str
+    tool_name: str
+    env_vars: list[EnvVarEntry]
+    available_tokens: list[TokenRef]
+
+
+class EnvMappingUpdate(BaseModel):
+    """Body for PUT /api/custom-tools/{id}/env-mapping.
+
+    Keys are env var names; values are token names (without the {{token:}} wrapper).
+    Set a value to empty string "" to remove the token mapping (keeps env var with empty template).
+    """
+
+    env_var_mapping: dict[str, str]

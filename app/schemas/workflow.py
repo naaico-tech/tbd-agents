@@ -32,6 +32,7 @@ class WorkflowCreate(BaseModel):
     repo_url: str | None = None  # GitHub repo URL
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
+    credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
 
 
 class WorkflowUpdate(BaseModel):
@@ -53,6 +54,7 @@ class WorkflowUpdate(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    credential_overrides: dict[str, str] | None = None  # env_var → token_name overrides for custom tools
     status: str | None = None  # active | inactive
 
 
@@ -115,6 +117,7 @@ class WorkflowResponse(BaseModel):
     repo_url: str | None = None
     repo_branch: str | None = None
     repo_token_name: str | None = None
+    credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

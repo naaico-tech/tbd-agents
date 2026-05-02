@@ -1209,16 +1209,31 @@ async def _execute_custom_tool(
     arguments: dict,
     fn_map: dict,
     runtime_env: dict[str, str] | None = None,
+    credential_overrides: dict[str, str] | None = None,
 ) -> str:
-    """Execute a custom Python tool from *fn_map* via the subprocess runner."""
+    """Execute a custom Python tool from *fn_map* via the subprocess runner.
+
+    If *credential_overrides* is provided, any env var declared in the tool's
+    ``env_config`` can be redirected to a different token.  Only env vars that
+    already exist in ``env_config`` may be overridden — unknown keys are silently
+    ignored so workflows cannot inject arbitrary env vars.
+    """
     tool = fn_map.get(tool_name)
     if not tool:
         return json.dumps({"error": f"Custom tool '{tool_name}' not found"})
 
+    # Build effective env_config: start with the tool's own mapping, then apply
+    # any workflow-level credential overrides (bare token names, not wrappers).
+    effective_env_config = dict(getattr(tool, "env_config", {}) or {})
+    if credential_overrides:
+        for env_var, token_name in credential_overrides.items():
+            if env_var in effective_env_config and token_name:
+                effective_env_config[env_var] = "{{token:" + token_name + "}}"
+
     resolved_env = None
-    if getattr(tool, "env_config", None):
+    if effective_env_config:
         from app.services import token_manager
-        resolved_env = await token_manager.resolve_config(tool.env_config)
+        resolved_env = await token_manager.resolve_config(effective_env_config)
 
     merged_env = dict(resolved_env or {})
     if runtime_env:
@@ -1773,6 +1788,7 @@ async def _run_with_claude_sdk(
                             tool_args,
                             custom_python_tool_map_claude,
                             runtime_env=custom_tool_runtime_env,
+                            credential_overrides=workflow.credential_overrides or None,
                         )
                     else:
                         tool_result = await _execute_mcp_tool(
@@ -2240,6 +2256,7 @@ async def _run_with_custom_provider(
                                     tool_args,
                                     custom_python_tool_map,
                                     runtime_env=custom_tool_runtime_env,
+                                    credential_overrides=workflow.credential_overrides or None,
                                 )
                             else:
                                 tool_result = await _execute_mcp_tool(
