@@ -81,6 +81,7 @@ class Workflow(Document):
     repo_url: str | None = None  # GitHub repo URL to clone for agent access
     repo_branch: str | None = None  # Branch to checkout (default: main)
     repo_token_name: str | None = None  # Token Store key for private repo auth
+    credential_overrides: dict[str, str] = Field(default_factory=dict)  # env_var → token_name overrides for custom tools
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
