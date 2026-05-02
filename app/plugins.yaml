@@ -15,3 +15,11 @@ plugins:
     enabled: true
   - name: repo_inspector
     enabled: true
+  - name: bigquery_read
+    enabled: true
+  - name: slack_reader
+    enabled: true
+  - name: google_sheets_read
+    enabled: true
+  - name: notion
+    enabled: true

@@ -158,6 +158,75 @@ class _CustomTool {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Token-mapping models
+// ---------------------------------------------------------------------------
+class _TokenRef {
+  const _TokenRef({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.maskedValue,
+  });
+  final String id;
+  final String name;
+  final String description;
+  final String maskedValue;
+
+  factory _TokenRef.fromJson(Map<String, dynamic> json) => _TokenRef(
+    id: json['id']?.toString() ?? '',
+    name: json['name']?.toString() ?? '',
+    description: json['description']?.toString() ?? '',
+    maskedValue: json['masked_value']?.toString() ?? '',
+  );
+}
+
+class _EnvVarEntry {
+  const _EnvVarEntry({
+    required this.envVar,
+    required this.currentToken,
+    required this.template,
+  });
+  final String envVar;
+  final String? currentToken; // null if not mapped to a token
+  final String template;
+
+  factory _EnvVarEntry.fromJson(Map<String, dynamic> json) => _EnvVarEntry(
+    envVar: json['env_var']?.toString() ?? '',
+    currentToken: json['current_token']?.toString(),
+    template: json['template']?.toString() ?? '',
+  );
+}
+
+class _EnvMapping {
+  const _EnvMapping({
+    required this.toolId,
+    required this.toolName,
+    required this.envVars,
+    required this.availableTokens,
+  });
+  final String toolId;
+  final String toolName;
+  final List<_EnvVarEntry> envVars;
+  final List<_TokenRef> availableTokens;
+
+  factory _EnvMapping.fromJson(Map<String, dynamic> json) => _EnvMapping(
+    toolId: json['tool_id']?.toString() ?? '',
+    toolName: json['tool_name']?.toString() ?? '',
+    envVars: (json['env_vars'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(_EnvVarEntry.fromJson)
+        .toList(),
+    availableTokens: (json['available_tokens'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(_TokenRef.fromJson)
+        .toList(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Token-mapping API helpers
+// ---------------------------------------------------------------------------
 Future<List<_CustomTool>> _fetchCustomTools(http.Client client) async {
   final response = await client.get(AppLinks.apiUri('/custom-tools'));
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -169,6 +238,41 @@ Future<List<_CustomTool>> _fetchCustomTools(http.Client client) async {
       .whereType<Map<String, dynamic>>()
       .map(_CustomTool.fromJson)
       .toList();
+}
+
+Future<_EnvMapping> _fetchEnvMapping(
+  http.Client client,
+  String toolId,
+) async {
+  final response = await client.get(
+    AppLinks.apiUri('/custom-tools/$toolId/env-mapping'),
+  );
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception('Failed to load env mapping (${response.statusCode})');
+  }
+  final decoded = jsonDecode(response.body);
+  if (decoded is! Map<String, dynamic>) {
+    throw Exception('Unexpected response format');
+  }
+  return _EnvMapping.fromJson(decoded);
+}
+
+Future<void> _saveEnvMapping(
+  http.Client client,
+  String toolId,
+  Map<String, String> mapping,
+) async {
+  final response = await client.put(
+    AppLinks.apiUri('/custom-tools/$toolId/env-mapping'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'env_var_mapping': mapping}),
+  );
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    final body = jsonDecode(response.body);
+    throw Exception(
+      body['detail'] ?? 'Failed to save mapping (${response.statusCode})',
+    );
+  }
 }
 
 class CustomToolsScreen extends StatefulWidget {
@@ -259,7 +363,11 @@ class _CustomToolsScreenState extends State<CustomToolsScreen> {
                         child: Column(
                           children: [
                             for (final tool in pluginTools)
-                              _ToolCard(tool: tool),
+                              _ToolCard(
+                                tool: tool,
+                                client: _client,
+                                onMappingSaved: _reload,
+                              ),
                           ],
                         ),
                       ),
@@ -288,7 +396,11 @@ class _CustomToolsScreenState extends State<CustomToolsScreen> {
                         child: Column(
                           children: [
                             for (final tool in userTools)
-                              _ToolCard(tool: tool),
+                              _ToolCard(
+                                tool: tool,
+                                client: _client,
+                                onMappingSaved: _reload,
+                              ),
                           ],
                         ),
                       ),
@@ -302,9 +414,15 @@ class _CustomToolsScreenState extends State<CustomToolsScreen> {
 }
 
 class _ToolCard extends StatelessWidget {
-  const _ToolCard({required this.tool});
+  const _ToolCard({
+    required this.tool,
+    required this.client,
+    required this.onMappingSaved,
+  });
 
   final _CustomTool tool;
+  final http.Client client;
+  final VoidCallback onMappingSaved;
 
   @override
   Widget build(BuildContext context) {
@@ -399,9 +517,345 @@ class _ToolCard extends StatelessWidget {
                   ],
                 ],
               ),
+              // ── MAP TOKENS button — only shown when env vars exist ───────
+              if (tool.envConfig.isNotEmpty) ...[
+                const SizedBox(height: sp12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: RetroButton(
+                    label: 'MAP TOKENS',
+                    icon: Icons.key_outlined,
+                    color: accentAmber,
+                    textColor: textPrimary,
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _TokenMappingDialog(
+                        tool: tool,
+                        client: client,
+                        onSaved: onMappingSaved,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _TokenMappingDialog — modal for assigning tokens to env vars
+// ---------------------------------------------------------------------------
+class _TokenMappingDialog extends StatefulWidget {
+  const _TokenMappingDialog({
+    required this.tool,
+    required this.client,
+    required this.onSaved,
+  });
+  final _CustomTool tool;
+  final http.Client client;
+  final VoidCallback onSaved;
+
+  @override
+  State<_TokenMappingDialog> createState() => _TokenMappingDialogState();
+}
+
+class _TokenMappingDialogState extends State<_TokenMappingDialog> {
+  _EnvMapping? _mapping;
+  Object? _error;
+  bool _loading = true;
+  bool _saving = false;
+  // env_var → selected token name (or null for unset)
+  final Map<String, String?> _selections = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final m = await _fetchEnvMapping(widget.client, widget.tool.id);
+      if (!mounted) return;
+      setState(() {
+        _mapping = m;
+        _loading = false;
+        // Initialise selections from current state
+        for (final e in m.envVars) {
+          _selections[e.envVar] = e.currentToken;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      final payload = <String, String>{
+        for (final e in (_mapping?.envVars ?? []))
+          e.envVar: _selections[e.envVar] ?? '',
+      };
+      await _saveEnvMapping(widget.client, widget.tool.id, payload);
+      if (!mounted) return;
+      widget.onSaved();
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4),
+        side: const BorderSide(color: accentAmber, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(sp24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 540, minWidth: 320),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(Icons.key_outlined, color: accentAmber, size: 20),
+                  const SizedBox(width: sp8),
+                  Expanded(
+                    child: Text(
+                      'MAP TOKENS — ${widget.tool.name}',
+                      style: const TextStyle(
+                        fontFamily: fontBody,
+                        fontSize: 14,
+                        color: accentAmber,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: textMuted, size: 18),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: sp4),
+              const Text(
+                'Assign a stored token to each required credential.',
+                style: TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: 12,
+                  color: textMuted,
+                ),
+              ),
+              const SizedBox(height: sp16),
+              // Body
+              if (_loading)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: sp24),
+                    child: CircularProgressIndicator(color: accentAmber),
+                  ),
+                )
+              else if (_error != null)
+                Text(
+                  'Error: $_error',
+                  style: const TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: 12,
+                    color: Colors.redAccent,
+                  ),
+                )
+              else if (_mapping != null && _mapping!.envVars.isEmpty)
+                const Text(
+                  'This tool has no credential requirements.',
+                  style: TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: 12,
+                    color: textMuted,
+                  ),
+                )
+              else if (_mapping != null)
+                ..._mapping!.envVars.map(
+                  (entry) => _EnvVarRow(
+                    entry: entry,
+                    availableTokens: _mapping!.availableTokens,
+                    selectedToken: _selections[entry.envVar],
+                    onChanged: (val) =>
+                        setState(() => _selections[entry.envVar] = val),
+                  ),
+                ),
+              const SizedBox(height: sp24),
+              // Actions
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  RetroButton(
+                    label: 'CANCEL',
+                    onPressed: () => Navigator.of(context).pop(),
+                    color: accentSlate,
+                  ),
+                  const SizedBox(width: sp8),
+                  RetroButton(
+                    label: _saving ? 'SAVING…' : 'SAVE',
+                    onPressed:
+                        (_saving || _loading || _error != null) ? null : _save,
+                    color: accentAmber,
+                    textColor: textPrimary,
+                    icon: _saving ? null : Icons.check,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _EnvVarRow — a single env-var → token dropdown row
+// ---------------------------------------------------------------------------
+class _EnvVarRow extends StatelessWidget {
+  const _EnvVarRow({
+    required this.entry,
+    required this.availableTokens,
+    required this.selectedToken,
+    required this.onChanged,
+  });
+
+  final _EnvVarEntry entry;
+  final List<_TokenRef> availableTokens;
+  final String? selectedToken;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final maskedValue = availableTokens
+        .cast<_TokenRef?>()
+        .firstWhere((t) => t?.name == selectedToken, orElse: () => null)
+        ?.maskedValue;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: sp12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            entry.envVar,
+            style: const TextStyle(
+              fontFamily: fontBody,
+              fontSize: 12,
+              color: textMuted,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: sp4),
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: accentAmber.withAlpha(80)),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: sp8),
+            child: DropdownButton<String>(
+              value: selectedToken,
+              isExpanded: true,
+              underline: const SizedBox(),
+              dropdownColor: const Color(0xFF1A1A2E),
+              style: const TextStyle(
+                fontFamily: fontBody,
+                fontSize: 12,
+                color: textPrimary,
+              ),
+              hint: const Text(
+                '— not mapped —',
+                style: TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: 12,
+                  color: textMuted,
+                ),
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text(
+                    '— not mapped —',
+                    style: TextStyle(
+                      fontFamily: fontBody,
+                      fontSize: 12,
+                      color: textMuted,
+                    ),
+                  ),
+                ),
+                ...availableTokens.map(
+                  (t) => DropdownMenuItem<String>(
+                    value: t.name,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          t.name,
+                          style: const TextStyle(
+                            fontFamily: fontBody,
+                            fontSize: 12,
+                            color: textPrimary,
+                          ),
+                        ),
+                        if (t.description.isNotEmpty)
+                          Text(
+                            t.description,
+                            style: const TextStyle(
+                              fontFamily: fontBody,
+                              fontSize: 10,
+                              color: textMuted,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: onChanged,
+            ),
+          ),
+          if (selectedToken != null) ...[
+            const SizedBox(height: sp4),
+            Text(
+              'Value: ${maskedValue ?? '****'}',
+              style: const TextStyle(
+                fontFamily: fontBody,
+                fontSize: 10,
+                color: textMuted,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

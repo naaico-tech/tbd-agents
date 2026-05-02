@@ -14,6 +14,8 @@ POST   /api/custom-tools/upload            Upload a .py file
 
 from datetime import UTC, datetime
 
+import re as _re
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -27,8 +29,13 @@ from app.schemas.custom_tool import (
     CustomToolUpdate,
     CustomToolValidateRequest,
     CustomToolValidateResponse,
+    EnvMappingResponse,
+    EnvMappingUpdate,
+    EnvVarEntry,
+    TokenRef,
 )
 from app.services import custom_tool_runner
+from app.services import token_manager as _token_manager
 
 router = APIRouter(prefix="/api/custom-tools", tags=["custom tools"])
 
@@ -140,6 +147,91 @@ async def update_custom_tool(
         await tool.set(update_data)
 
     return _to_response(await _get_tool_or_404(tool_id))
+
+
+@router.get("/{tool_id}/env-mapping", response_model=EnvMappingResponse)
+async def get_env_mapping(tool_id: str, _user=Depends(get_current_user)):
+    """Return the env-var → token mapping for a tool, plus all available tokens.
+
+    For each entry in env_config, extract the token name from ``{{token:NAME}}``
+    references. The ``available_tokens`` list lets clients present a dropdown.
+    """
+    tool = await _get_tool_or_404(tool_id)
+
+    _TOKEN_REF_RE = _re.compile(r"\{\{token:([^}]+)\}\}")
+
+    env_vars: list[EnvVarEntry] = []
+    for env_var, template in tool.env_config.items():
+        stripped = template.strip() if template else ""
+        match = _TOKEN_REF_RE.fullmatch(stripped) if stripped else None
+        current_token = match.group(1) if match else None
+        env_vars.append(EnvVarEntry(
+            env_var=env_var,
+            current_token=current_token,
+            template=template,
+        ))
+
+    tokens = await _token_manager.list_tokens()
+    available = [
+        TokenRef(
+            id=str(t.id),
+            name=t.name,
+            description=t.description,
+            masked_value=_token_manager.mask_value(t.encrypted_value),
+        )
+        for t in tokens
+    ]
+
+    return EnvMappingResponse(
+        tool_id=str(tool.id),
+        tool_name=tool.name,
+        env_vars=env_vars,
+        available_tokens=available,
+    )
+
+
+@router.put("/{tool_id}/env-mapping", response_model=EnvMappingResponse)
+async def update_env_mapping(
+    tool_id: str,
+    body: EnvMappingUpdate,
+    _user=Depends(get_current_user),
+):
+    """Update which token is mapped to each env var in the tool's env_config.
+
+    Only env vars already declared in env_config can be mapped. Attempting to
+    map an env var that doesn't exist on the tool raises HTTP 422.
+    Unknown token names (tokens that don't exist in the store) are accepted but
+    will produce a warning at runtime — this allows pre-configuring a mapping
+    before the token is created.
+
+    An empty string value removes the ``{{token:}}`` reference and stores ``""``
+    for that env var.
+    """
+    tool = await _get_tool_or_404(tool_id)
+
+    # Validate: only allow updating env vars already in the tool's env_config
+    unknown_vars = set(body.env_var_mapping.keys()) - set(tool.env_config.keys())
+    if unknown_vars:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown env vars for this tool: {sorted(unknown_vars)}. "
+                   f"Known env vars: {sorted(tool.env_config.keys())}",
+        )
+
+    # Build the new env_config: update only the vars present in the request
+    new_env_config = dict(tool.env_config)
+    for env_var, token_name in body.env_var_mapping.items():
+        if token_name:
+            new_env_config[env_var] = f"{{{{token:{token_name}}}}}"
+        else:
+            new_env_config[env_var] = ""
+
+    tool.env_config = new_env_config
+    tool.updated_at = datetime.now(UTC)
+    await tool.save()
+
+    # Return the updated mapping view (reuse GET logic)
+    return await get_env_mapping(tool_id, _user)
 
 
 @router.delete("/{tool_id}", status_code=204)
