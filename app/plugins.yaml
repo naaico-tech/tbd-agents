@@ -17,7 +17,7 @@ plugins:
     enabled: true
   - name: bigquery_read
     enabled: true
-  - name: slack_reader
+  - name: slack
     enabled: true
   - name: google_sheets_read
     enabled: true

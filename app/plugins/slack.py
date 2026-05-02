@@ -1,14 +1,20 @@
-"""SlackReaderPlugin — read-only Slack messaging plugin for tbd-agents.
+"""SlackPlugin — read and write Slack integration for tbd-agents.
 
-Provides access to public Slack channels, message history, thread replies,
-and keyword search without any write operations.
+Provides channel browsing, message history, thread access, keyword search,
+and outbound messaging (send to channels, reply in threads, add reactions).
 
-Required Slack bot token scopes:
+Required Slack bot token scopes
+---------------------------------
+Read operations:
   - channels:read      (list_channels, get_channel_info)
   - channels:history   (get_channel_history, get_thread_replies)
   - search:read        (search_messages — requires user token, not bot token)
 
-The token is resolved at runtime via the ``SLACK_BOT_TOKEN`` environment
+Write operations:
+  - chat:write         (send_message, reply_in_thread)
+  - reactions:write    (add_reaction)
+
+The bot token is resolved at runtime via the ``SLACK_BOT_TOKEN`` environment
 variable, which is populated from the ``{{token:slack-bot-token}}`` secret.
 """
 
@@ -22,17 +28,18 @@ from app.core.plugin_base import PluginBase
 _MAX_LIMIT = 200
 
 
-class SlackReaderPlugin(PluginBase):
-    """Read-only Slack plugin that surfaces channels, messages, threads, and search.
+class SlackPlugin(PluginBase):
+    """Slack plugin with read and messaging (write) capabilities.
 
-    All operations are strictly non-destructive — no messages are sent, no
-    channels are modified, and no reactions are posted.  The plugin delegates
-    all API calls to the official ``slack-sdk`` ``WebClient``, which is
-    imported lazily inside :meth:`execute` so that the dependency is only
-    required at invocation time.
+    Read operations are strictly non-destructive.  Write operations are limited
+    to sending and reacting to messages — no channels or users are modified.
+    All API calls are delegated to the official ``slack-sdk`` ``WebClient``,
+    imported lazily inside :meth:`execute`.
 
     Supported operations
     --------------------
+    **Read**
+
     ``list_channels``
         List public channels the bot has access to.
     ``get_channel_history``
@@ -43,6 +50,15 @@ class SlackReaderPlugin(PluginBase):
         Search messages by keyword across the workspace.
     ``get_channel_info``
         Get metadata for a specific channel.
+
+    **Write**
+
+    ``send_message``
+        Post a message to a channel (plain text or Block Kit blocks).
+    ``reply_in_thread``
+        Post a threaded reply to an existing message.
+    ``add_reaction``
+        Add an emoji reaction to a specific message.
     """
 
     # ------------------------------------------------------------------
@@ -51,19 +67,19 @@ class SlackReaderPlugin(PluginBase):
 
     @property
     def name(self) -> str:
-        return "slack_reader"
+        return "slack"
 
     @property
     def description(self) -> str:
         return (
-            "Read-only Slack access: list channels, fetch message history, "
-            "read thread replies, search by keyword, and get channel details. "
-            "Never sends messages or modifies any Slack data."
+            "Slack integration: list channels, fetch message history, read thread "
+            "replies, search by keyword, get channel details, send messages to "
+            "channels, post threaded replies, and add emoji reactions."
         )
 
     @property
     def tags(self) -> list[str]:
-        return ["slack", "messaging", "read-only", "communication"]
+        return ["slack", "messaging", "communication", "notifications"]
 
     @property
     def env_config(self) -> dict[str, str]:
@@ -76,12 +92,6 @@ class SlackReaderPlugin(PluginBase):
     def _get_client(self):  # type: ignore[return]
         """Build and return a configured ``WebClient``.
 
-        Imports ``slack_sdk`` lazily so the module is only required when the
-        plugin is actually invoked.
-
-        Returns:
-            A ``slack_sdk.WebClient`` instance authenticated with the bot token.
-
         Raises:
             RuntimeError: If ``SLACK_BOT_TOKEN`` is not set in the environment.
         """
@@ -93,19 +103,7 @@ class SlackReaderPlugin(PluginBase):
         return WebClient(token=token)
 
     def _resolve_channel_id(self, client, channel_name: str, limit: int) -> str | None:
-        """Resolve a channel name to its Slack channel ID.
-
-        Iterates through ``list_channels`` pages until a match is found or
-        all pages are exhausted.
-
-        Args:
-            client: An authenticated ``WebClient`` instance.
-            channel_name: The human-readable channel name (with or without ``#``).
-            limit: Page size to use when listing channels.
-
-        Returns:
-            The channel ID string, or ``None`` if no match was found.
-        """
+        """Resolve a channel name to its Slack channel ID."""
         from slack_sdk.errors import SlackApiError  # noqa: PLC0415
 
         name_clean = channel_name.lstrip("#").lower()
@@ -145,49 +143,65 @@ class SlackReaderPlugin(PluginBase):
         channel_name: str = "",
         thread_ts: str = "",
         query: str = "",
+        text: str = "",
+        blocks: list | None = None,
+        emoji: str = "",
         limit: int = 50,
         cursor: str = "",
     ) -> dict:
-        """Perform a read-only Slack operation.
+        """Perform a Slack read or messaging operation.
 
         Args:
-            operation: One of ``list_channels``, ``get_channel_history``,
-                ``get_thread_replies``, ``search_messages``, or
-                ``get_channel_info``.
+            operation: One of the supported operation names (see class docstring).
             channel_id: Slack channel ID (e.g. ``C01234ABCDE``).  Required for
                 ``get_channel_history`` (unless ``channel_name`` is given),
-                ``get_thread_replies``, and ``get_channel_info``.
+                ``get_thread_replies``, ``get_channel_info``, ``send_message``,
+                ``reply_in_thread``, and ``add_reaction``.
             channel_name: Human-readable channel name (e.g. ``general`` or
                 ``#general``).  Used as a fallback for ``get_channel_history``
-                when ``channel_id`` is not supplied — the name is resolved to
-                an ID via ``list_channels``.
-            thread_ts: The timestamp of the parent message (as returned by the
-                Slack API, e.g. ``1715000000.000100``).  Required for
-                ``get_thread_replies``.
+                and ``send_message`` when ``channel_id`` is not supplied.
+            thread_ts: Timestamp of the parent message (e.g.
+                ``1715000000.000100``).  Required for ``get_thread_replies``,
+                ``reply_in_thread``, and ``add_reaction``.
             query: Keyword query string.  Required for ``search_messages``.
+            text: Message text (plain text or mrkdwn).  Required for
+                ``send_message`` and ``reply_in_thread`` unless ``blocks``
+                is provided.
+            blocks: Optional list of `Block Kit
+                <https://api.slack.com/block-kit>`_ block dicts for rich
+                message formatting in ``send_message`` and ``reply_in_thread``.
+                When provided, ``text`` is used as the plain-text fallback.
+            emoji: Emoji name **without** colons (e.g. ``thumbsup``).  Required
+                for ``add_reaction``.
             limit: Maximum number of items to return (clamped to 1–200).
                 Defaults to ``50``.
-            cursor: Pagination cursor returned by a previous API call.  Pass
-                this to retrieve the next page of results for
+            cursor: Pagination cursor returned by a previous call.  Used by
                 ``list_channels`` and ``get_channel_history``.
 
         Returns:
             A dict whose structure depends on the operation:
 
-            * ``list_channels`` → ``{"channels": [...], "next_cursor": "..."}``
-            * ``get_channel_history`` → ``{"messages": [...], "channel_id": "..."}``
-            * ``get_thread_replies`` → ``{"replies": [...], "channel_id": "...", "thread_ts": "..."}``
-            * ``search_messages`` → ``{"matches": [...], "total": int, "query": "..."}``
-            * ``get_channel_info`` → ``{"channel": {...}}``
-            * On error → ``{"error": "..."}``
+            Read operations:
+
+            * ``list_channels``      → ``{"channels": [...], "next_cursor": ""}``
+            * ``get_channel_history``→ ``{"messages": [...], "channel_id": ""}``
+            * ``get_thread_replies`` → ``{"replies": [...], "channel_id": "", "thread_ts": ""}``
+            * ``search_messages``    → ``{"matches": [...], "total": int, "query": ""}``
+            * ``get_channel_info``   → ``{"channel": {...}}``
+
+            Write operations:
+
+            * ``send_message``       → ``{"ok": true, "ts": "...", "channel": "..."}``
+            * ``reply_in_thread``    → ``{"ok": true, "ts": "...", "channel": "...", "thread_ts": "..."}``
+            * ``add_reaction``       → ``{"ok": true}``
+
+            On error → ``{"error": "..."}``
         """
         from slack_sdk.errors import SlackApiError  # noqa: PLC0415
 
-        # Clamp limit to a safe range.
         bounded_limit = max(1, min(limit, _MAX_LIMIT))
         op = operation.strip().lower()
 
-        # Acquire client — propagate missing-token as an error dict.
         try:
             client = self._get_client()
         except RuntimeError as exc:
@@ -226,18 +240,13 @@ class SlackReaderPlugin(PluginBase):
         # ----------------------------------------------------------------
         if op == "get_channel_history":
             resolved_id = channel_id.strip()
-
-            # Resolve channel name to ID when only a name is supplied.
             if not resolved_id and channel_name:
-                resolved_id = self._resolve_channel_id(
-                    client, channel_name, bounded_limit
-                ) or ""
-
+                resolved_id = (
+                    self._resolve_channel_id(client, channel_name, bounded_limit) or ""
+                )
             if not resolved_id:
                 return {
-                    "error": (
-                        "channel_id or channel_name is required for get_channel_history."
-                    )
+                    "error": "channel_id or channel_name is required for get_channel_history."
                 }
 
             try:
@@ -309,9 +318,7 @@ class SlackReaderPlugin(PluginBase):
             except SlackApiError as exc:
                 return {"error": exc.response["error"]}
 
-            raw_matches = (
-                response.get("messages", {}).get("matches", [])
-            )
+            raw_matches = response.get("messages", {}).get("matches", [])
             matches = [
                 {
                     "text": m.get("text", ""),
@@ -351,12 +358,104 @@ class SlackReaderPlugin(PluginBase):
             }
 
         # ----------------------------------------------------------------
+        # send_message
+        # ----------------------------------------------------------------
+        if op == "send_message":
+            resolved_id = channel_id.strip()
+            if not resolved_id and channel_name:
+                resolved_id = (
+                    self._resolve_channel_id(client, channel_name, _MAX_LIMIT) or ""
+                )
+            if not resolved_id:
+                return {
+                    "error": "channel_id or channel_name is required for send_message."
+                }
+            if not text.strip() and not blocks:
+                return {"error": "text or blocks is required for send_message."}
+
+            kwargs: dict = {"channel": resolved_id, "text": text}
+            if blocks:
+                kwargs["blocks"] = blocks
+
+            try:
+                response = client.chat_postMessage(**kwargs)
+            except SlackApiError as exc:
+                return {"error": exc.response["error"]}
+
+            return {
+                "ok": True,
+                "ts": response.get("ts", ""),
+                "channel": response.get("channel", resolved_id),
+            }
+
+        # ----------------------------------------------------------------
+        # reply_in_thread
+        # ----------------------------------------------------------------
+        if op == "reply_in_thread":
+            resolved_id = channel_id.strip()
+            if not resolved_id and channel_name:
+                resolved_id = (
+                    self._resolve_channel_id(client, channel_name, _MAX_LIMIT) or ""
+                )
+            if not resolved_id:
+                return {
+                    "error": "channel_id or channel_name is required for reply_in_thread."
+                }
+            if not thread_ts.strip():
+                return {"error": "thread_ts is required for reply_in_thread."}
+            if not text.strip() and not blocks:
+                return {"error": "text or blocks is required for reply_in_thread."}
+
+            kwargs = {
+                "channel": resolved_id,
+                "thread_ts": thread_ts.strip(),
+                "text": text,
+            }
+            if blocks:
+                kwargs["blocks"] = blocks
+
+            try:
+                response = client.chat_postMessage(**kwargs)
+            except SlackApiError as exc:
+                return {"error": exc.response["error"]}
+
+            return {
+                "ok": True,
+                "ts": response.get("ts", ""),
+                "channel": response.get("channel", resolved_id),
+                "thread_ts": thread_ts.strip(),
+            }
+
+        # ----------------------------------------------------------------
+        # add_reaction
+        # ----------------------------------------------------------------
+        if op == "add_reaction":
+            if not channel_id.strip():
+                return {"error": "channel_id is required for add_reaction."}
+            if not thread_ts.strip():
+                return {"error": "thread_ts (message timestamp) is required for add_reaction."}
+            if not emoji.strip():
+                return {"error": "emoji is required for add_reaction (e.g. 'thumbsup')."}
+
+            try:
+                client.reactions_add(
+                    channel=channel_id.strip(),
+                    timestamp=thread_ts.strip(),
+                    name=emoji.strip().strip(":"),
+                )
+            except SlackApiError as exc:
+                return {"error": exc.response["error"]}
+
+            return {"ok": True}
+
+        # ----------------------------------------------------------------
         # Unsupported operation
         # ----------------------------------------------------------------
         return {
             "error": (
                 f"Unsupported operation: {operation!r}. "
                 "Valid operations: list_channels, get_channel_history, "
-                "get_thread_replies, search_messages, get_channel_info."
+                "get_thread_replies, search_messages, get_channel_info, "
+                "send_message, reply_in_thread, add_reaction."
             )
         }
