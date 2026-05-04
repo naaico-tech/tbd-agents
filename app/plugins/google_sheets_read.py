@@ -5,16 +5,16 @@ Provides three operations against the Google Sheets API v4:
 - ``list_sheets``  – list all sheet tabs in a spreadsheet.
 - ``get_metadata`` – return title, locale, and sheet names for a spreadsheet.
 
-Credentials are supplied via the ``GOOGLE_SHEETS_CREDENTIALS`` environment
-variable as a JSON string of a Google service-account key file.  The
+Credentials are supplied via the ``GOOGLE_SHEETS_CREDENTIALS_JSON`` environment
+variable as a JSON string of a Google service-account key file — the same
+format used by the BigQuery plugin (``BIGQUERY_CREDENTIALS_JSON``).  The
 ``google-auth`` and ``google-api-python-client`` packages are imported lazily
-inside :meth:`GoogleSheetsReadPlugin.execute` so the plugin module can be
+inside :meth:`GoogleSheetsReadPlugin._get_client` so the plugin module can be
 imported even when those packages are not installed.
 """
 
 from __future__ import annotations
 
-import json
 import os
 
 from app.core.plugin_base import PluginBase
@@ -62,7 +62,42 @@ class GoogleSheetsReadPlugin(PluginBase):
 
     @property
     def env_config(self) -> dict[str, str]:
-        return {"GOOGLE_SHEETS_CREDENTIALS": "{{token:google-sheets-credentials}}"}
+        return {"GOOGLE_SHEETS_CREDENTIALS_JSON": "{{token:google-sheets-credentials}}"}
+
+    # ------------------------------------------------------------------
+    # Internal helper — mirrors BigQuery's _get_client pattern
+    # ------------------------------------------------------------------
+
+    def _get_client(self):
+        """Build and return an authenticated Sheets API service client.
+
+        Reads ``GOOGLE_SHEETS_CREDENTIALS_JSON`` from the environment (a JSON
+        string of a Google service-account key file) and constructs credentials
+        with the spreadsheets read-only scope — identical to how
+        ``BigqueryReadPlugin._get_client`` works with
+        ``BIGQUERY_CREDENTIALS_JSON``.
+
+        Returns:
+            A ``googleapiclient`` Resource for the Sheets v4 API.
+
+        Raises:
+            ValueError: If the env var is missing or contains invalid JSON.
+            Exception: Propagated from credential construction or API build.
+        """
+        import json  # noqa: PLC0415
+
+        from google.oauth2.service_account import Credentials  # noqa: PLC0415
+        from googleapiclient.discovery import build  # noqa: PLC0415
+
+        creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_JSON", "").strip()
+        if not creds_json:
+            raise ValueError("GOOGLE_SHEETS_CREDENTIALS_JSON environment variable is not set.")
+
+        credentials = Credentials.from_service_account_info(
+            json.loads(creds_json),
+            scopes=_SCOPES,
+        )
+        return build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
     # ------------------------------------------------------------------
     # Main entrypoint
@@ -99,12 +134,7 @@ class GoogleSheetsReadPlugin(PluginBase):
             * ``get_metadata`` → ``{"spreadsheet_id": ..., "title": ..., "locale": ..., "sheets": [...]}``
             * On any error → ``{"error": "<message>"}``
         """
-        # ----------------------------------------------------------------
-        # Lazy imports – avoids hard dependency at module import time
-        # ----------------------------------------------------------------
         try:
-            from google.oauth2.service_account import Credentials  # noqa: PLC0415
-            from googleapiclient.discovery import build  # noqa: PLC0415
             from googleapiclient.errors import HttpError  # noqa: PLC0415
         except ImportError as exc:
             return {
@@ -114,32 +144,10 @@ class GoogleSheetsReadPlugin(PluginBase):
                 )
             }
 
-        # ----------------------------------------------------------------
-        # Resolve and validate credentials
-        # ----------------------------------------------------------------
-        creds_json = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "").strip()
-        if not creds_json:
-            return {"error": "GOOGLE_SHEETS_CREDENTIALS environment variable is not set."}
-
         try:
-            service_account_info = json.loads(creds_json)
-        except json.JSONDecodeError as exc:
-            return {"error": f"GOOGLE_SHEETS_CREDENTIALS is not valid JSON: {exc}"}
-
-        try:
-            credentials = Credentials.from_service_account_info(
-                service_account_info, scopes=_SCOPES
-            )
-        except Exception as exc:  # noqa: BLE001
-            return {"error": f"Failed to build service-account credentials: {exc}"}
-
-        # ----------------------------------------------------------------
-        # Build the Sheets API client
-        # ----------------------------------------------------------------
-        try:
-            service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
-        except Exception as exc:  # noqa: BLE001
-            return {"error": f"Failed to build Sheets API client: {exc}"}
+            service = self._get_client()
+        except (ValueError, Exception) as exc:  # noqa: BLE001
+            return {"error": str(exc)}
 
         # ----------------------------------------------------------------
         # Dispatch to the requested operation
