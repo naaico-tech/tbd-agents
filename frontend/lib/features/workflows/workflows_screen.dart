@@ -844,7 +844,7 @@ class _CredentialOverridesDialogState
         : widget.workflow.agentId;
 
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentAmber, width: 1),
@@ -1053,7 +1053,7 @@ class _OverrideRow extends StatelessWidget {
                     value: effectiveEnvVar,
                     isExpanded: true,
                     underline: const SizedBox(),
-                    dropdownColor: const Color(0xFF1A1A2E),
+                    dropdownColor: cardBg,
                     style: const TextStyle(
                       fontFamily: fontBody,
                       fontSize: 11,
@@ -1127,7 +1127,7 @@ class _OverrideRow extends StatelessWidget {
                     value: effectiveToken,
                     isExpanded: true,
                     underline: const SizedBox(),
-                    dropdownColor: const Color(0xFF1A1A2E),
+                    dropdownColor: cardBg,
                     style: const TextStyle(
                       fontFamily: fontBody,
                       fontSize: 11,
@@ -1284,7 +1284,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentLavender, width: 1),
@@ -2330,7 +2330,7 @@ class _ScheduledAgentDialogState extends State<_ScheduledAgentDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentTeal, width: 1),
@@ -2480,7 +2480,7 @@ class _ScheduledAgentDialogState extends State<_ScheduledAgentDialog> {
                               value: _intervalUnit,
                               isExpanded: true,
                               underline: const SizedBox(),
-                              dropdownColor: const Color(0xFF1A1A2E),
+                              dropdownColor: cardBg,
                               style: const TextStyle(
                                 fontFamily: fontBody,
                                 fontSize: 11,
@@ -2654,7 +2654,7 @@ class _ConfirmDeleteDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: BorderSide(color: accentColor, width: 1),
@@ -3077,7 +3077,7 @@ class _TokenDialogState extends State<_TokenDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentAmber, width: 1),
@@ -3508,7 +3508,7 @@ class _ProviderDialogState extends State<_ProviderDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentSlate, width: 1),
@@ -3589,7 +3589,7 @@ class _ProviderDialogState extends State<_ProviderDialog> {
                         value: _providerType,
                         isExpanded: true,
                         underline: const SizedBox(),
-                        dropdownColor: const Color(0xFF1A1A2E),
+                        dropdownColor: cardBg,
                         style: const TextStyle(
                           fontFamily: fontBody,
                           fontSize: 11,

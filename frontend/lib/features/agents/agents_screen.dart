@@ -165,7 +165,7 @@ class _AgentsScreenState extends State<AgentsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
+        backgroundColor: cardBg,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(4),
           side: const BorderSide(color: accentPrimary, width: 1),
@@ -569,7 +569,7 @@ class _AgentDialogState extends State<_AgentDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentAmber, width: 1),
@@ -1266,7 +1266,7 @@ class _McpServerDialogState extends State<_McpServerDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentAmber, width: 1),
@@ -1863,7 +1863,7 @@ class _TokenMappingDialogState extends State<_TokenMappingDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentAmber, width: 1),
@@ -2024,7 +2024,7 @@ class _EnvVarRow extends StatelessWidget {
               value: selectedToken,
               isExpanded: true,
               underline: const SizedBox(),
-              dropdownColor: const Color(0xFF1A1A2E),
+              dropdownColor: cardBg,
               style: const TextStyle(
                 fontFamily: fontBody,
                 fontSize: 12,
@@ -2547,7 +2547,7 @@ class _SkillDialogState extends State<_SkillDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentLavender, width: 1),
@@ -4480,7 +4480,7 @@ class _GuardrailDialogState extends State<_GuardrailDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: accentPrimary, width: 1),
@@ -4598,7 +4598,7 @@ const _kDialogInputStyle = TextStyle(
   color: textPrimary,
 );
 
-/// Returns a dark-themed [InputDecoration] used in all dialogs.
+/// Returns an [InputDecoration] used in all dialogs.
 InputDecoration _dialogInputDeco(String hint) => InputDecoration(
   hintText: hint,
   hintStyle: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textMuted),
@@ -4620,7 +4620,7 @@ InputDecoration _dialogInputDeco(String hint) => InputDecoration(
     borderSide: BorderSide(color: accentPrimary, width: 1.5),
   ),
   filled: true,
-  fillColor: const Color(0xFF0D0D1A),
+  fillColor: pageBg,
   errorStyle: const TextStyle(fontFamily: fontBody, fontSize: 10),
 );
 
@@ -4769,7 +4769,7 @@ class _RetroDropdown<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0D1A),
+        color: pageBg,
         border: Border.all(color: accentSlate.withAlpha(120), width: 1),
       ),
       padding: const EdgeInsets.symmetric(horizontal: sp8),
@@ -4777,7 +4777,7 @@ class _RetroDropdown<T> extends StatelessWidget {
         value: value,
         isExpanded: true,
         underline: const SizedBox(),
-        dropdownColor: const Color(0xFF1A1A2E),
+        dropdownColor: cardBg,
         style: _kDialogInputStyle,
         items: items
             .map(
@@ -4808,7 +4808,7 @@ class _ConfirmDeleteDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A2E),
+      backgroundColor: cardBg,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(4),
         side: BorderSide(color: accentColor, width: 1),
