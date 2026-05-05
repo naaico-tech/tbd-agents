@@ -33,6 +33,7 @@ class WorkflowCreate(BaseModel):
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
 
 
 class WorkflowUpdate(BaseModel):
@@ -55,6 +56,7 @@ class WorkflowUpdate(BaseModel):
     repo_branch: str | None = None
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] | None = None  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
     status: str | None = None  # active | inactive
 
 
@@ -80,6 +82,7 @@ class LogEntryResponse(BaseModel):
 
 class PromptResponse(BaseModel):
     workflow_id: str
+    task_id: str | None = None
     status: str
     current_turn: int
     max_turns: int
@@ -118,6 +121,7 @@ class WorkflowResponse(BaseModel):
     repo_branch: str | None = None
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]
