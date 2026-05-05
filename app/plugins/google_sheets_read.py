@@ -15,6 +15,7 @@ imported even when those packages are not installed.
 
 from __future__ import annotations
 
+import json
 import os
 
 from app.core.plugin_base import PluginBase

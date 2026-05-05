@@ -4224,6 +4224,27 @@ class _GuardrailCard extends StatelessWidget {
                   ),
                 ],
               ),
+              // ── MAP TOKENS button — only shown when env vars exist ───────
+              if (tool.envConfig.isNotEmpty) ...[
+                const SizedBox(height: sp12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: RetroButton(
+                    label: 'MAP TOKENS',
+                    icon: Icons.key_outlined,
+                    color: accentAmber,
+                    textColor: textPrimary,
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _TokenMappingDialog(
+                        tool: tool,
+                        client: client,
+                        onSaved: onMappingSaved,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
