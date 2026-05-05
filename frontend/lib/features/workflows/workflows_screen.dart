@@ -1348,6 +1348,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   late List<String> _selectedSkillIds;
   late List<String> _selectedGuardrailIds;
   late String _outputFormat;
+  late bool _isActive;
   late bool _infiniteSession;
   late bool _bypassMemory;
   late bool _autoMemory;
@@ -1376,6 +1377,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _selectedSkillIds = List.from(w?.skillIds ?? []);
     _selectedGuardrailIds = List.from(w?.guardrailIds ?? []);
     _outputFormat = w?.outputFormat ?? 'json';
+    _isActive = (w?.status ?? 'active').toLowerCase() == 'active';
     _infiniteSession = w?.infiniteSession ?? true;
     _bypassMemory = w?.bypassMemory ?? false;
     _autoMemory = w?.autoMemory ?? false;
@@ -1466,6 +1468,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         'infinite_session': _infiniteSession,
         'bypass_memory': _bypassMemory,
         'auto_memory': _autoMemory,
+        if (_isEdit) 'status': _isActive ? 'active' : 'inactive',
         if (_reasoningEffort != null) 'reasoning_effort': _reasoningEffort,
         if (_repoUrlCtrl.text.trim().isNotEmpty) 'repo_url': _repoUrlCtrl.text.trim(),
         if (_repoBranchCtrl.text.trim().isNotEmpty) 'repo_branch': _repoBranchCtrl.text.trim(),
@@ -1754,6 +1757,23 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                 ),
                 const SizedBox(height: sp8),
                 // TOGGLES ──────────────────────────────────────────────
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Row(
+                    children: [
+                      const Text('STATUS', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                      const SizedBox(width: sp8),
+                      RetroChip(
+                        label: _isActive ? 'ACTIVE' : 'INACTIVE',
+                        color: _isActive ? const Color(0xFF4CAF50) : accentPrimary,
+                      ),
+                    ],
+                  ),
+                  value: _isActive,
+                  activeThumbColor: const Color(0xFF4CAF50),
+                  onChanged: (v) => setState(() => _isActive = v),
+                ),
                 SwitchListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
