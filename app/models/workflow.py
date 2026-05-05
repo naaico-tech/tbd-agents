@@ -3,12 +3,17 @@ from enum import StrEnum
 from typing import Any
 
 from beanie import Document
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class WorkflowStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    HALTED = "halted"
+    MAX_TURNS_REACHED = "max_turns_reached"
 
 
 class OutputFormat(StrEnum):
@@ -61,14 +66,6 @@ class Workflow(Document):
     logs: list[LogEntry] = Field(default_factory=list)
     status: WorkflowStatus = WorkflowStatus.ACTIVE
     output_format: OutputFormat = OutputFormat.JSON
-
-    @field_validator("status", mode="before")
-    @classmethod
-    def _normalise_legacy_status(cls, v: Any) -> str:
-        """Map legacy execution statuses (completed, failed, etc.) to active."""
-        if isinstance(v, str) and v not in (WorkflowStatus.ACTIVE, WorkflowStatus.INACTIVE):
-            return WorkflowStatus.ACTIVE
-        return v
     usage: UsageStats | None = None
     infinite_session: bool = True
     caveman: bool = False  # Enable terse caveman mode + context compression

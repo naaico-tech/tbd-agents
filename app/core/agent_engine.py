@@ -2402,6 +2402,11 @@ async def _run_with_custom_provider(
         await workflow.save()
 
     except httpx.HTTPStatusError as exc:
+        # Streaming responses need an explicit read() before .text is accessible.
+        try:
+            await exc.response.aread()
+        except Exception:
+            pass
         await _log(
             workflow,
             "error",

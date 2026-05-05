@@ -21,5 +21,7 @@ plugins:
     enabled: true
   - name: google_sheets_read
     enabled: true
+  - name: google_sheets
+    enabled: true
   - name: notion
     enabled: true

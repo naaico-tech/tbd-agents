@@ -32,6 +32,7 @@ from app.config import settings
 from app.core import plugin_loader
 from app.db import init_db
 from app.observability import celery_queue_length, init_telemetry
+from app.seeds.google_sheets_analyst import seed_google_sheets_analyst
 from app.services import memory_stm
 
 logging.basicConfig(level=logging.INFO)
@@ -118,6 +119,12 @@ async def lifespan(app: FastAPI):
         await plugin_loader.load_plugins_from_config()
     except Exception as exc:
         logger.error("Failed to load plugins: %s", exc)
+
+    # Provision built-in seed agents (idempotent)
+    try:
+        await seed_google_sheets_analyst()
+    except Exception as exc:
+        logger.warning("Google Sheets Analyst seed failed (non-fatal): %s", exc)
 
     # Warm up Short-Term Memory cache from MongoDB → Redis
     try:
