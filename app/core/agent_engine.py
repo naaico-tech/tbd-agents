@@ -2000,6 +2000,9 @@ async def _run_with_claude_sdk(
                     "timestamp": datetime.now(UTC).isoformat(),
                 },
             ))
+    except Exception as exc:
+        logger.exception("Claude SDK agent task failed: %s", exc)
+        await _publish_status(workflow, "failed")
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
