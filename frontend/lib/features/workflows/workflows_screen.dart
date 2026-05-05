@@ -325,6 +325,18 @@ class _Workflow {
     required this.status,
     required this.maxTurns,
     required this.credentialOverrides,
+    this.skillIds = const [],
+    this.skillTags = const [],
+    this.guardrailIds = const [],
+    this.guardrailTags = const [],
+    this.outputFormat = 'json',
+    this.infiniteSession = true,
+    this.bypassMemory = false,
+    this.autoMemory = false,
+    this.reasoningEffort,
+    this.repoUrl,
+    this.repoBranch,
+    this.repoTokenName,
   });
 
   final String id;
@@ -334,6 +346,18 @@ class _Workflow {
   final String status;
   final int maxTurns;
   final Map<String, String> credentialOverrides;
+  final List<String> skillIds;
+  final List<String> skillTags;
+  final List<String> guardrailIds;
+  final List<String> guardrailTags;
+  final String outputFormat;
+  final bool infiniteSession;
+  final bool bypassMemory;
+  final bool autoMemory;
+  final String? reasoningEffort;
+  final String? repoUrl;
+  final String? repoBranch;
+  final String? repoTokenName;
 
   factory _Workflow.fromJson(Map<String, dynamic> json) => _Workflow(
     id: json['id']?.toString() ?? '',
@@ -345,6 +369,18 @@ class _Workflow {
     credentialOverrides: Map<String, String>.from(
       (json['credential_overrides'] as Map<String, dynamic>?) ?? {},
     ),
+    skillIds: (json['skill_ids'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    skillTags: (json['skill_tags'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    guardrailIds: (json['guardrail_ids'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    guardrailTags: (json['guardrail_tags'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    outputFormat: json['output_format']?.toString() ?? 'json',
+    infiniteSession: json['infinite_session'] as bool? ?? true,
+    bypassMemory: json['bypass_memory'] as bool? ?? false,
+    autoMemory: json['auto_memory'] as bool? ?? false,
+    reasoningEffort: json['reasoning_effort']?.toString(),
+    repoUrl: json['repo_url']?.toString(),
+    repoBranch: json['repo_branch']?.toString(),
+    repoTokenName: json['repo_token_name']?.toString(),
   );
 }
 
@@ -693,24 +729,40 @@ class _WorkflowCard extends StatelessWidget {
                     ),
                 ],
               ),
-              // ── EDIT CREDENTIALS button ─────────────────────────────────
+              // ── Action buttons ─────────────────────────────────────────
               const SizedBox(height: sp12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: RetroButton(
-                  label: 'EDIT CREDENTIALS',
-                  icon: Icons.key_outlined,
-                  color: accentAmber,
-                  textColor: textPrimary,
-                  onPressed: () => showDialog<void>(
-                    context: context,
-                    builder: (_) => _CredentialOverridesDialog(
-                      workflow: workflow,
-                      client: client,
-                      onSaved: onSaved,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  RetroButton(
+                    label: 'EDIT',
+                    icon: Icons.edit_outlined,
+                    color: accentLavender,
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _WorkflowDialog(
+                        client: client,
+                        onSaved: onSaved,
+                        existing: workflow,
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: sp8),
+                  RetroButton(
+                    label: 'CREDENTIALS',
+                    icon: Icons.key_outlined,
+                    color: accentAmber,
+                    textColor: textPrimary,
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _CredentialOverridesDialog(
+                        workflow: workflow,
+                        client: client,
+                        onSaved: onSaved,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1265,33 +1317,40 @@ class _AgentOption {
 // ---------------------------------------------------------------------------
 
 class _WorkflowDialog extends StatefulWidget {
-  const _WorkflowDialog({required this.client, required this.onSaved});
+  const _WorkflowDialog({
+    required this.client,
+    required this.onSaved,
+    this.existing,
+  });
 
   final http.Client client;
   final VoidCallback onSaved;
+  final _Workflow? existing;
 
   @override
   State<_WorkflowDialog> createState() => _WorkflowDialogState();
 }
 
 class _WorkflowDialogState extends State<_WorkflowDialog> {
-  final _titleCtrl = TextEditingController();
-  final _modelCtrl = TextEditingController();
-  final _maxTurnsCtrl = TextEditingController(text: '10');
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _modelCtrl;
+  late final TextEditingController _maxTurnsCtrl;
   bool _saving = false;
+
+  bool get _isEdit => widget.existing != null;
 
   // Agent dropdown state
   late Future<List<_AgentOption>> _agentsFuture;
   String? _selectedAgentId;
 
   // New fields
-  List<String> _selectedSkillIds = [];
-  List<String> _selectedGuardrailIds = [];
-  String _outputFormat = 'json';
-  bool _infiniteSession = true;
-  bool _bypassMemory = false;
-  bool _autoMemory = false;
-  String? _reasoningEffort;
+  late List<String> _selectedSkillIds;
+  late List<String> _selectedGuardrailIds;
+  late String _outputFormat;
+  late bool _infiniteSession;
+  late bool _bypassMemory;
+  late bool _autoMemory;
+  late String? _reasoningEffort;
   final _skillTagsCtrl = TextEditingController();
   final _guardrailTagsCtrl = TextEditingController();
   final _repoUrlCtrl = TextEditingController();
@@ -1300,7 +1359,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   late Future<List<_Skill>> _skillsFuture;
   late Future<List<_Guardrail>> _wfGuardrailsFuture;
 
-  // Credential overrides (token → env-var mapping at create time)
+  // Credential overrides
   final List<_CredOverride> _credOverrides = [];
   List<_TokenRef> _credTokens = [];
   List<String> _credEnvVarKeys = [];
@@ -1308,6 +1367,31 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   @override
   void initState() {
     super.initState();
+    final w = widget.existing;
+    _titleCtrl = TextEditingController(text: w?.title ?? '');
+    _modelCtrl = TextEditingController(text: w?.model ?? '');
+    _maxTurnsCtrl = TextEditingController(text: (w?.maxTurns ?? 10).toString());
+    _selectedAgentId = w?.agentId;
+    _selectedSkillIds = List.from(w?.skillIds ?? []);
+    _selectedGuardrailIds = List.from(w?.guardrailIds ?? []);
+    _outputFormat = w?.outputFormat ?? 'json';
+    _infiniteSession = w?.infiniteSession ?? true;
+    _bypassMemory = w?.bypassMemory ?? false;
+    _autoMemory = w?.autoMemory ?? false;
+    _reasoningEffort = w?.reasoningEffort;
+    _skillTagsCtrl.text = (w?.skillTags ?? []).join(', ');
+    _guardrailTagsCtrl.text = (w?.guardrailTags ?? []).join(', ');
+    _repoUrlCtrl.text = w?.repoUrl ?? '';
+    _repoBranchCtrl.text = w?.repoBranch ?? '';
+    _repoTokenCtrl.text = w?.repoTokenName ?? '';
+    // Pre-populate credential overrides from existing workflow
+    if (w != null) {
+      _credOverrides.addAll(
+        w.credentialOverrides.entries.map(
+          (e) => _CredOverride(envVar: e.key, tokenName: e.value),
+        ),
+      );
+    }
     _agentsFuture = _fetchAgentOptions(widget.client);
     _skillsFuture = _fetchSkills(widget.client);
     _wfGuardrailsFuture = _fetchGuardrails(widget.client);
@@ -1386,15 +1470,22 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         if (_repoBranchCtrl.text.trim().isNotEmpty) 'repo_branch': _repoBranchCtrl.text.trim(),
         if (_repoTokenCtrl.text.trim().isNotEmpty) 'repo_token_name': _repoTokenCtrl.text.trim(),
       };
-      final response = await widget.client.post(
-        AppLinks.apiUri('/workflows'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      );
+      final response = _isEdit
+          ? await widget.client.put(
+              AppLinks.apiUri('/workflows/${widget.existing!.id}'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body),
+            )
+          : await widget.client.post(
+              AppLinks.apiUri('/workflows'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body),
+            );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final decoded = jsonDecode(response.body);
         throw Exception(
-          decoded['detail'] ?? 'Create failed (${response.statusCode})',
+          decoded['detail'] ??
+              '${_isEdit ? 'Update' : 'Create'} failed (${response.statusCode})',
         );
       }
       if (!mounted) return;
@@ -1439,10 +1530,10 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                       size: 20,
                     ),
                     const SizedBox(width: sp8),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'NEW WORKFLOW',
-                        style: TextStyle(
+                        _isEdit ? 'EDIT WORKFLOW' : 'NEW WORKFLOW',
+                        style: const TextStyle(
                           fontFamily: fontBody,
                           fontSize: 13,
                           color: accentLavender,
@@ -1795,7 +1886,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                     ),
                     const SizedBox(width: sp8),
                     RetroButton(
-                      label: _saving ? 'SAVING…' : 'CREATE',
+                      label: _saving ? 'SAVING…' : (_isEdit ? 'SAVE' : 'CREATE'),
                       onPressed: _saving ? null : _save,
                       color: accentLavender,
                       icon: _saving ? null : Icons.check,
