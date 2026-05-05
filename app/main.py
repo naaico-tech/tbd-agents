@@ -166,6 +166,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(chat.router)
+app.include_router(chat.workflow_chat_router)
 app.include_router(custom_tools.router)
 app.include_router(export_import.router)
 app.include_router(guardrails.router)
