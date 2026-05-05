@@ -338,6 +338,7 @@ class _Workflow {
     this.repoUrl,
     this.repoBranch,
     this.repoTokenName,
+    this.webhookUrl,
   });
 
   final String id;
@@ -359,6 +360,7 @@ class _Workflow {
   final String? repoUrl;
   final String? repoBranch;
   final String? repoTokenName;
+  final String? webhookUrl;
 
   factory _Workflow.fromJson(Map<String, dynamic> json) => _Workflow(
     id: json['id']?.toString() ?? '',
@@ -382,6 +384,7 @@ class _Workflow {
     repoUrl: json['repo_url']?.toString(),
     repoBranch: json['repo_branch']?.toString(),
     repoTokenName: json['repo_token_name']?.toString(),
+    webhookUrl: json['webhook_url']?.toString(),
   );
 }
 
@@ -727,6 +730,11 @@ class _WorkflowCard extends StatelessWidget {
                       icon: Icons.key_outlined,
                       label:
                           '${workflow.credentialOverrides.length} override(s)',
+                    ),
+                  if (workflow.webhookUrl != null && workflow.webhookUrl!.isNotEmpty)
+                    const _WfMetaItem(
+                      icon: Icons.http_outlined,
+                      label: 'Webhook configured',
                     ),
                 ],
               ),
@@ -1358,6 +1366,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   final _repoUrlCtrl = TextEditingController();
   final _repoBranchCtrl = TextEditingController();
   final _repoTokenCtrl = TextEditingController();
+  final _webhookUrlCtrl = TextEditingController();
   late Future<List<_Skill>> _skillsFuture;
   late Future<List<_Guardrail>> _wfGuardrailsFuture;
 
@@ -1387,6 +1396,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _repoUrlCtrl.text = w?.repoUrl ?? '';
     _repoBranchCtrl.text = w?.repoBranch ?? '';
     _repoTokenCtrl.text = w?.repoTokenName ?? '';
+    _webhookUrlCtrl.text = w?.webhookUrl ?? '';
     // Pre-populate credential overrides from existing workflow
     if (w != null) {
       _credOverrides.addAll(
@@ -1435,6 +1445,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _repoUrlCtrl.dispose();
     _repoBranchCtrl.dispose();
     _repoTokenCtrl.dispose();
+    _webhookUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -1473,6 +1484,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         if (_repoUrlCtrl.text.trim().isNotEmpty) 'repo_url': _repoUrlCtrl.text.trim(),
         if (_repoBranchCtrl.text.trim().isNotEmpty) 'repo_branch': _repoBranchCtrl.text.trim(),
         if (_repoTokenCtrl.text.trim().isNotEmpty) 'repo_token_name': _repoTokenCtrl.text.trim(),
+        if (_webhookUrlCtrl.text.trim().isNotEmpty) 'webhook_url': _webhookUrlCtrl.text.trim(),
       };
       final response = _isEdit
           ? await widget.client.put(
@@ -1895,6 +1907,12 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                   label: 'REPO TOKEN NAME (optional)',
                   controller: _repoTokenCtrl,
                   hint: 'GITHUB_TOKEN',
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'WEBHOOK URL (optional)',
+                  controller: _webhookUrlCtrl,
+                  hint: 'https://your-server.com/webhook',
                 ),
                 const SizedBox(height: sp24),
                 Row(
