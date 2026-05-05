@@ -1207,6 +1207,22 @@ class _OverrideRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Agent option model (lightweight, for dropdown in _WorkflowDialog)
+// ---------------------------------------------------------------------------
+
+class _AgentOption {
+  const _AgentOption({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  factory _AgentOption.fromJson(Map<String, dynamic> j) => _AgentOption(
+    id: j['id']?.toString() ?? '',
+    name: j['name']?.toString() ?? '',
+  );
+}
+
+// ---------------------------------------------------------------------------
 // _WorkflowDialog — create a new workflow
 // ---------------------------------------------------------------------------
 
@@ -1222,25 +1238,41 @@ class _WorkflowDialog extends StatefulWidget {
 
 class _WorkflowDialogState extends State<_WorkflowDialog> {
   final _titleCtrl = TextEditingController();
-  final _agentIdCtrl = TextEditingController();
   final _modelCtrl = TextEditingController();
   final _maxTurnsCtrl = TextEditingController(text: '10');
   bool _saving = false;
 
+  // Agent dropdown state
+  late Future<List<_AgentOption>> _agentsFuture;
+  String? _selectedAgentId;
+
+  @override
+  void initState() {
+    super.initState();
+    _agentsFuture = _fetchAgentOptions(widget.client);
+  }
+
+  Future<List<_AgentOption>> _fetchAgentOptions(http.Client client) async {
+    final response = await client.get(AppLinks.apiUri('/agents'));
+    if (response.statusCode < 200 || response.statusCode >= 300) return [];
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) return [];
+    return decoded.whereType<Map<String, dynamic>>().map(_AgentOption.fromJson).toList();
+  }
+
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _agentIdCtrl.dispose();
     _modelCtrl.dispose();
     _maxTurnsCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
-    if (_agentIdCtrl.text.trim().isEmpty) {
+    if (_selectedAgentId == null || _selectedAgentId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Agent ID is required.'),
+          content: Text('Please select an agent.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -1253,7 +1285,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'title': _titleCtrl.text.trim(),
-          'agent_id': _agentIdCtrl.text.trim(),
+          'agent_id': _selectedAgentId!,
           if (_modelCtrl.text.trim().isNotEmpty) 'model': _modelCtrl.text.trim(),
           'max_turns': int.tryParse(_maxTurnsCtrl.text.trim()) ?? 10,
           'credential_overrides': <String, String>{},
@@ -1333,10 +1365,79 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                 hint: 'My workflow',
               ),
               const SizedBox(height: sp12),
-              _WfDialogField(
-                label: 'AGENT ID *',
-                controller: _agentIdCtrl,
-                hint: 'my-agent',
+              // Agent dropdown ──────────────────────────────────────────
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'AGENT *',
+                    style: TextStyle(
+                      fontFamily: fontBody,
+                      fontSize: 10,
+                      color: accentLavender,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: sp4),
+                  FutureBuilder<List<_AgentOption>>(
+                    future: _agentsFuture,
+                    builder: (context, snap) {
+                      final agents = snap.data ?? [];
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: sp12,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: pageBg,
+                          border: Border.all(
+                            color: accentLavender.withAlpha(80),
+                          ),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                        child: DropdownButton<String?>(
+                          value: _selectedAgentId,
+                          isExpanded: true,
+                          underline: const SizedBox(),
+                          dropdownColor: cardBg,
+                          style: const TextStyle(
+                            fontFamily: fontBody,
+                            fontSize: 12,
+                            color: textPrimary,
+                          ),
+                          hint: Text(
+                            snap.connectionState == ConnectionState.waiting
+                                ? 'Loading agents…'
+                                : 'Select an agent',
+                            style: const TextStyle(
+                              fontFamily: fontBody,
+                              fontSize: 12,
+                              color: textMuted,
+                            ),
+                          ),
+                          items: [
+                            for (final a in agents)
+                              DropdownMenuItem<String?>(
+                                value: a.id,
+                                child: Text(
+                                  a.name,
+                                  style: const TextStyle(
+                                    fontFamily: fontBody,
+                                    fontSize: 12,
+                                    color: textPrimary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _selectedAgentId = v),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
               const SizedBox(height: sp12),
               _WfDialogField(

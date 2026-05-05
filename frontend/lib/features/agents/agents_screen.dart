@@ -67,6 +67,28 @@ class _Agent {
 }
 
 // ---------------------------------------------------------------------------
+// Provider option model (lightweight, for dropdown in _AgentDialog)
+// ---------------------------------------------------------------------------
+
+class _ProviderOption {
+  const _ProviderOption({
+    required this.id,
+    required this.name,
+    required this.providerType,
+  });
+
+  final String id;
+  final String name;
+  final String providerType;
+
+  factory _ProviderOption.fromJson(Map<String, dynamic> j) => _ProviderOption(
+    id: j['id']?.toString() ?? '',
+    name: j['name']?.toString() ?? '',
+    providerType: j['provider_type']?.toString() ?? '',
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Agent API helpers
 // ---------------------------------------------------------------------------
 
@@ -480,8 +502,11 @@ class _AgentDialogState extends State<_AgentDialog> {
   late final TextEditingController _descCtrl;
   late final TextEditingController _systemPromptCtrl;
   late final TextEditingController _modelCtrl;
-  late final TextEditingController _providerIdCtrl;
   bool _saving = false;
+
+  // Provider dropdown state
+  late Future<List<_ProviderOption>> _providersFuture;
+  String? _selectedProviderId;
 
   bool get _isEdit => widget.existing != null;
 
@@ -495,7 +520,8 @@ class _AgentDialogState extends State<_AgentDialog> {
       text: a?.systemPrompt ?? 'You are a helpful assistant.',
     );
     _modelCtrl = TextEditingController(text: a?.model ?? '');
-    _providerIdCtrl = TextEditingController(text: a?.providerId ?? '');
+    _selectedProviderId = a?.providerId;
+    _providersFuture = _fetchProviderOptions(widget.client);
   }
 
   @override
@@ -504,8 +530,17 @@ class _AgentDialogState extends State<_AgentDialog> {
     _descCtrl.dispose();
     _systemPromptCtrl.dispose();
     _modelCtrl.dispose();
-    _providerIdCtrl.dispose();
     super.dispose();
+  }
+
+  Future<List<_ProviderOption>> _fetchProviderOptions(
+    http.Client client,
+  ) async {
+    final response = await client.get(AppLinks.apiUri('/providers'));
+    if (response.statusCode < 200 || response.statusCode >= 300) return [];
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) return [];
+    return decoded.whereType<Map<String, dynamic>>().map(_ProviderOption.fromJson).toList();
   }
 
   Future<void> _save() async {
@@ -536,8 +571,8 @@ class _AgentDialogState extends State<_AgentDialog> {
         'description': _descCtrl.text.trim(),
         'system_prompt': systemPrompt,
         if (_modelCtrl.text.trim().isNotEmpty) 'model': _modelCtrl.text.trim(),
-        if (_providerIdCtrl.text.trim().isNotEmpty)
-          'provider_id': _providerIdCtrl.text.trim(),
+        if (_selectedProviderId != null && _selectedProviderId!.isNotEmpty)
+          'provider_id': _selectedProviderId,
       };
       if (_isEdit) {
         await _updateAgent(widget.client, widget.existing!.id, body);
@@ -643,10 +678,102 @@ class _AgentDialogState extends State<_AgentDialog> {
                   hint: 'Leave blank for default',
                 ),
                 const SizedBox(height: sp12),
-                _AgentDialogField(
-                  label: 'PROVIDER ID',
-                  controller: _providerIdCtrl,
-                  hint: 'Provider ID or leave blank',
+                // Provider dropdown ─────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'PROVIDER',
+                      style: TextStyle(
+                        fontFamily: fontBody,
+                        fontSize: 10,
+                        color: accentAmber,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: sp4),
+                    FutureBuilder<List<_ProviderOption>>(
+                      future: _providersFuture,
+                      builder: (context, snap) {
+                        final providers = snap.data ?? [];
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: sp12,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: pageBg,
+                            border: Border.all(color: accentAmber.withAlpha(80)),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: DropdownButton<String?>(
+                            value: _selectedProviderId,
+                            isExpanded: true,
+                            underline: const SizedBox(),
+                            dropdownColor: cardBg,
+                            style: const TextStyle(
+                              fontFamily: fontBody,
+                              fontSize: 12,
+                              color: textPrimary,
+                            ),
+                            hint: Text(
+                              snap.connectionState == ConnectionState.waiting
+                                  ? 'Loading providers…'
+                                  : 'None (use default)',
+                              style: const TextStyle(
+                                fontFamily: fontBody,
+                                fontSize: 12,
+                                color: textMuted,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text(
+                                  'None (use default)',
+                                  style: TextStyle(
+                                    fontFamily: fontBody,
+                                    fontSize: 12,
+                                    color: textMuted,
+                                  ),
+                                ),
+                              ),
+                              for (final p in providers)
+                                DropdownMenuItem<String?>(
+                                  value: p.id,
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          p.name,
+                                          style: const TextStyle(
+                                            fontFamily: fontBody,
+                                            fontSize: 12,
+                                            color: textPrimary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: sp8),
+                                      Text(
+                                        p.providerType,
+                                        style: const TextStyle(
+                                          fontFamily: fontBody,
+                                          fontSize: 10,
+                                          color: textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() => _selectedProviderId = v),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
                 const SizedBox(height: sp24),
                 Row(
