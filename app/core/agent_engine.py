@@ -1714,10 +1714,14 @@ async def _run_with_claude_sdk(
         await _log(workflow, "claude_env_created", environment.id, task_exec)
 
         # ── Create agent ─────────────────────────────────────────────────────
+        # NOTE: The Anthropic agents beta API (/v1/agents) requires `system`
+        # to be a plain string.  The cache-block format (list[dict]) is only
+        # accepted by the messages API and would cause a 400
+        # "system: value must be a string" error here.
         agent_kwargs: dict = {
             "model": model,
             "name": f"tbd-agent-{workflow.agent_id}",
-            "system": _build_anthropic_system_blocks(system_prompt, static_prefix_len),
+            "system": system_prompt,
         }
         if native_mcp_servers:
             agent_kwargs["mcp_servers"] = native_mcp_servers

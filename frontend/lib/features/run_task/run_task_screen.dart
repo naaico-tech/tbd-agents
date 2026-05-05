@@ -54,6 +54,8 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
   int? _maxTurns;
   String? _error;
   Timer? _pollTimer;
+  // Live execution logs (event_type + message) shown during run
+  final List<Map<String, String>> _liveLogs = [];
 
   @override
   void initState() {
@@ -119,6 +121,7 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
       _taskId = null;
       _currentTurn = null;
       _maxTurns = null;
+      _liveLogs.clear();
     });
 
     try {
@@ -210,6 +213,23 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
         final newResponse = decoded['response']?.toString();
         if (newResponse != null && newResponse.isNotEmpty) {
           _output = newResponse;
+        }
+        // Update live logs
+        final rawLogs = decoded['logs'];
+        if (rawLogs is List) {
+          _liveLogs
+            ..clear()
+            ..addAll(
+              rawLogs
+                  .whereType<Map<String, dynamic>>()
+                  .map(
+                    (l) => {
+                      'type': l['event_type']?.toString() ?? 'log',
+                      'msg': l['message']?.toString() ?? '',
+                    },
+                  )
+                  .toList(),
+            );
         }
       });
       // Stop polling when task is terminal
@@ -565,6 +585,62 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
                           fontFamily: fontBody,
                           fontSize: fontSizeSmall,
                           color: textMuted,
+                        ),
+                      ),
+                    ],
+                    // Live execution logs
+                    if (_liveLogs.isNotEmpty) ...[
+                      const SizedBox(height: sp16),
+                      const Text(
+                        'EXECUTION LOG',
+                        style: TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: fontSizeSmall,
+                          color: textMuted,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(height: sp8),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: pageBg,
+                          border: Border.all(color: borderColor),
+                        ),
+                        padding: const EdgeInsets.all(sp8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final log in _liveLogs)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '[${log['type'] ?? 'log'}]',
+                                      style: const TextStyle(
+                                        fontFamily: fontBody,
+                                        fontSize: 10,
+                                        color: accentTeal,
+                                        letterSpacing: 0.4,
+                                      ),
+                                    ),
+                                    const SizedBox(width: sp4),
+                                    Expanded(
+                                      child: Text(
+                                        log['msg'] ?? '',
+                                        style: const TextStyle(
+                                          fontFamily: fontBody,
+                                          fontSize: 11,
+                                          color: textPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ],
