@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -2149,7 +2150,7 @@ class _WfErrorBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// _Task — data model
+// _Task — data model (mirrors TaskExecutionSummary)
 // ---------------------------------------------------------------------------
 
 class _Task {
@@ -2161,6 +2162,15 @@ class _Task {
     required this.createdAt,
     required this.updatedAt,
     this.error,
+    this.workflowTitle,
+    this.agentName,
+    this.model,
+    this.reasoningEffort,
+    this.toolCalls = 0,
+    this.startedAt,
+    this.finishedAt,
+    this.elapsedSeconds,
+    this.worker,
   });
 
   final String id;
@@ -2171,6 +2181,17 @@ class _Task {
   final DateTime updatedAt;
   final String? error;
 
+  // enriched fields from TaskExecutionSummary
+  final String? workflowTitle;
+  final String? agentName;
+  final String? model;
+  final String? reasoningEffort;
+  final int toolCalls;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+  final double? elapsedSeconds;
+  final String? worker;
+
   factory _Task.fromJson(Map<String, dynamic> j) => _Task(
     id: j['id']?.toString() ?? '',
     workflowId: j['workflow_id']?.toString() ?? '',
@@ -2179,8 +2200,19 @@ class _Task {
     createdAt:
         DateTime.tryParse(j['created_at']?.toString() ?? '') ?? DateTime.now(),
     updatedAt:
-        DateTime.tryParse(j['updated_at']?.toString() ?? '') ?? DateTime.now(),
+        DateTime.tryParse(j['updated_at']?.toString() ?? '') ??
+        DateTime.tryParse(j['created_at']?.toString() ?? '') ??
+        DateTime.now(),
     error: j['error']?.toString(),
+    workflowTitle: j['workflow_title']?.toString(),
+    agentName: j['agent_name']?.toString(),
+    model: j['model']?.toString(),
+    reasoningEffort: j['reasoning_effort']?.toString(),
+    toolCalls: (j['tool_calls'] as num?)?.toInt() ?? 0,
+    startedAt: DateTime.tryParse(j['started_at']?.toString() ?? ''),
+    finishedAt: DateTime.tryParse(j['finished_at']?.toString() ?? ''),
+    elapsedSeconds: (j['elapsed_seconds'] as num?)?.toDouble(),
+    worker: j['worker']?.toString(),
   );
 }
 
@@ -2211,6 +2243,7 @@ class TasksScreen extends StatefulWidget {
 class _TasksScreenState extends State<TasksScreen> {
   http.Client? _ownedClient;
   late Future<List<_Task>> _tasksFuture;
+  Timer? _pollTimer;
 
   http.Client get _client => _ownedClient ??= http.Client();
 
@@ -2222,14 +2255,53 @@ class _TasksScreenState extends State<TasksScreen> {
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _ownedClient?.close();
     super.dispose();
   }
 
   void _reload() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    final future = _fetchTasks(_client);
     setState(() {
-      _tasksFuture = _fetchTasks(_client);
+      _tasksFuture = future;
     });
+    future.then((tasks) {
+      if (!mounted) return;
+      final hasActive = tasks.any(
+        (t) => t.status == 'running' || t.status == 'pending',
+      );
+      if (hasActive) {
+        _pollTimer = Timer.periodic(
+          const Duration(seconds: 5),
+          (_) {
+            if (!mounted) {
+              _pollTimer?.cancel();
+              return;
+            }
+            _reloadSilent();
+          },
+        );
+      }
+    }).catchError((_) {});
+  }
+
+  void _reloadSilent() {
+    final future = _fetchTasks(_client);
+    setState(() {
+      _tasksFuture = future;
+    });
+    future.then((tasks) {
+      if (!mounted) return;
+      final hasActive = tasks.any(
+        (t) => t.status == 'running' || t.status == 'pending',
+      );
+      if (!hasActive) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
+      }
+    }).catchError((_) {});
   }
 
   @override
@@ -2281,7 +2353,8 @@ class _TasksScreenState extends State<TasksScreen> {
                         padding: const EdgeInsets.all(sp16),
                         child: Column(
                           children: [
-                            for (final t in tasks) _TaskCard(task: t),
+                            for (final t in tasks)
+                              _TaskCard(task: t, client: _client),
                           ],
                         ),
                       ),
@@ -2299,9 +2372,10 @@ class _TasksScreenState extends State<TasksScreen> {
 // ---------------------------------------------------------------------------
 
 class _TaskCard extends StatelessWidget {
-  const _TaskCard({required this.task});
+  const _TaskCard({required this.task, required this.client});
 
   final _Task task;
+  final http.Client client;
 
   Color get _statusColor {
     switch (task.status.toLowerCase()) {
@@ -2333,6 +2407,12 @@ class _TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final wfLabel =
+        (task.workflowTitle != null && task.workflowTitle!.isNotEmpty)
+            ? task.workflowTitle!
+            : (task.workflowId.length > 14
+                ? '${task.workflowId.substring(0, 14)}…'
+                : task.workflowId);
     return Padding(
       padding: const EdgeInsets.only(bottom: sp12),
       child: RetroCard(
@@ -2345,9 +2425,9 @@ class _TaskCard extends StatelessWidget {
               Row(
                 children: [
                   RetroChip(
-                    label: task.workflowId.length > 14
-                        ? '${task.workflowId.substring(0, 14)}…'
-                        : task.workflowId,
+                    label: wfLabel.length > 22
+                        ? '${wfLabel.substring(0, 22)}…'
+                        : wfLabel,
                     color: accentSlate,
                   ),
                   const Spacer(),
@@ -2372,10 +2452,36 @@ class _TaskCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: sp8),
-              // ── Timestamp ───────────────────────────────────────────────
-              _WfMetaItem(
-                icon: Icons.access_time_outlined,
-                label: _formatDate(task.createdAt),
+              // ── Meta row ────────────────────────────────────────────────
+              Wrap(
+                spacing: sp12,
+                runSpacing: 4,
+                children: [
+                  _WfMetaItem(
+                    icon: Icons.access_time_outlined,
+                    label: _formatDate(task.createdAt),
+                  ),
+                  if (task.agentName != null && task.agentName!.isNotEmpty)
+                    _WfMetaItem(
+                      icon: Icons.smart_toy_outlined,
+                      label: task.agentName!,
+                    ),
+                  if (task.model != null && task.model!.isNotEmpty)
+                    _WfMetaItem(
+                      icon: Icons.memory_outlined,
+                      label: task.model!,
+                    ),
+                  if (task.toolCalls > 0)
+                    _WfMetaItem(
+                      icon: Icons.build_outlined,
+                      label: '${task.toolCalls} tools',
+                    ),
+                  if (task.elapsedSeconds != null)
+                    _WfMetaItem(
+                      icon: Icons.timer_outlined,
+                      label: '${task.elapsedSeconds!.toStringAsFixed(1)}s',
+                    ),
+                ],
               ),
               // ── Error ───────────────────────────────────────────────────
               if (task.status.toLowerCase() == 'failed' &&
@@ -2394,10 +2500,615 @@ class _TaskCard extends StatelessWidget {
                   ),
                 ),
               ],
+              const SizedBox(height: sp8),
+              // ── VIEW DETAILS button ──────────────────────────────────────
+              Align(
+                alignment: Alignment.centerRight,
+                child: RetroButton(
+                  label: 'VIEW DETAILS',
+                  icon: Icons.open_in_new_outlined,
+                  color: accentSlate,
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => _TaskDetailDialog(
+                      taskId: task.id,
+                      client: client,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _TaskDetailDialog — full task execution detail with logs, messages, usage
+// ---------------------------------------------------------------------------
+
+class _TaskDetailDialog extends StatefulWidget {
+  const _TaskDetailDialog({required this.taskId, required this.client});
+
+  final String taskId;
+  final http.Client client;
+
+  @override
+  State<_TaskDetailDialog> createState() => _TaskDetailDialogState();
+}
+
+class _TaskDetailDialogState extends State<_TaskDetailDialog> {
+  Map<String, dynamic>? _data;
+  String? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final resp = await widget.client.get(
+        AppLinks.apiUri('/tasks/${widget.taskId}'),
+      );
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception('Failed (${resp.statusCode})');
+      }
+      if (!mounted) return;
+      setState(() {
+        _data = jsonDecode(resp.body) as Map<String, dynamic>;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  String _fmt(String? raw) {
+    if (raw == null) return '—';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    final s = dt.toIso8601String();
+    return s.length > 19 ? s.substring(0, 19).replaceAll('T', ' ') : s;
+  }
+
+  Color _todoColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return const Color(0xFF4CAF50);
+      case 'in-progress':
+        return accentTeal;
+      default:
+        return accentAmber;
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return const Color(0xFF4CAF50);
+      case 'running':
+        return accentTeal;
+      case 'failed':
+        return accentPrimary;
+      default:
+        return accentAmber;
+    }
+  }
+
+  Color _statusTextColor(String status) {
+    return status.toLowerCase() == 'pending' ? textPrimary : cardBg;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: cardBg,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 800, maxHeight: 680),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Dialog header ────────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: sp16,
+                vertical: sp12,
+              ),
+              decoration: const BoxDecoration(
+                color: accentSlate,
+                border: Border(
+                  bottom: BorderSide(color: borderColor, width: 2),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.assignment_outlined,
+                    color: cardBg,
+                    size: 16,
+                  ),
+                  const SizedBox(width: sp8),
+                  const Expanded(
+                    child: Text(
+                      'TASK DETAILS',
+                      style: TextStyle(
+                        fontFamily: fontDisplay,
+                        fontSize: 9,
+                        color: cardBg,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: cardBg, size: 18),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            // ── Body ────────────────────────────────────────────────────
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: accentSlate),
+                    )
+                  : _error != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(sp24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              color: accentPrimary,
+                              size: 32,
+                            ),
+                            const SizedBox(height: sp8),
+                            Text(
+                              _error!,
+                              style: const TextStyle(
+                                fontFamily: fontBody,
+                                fontSize: fontSizeSmall,
+                                color: accentPrimary,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: sp12),
+                            RetroButton(
+                              label: 'RETRY',
+                              onPressed: _load,
+                              color: accentSlate,
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _buildContent(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    final d = _data!;
+    final status = d['status']?.toString() ?? '';
+    final response = d['response']?.toString();
+    final prompt = d['prompt']?.toString() ?? '';
+    final model = d['model']?.toString();
+    final reasoningEffort = d['reasoning_effort']?.toString();
+    final toolCalls = (d['tool_calls'] as num?)?.toInt() ?? 0;
+    final elapsedSeconds = (d['elapsed_seconds'] as num?)?.toDouble();
+    final worker = d['worker']?.toString();
+    final workflowTitle = d['workflow_title']?.toString();
+    final agentName = d['agent_name']?.toString();
+
+    final logs = (d['logs'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final messages = (d['messages'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final usage = d['usage'] as Map<String, dynamic>?;
+    final progress = d['progress'] as Map<String, dynamic>?;
+    final todos = progress != null
+        ? (progress['todos'] as List<dynamic>? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .toList()
+        : <Map<String, dynamic>>[];
+
+    // Compute total tokens
+    final inputTokens = (usage?['total_input_tokens'] as num?)?.toInt() ?? 0;
+    final outputTokens = (usage?['total_output_tokens'] as num?)?.toInt() ?? 0;
+    final totalTokens = inputTokens + outputTokens;
+
+    final sc = _statusColor(status);
+    final stc = _statusTextColor(status);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(sp16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Status + title row ──────────────────────────────────────
+          Row(
+            children: [
+              if (workflowTitle != null && workflowTitle.isNotEmpty)
+                Expanded(
+                  child: Text(
+                    workflowTitle,
+                    style: const TextStyle(
+                      fontFamily: fontBody,
+                      fontSize: fontSizeBody,
+                      color: textPrimary,
+                      letterSpacing: 0.5,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )
+              else
+                const Spacer(),
+              RetroChip(label: status, color: sc, textColor: stc),
+            ],
+          ),
+          const SizedBox(height: sp8),
+          // ── Meta chips ──────────────────────────────────────────────
+          Wrap(
+            spacing: sp12,
+            runSpacing: 4,
+            children: [
+              if (agentName != null && agentName.isNotEmpty)
+                _WfMetaItem(
+                  icon: Icons.smart_toy_outlined,
+                  label: agentName,
+                ),
+              if (model != null && model.isNotEmpty)
+                _WfMetaItem(icon: Icons.memory_outlined, label: model),
+              if (reasoningEffort != null && reasoningEffort.isNotEmpty)
+                _WfMetaItem(
+                  icon: Icons.psychology_outlined,
+                  label: 'effort: $reasoningEffort',
+                ),
+              if (toolCalls > 0)
+                _WfMetaItem(
+                  icon: Icons.build_outlined,
+                  label: '$toolCalls tools',
+                ),
+              if (elapsedSeconds != null)
+                _WfMetaItem(
+                  icon: Icons.timer_outlined,
+                  label: '${elapsedSeconds.toStringAsFixed(1)}s',
+                ),
+              if (worker != null && worker.isNotEmpty)
+                _WfMetaItem(icon: Icons.dns_outlined, label: worker),
+              _WfMetaItem(
+                icon: Icons.play_arrow_outlined,
+                label: _fmt(d['started_at']?.toString()),
+              ),
+              _WfMetaItem(
+                icon: Icons.stop_outlined,
+                label: _fmt(d['finished_at']?.toString()),
+              ),
+            ],
+          ),
+          const SizedBox(height: sp16),
+          // ── Prompt ──────────────────────────────────────────────────
+          SectionFrame(
+            title: 'Prompt',
+            accentColor: accentSlate,
+            child: Padding(
+              padding: const EdgeInsets.all(sp12),
+              child: SelectableText(
+                prompt,
+                style: const TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: fontSizeSmall,
+                  color: textPrimary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: sp12),
+          // ── Response ────────────────────────────────────────────────
+          if (response != null && response.isNotEmpty) ...[
+            SectionFrame(
+              title: 'Response',
+              accentColor: const Color(0xFF4CAF50),
+              child: Padding(
+                padding: const EdgeInsets.all(sp12),
+                child: SelectableText(
+                  response,
+                  style: const TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: fontSizeSmall,
+                    color: textPrimary,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: sp12),
+          ],
+          // ── Progress / Todos ─────────────────────────────────────────
+          if (todos.isNotEmpty) ...[
+            SectionFrame(
+              title:
+                  'Progress  (${(progress?['percent_complete'] ?? 0.0).toStringAsFixed(0)}%)',
+              accentColor: accentTeal,
+              child: Padding(
+                padding: const EdgeInsets.all(sp12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final todo in todos)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: sp4),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              color: _todoColor(
+                                todo['status']?.toString() ?? '',
+                              ),
+                            ),
+                            const SizedBox(width: sp8),
+                            Expanded(
+                              child: Text(
+                                todo['title']?.toString() ?? '',
+                                style: const TextStyle(
+                                  fontFamily: fontBody,
+                                  fontSize: fontSizeSmall,
+                                  color: textPrimary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: sp8),
+                            Text(
+                              todo['status']?.toString() ?? '',
+                              style: const TextStyle(
+                                fontFamily: fontBody,
+                                fontSize: fontSizeSmall,
+                                color: textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: sp12),
+          ],
+          // ── Usage stats ─────────────────────────────────────────────
+          if (usage != null) ...[
+            SectionFrame(
+              title: 'Usage',
+              accentColor: accentLavender,
+              child: Padding(
+                padding: const EdgeInsets.all(sp12),
+                child: Wrap(
+                  spacing: sp16,
+                  runSpacing: 4,
+                  children: [
+                    _WfMetaItem(
+                      icon: Icons.input_outlined,
+                      label: 'in: $inputTokens',
+                    ),
+                    _WfMetaItem(
+                      icon: Icons.output_outlined,
+                      label: 'out: $outputTokens',
+                    ),
+                    _WfMetaItem(
+                      icon: Icons.token_outlined,
+                      label: 'total: $totalTokens',
+                    ),
+                    if ((usage['total_cost'] as num?)?.toDouble() != null)
+                      _WfMetaItem(
+                        icon: Icons.attach_money_outlined,
+                        label:
+                            '\$${(usage['total_cost'] as num).toStringAsFixed(4)}',
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: sp12),
+          ],
+          // ── Conversation messages (assistant turns) ──────────────────
+          if (messages.where((m) => m['role'] == 'assistant').isNotEmpty) ...[
+            SectionFrame(
+              title: 'Conversation',
+              accentColor: accentTeal,
+              child: Padding(
+                padding: const EdgeInsets.all(sp12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final msg in messages)
+                      if (msg['role']?.toString() == 'assistant' &&
+                          msg['content'] != null &&
+                          (msg['content'] as String).isNotEmpty) ...[
+                        _TaskMessageBubble(
+                          content: msg['content']?.toString() ?? '',
+                        ),
+                        const SizedBox(height: sp8),
+                      ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: sp12),
+          ],
+          // ── Logs (expandable) ────────────────────────────────────────
+          if (logs.isNotEmpty)
+            _TaskLogsExpansion(logs: logs, formatDate: _fmt),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _TaskMessageBubble — assistant message display in task detail
+// ---------------------------------------------------------------------------
+
+class _TaskMessageBubble extends StatelessWidget {
+  const _TaskMessageBubble({required this.content});
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(sp8),
+      decoration: BoxDecoration(
+        color: pageBg,
+        border: Border.all(color: borderColor.withAlpha(60)),
+      ),
+      child: SelectableText(
+        content,
+        style: const TextStyle(
+          fontFamily: fontBody,
+          fontSize: fontSizeSmall,
+          color: textPrimary,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _TaskLogsExpansion — expandable log list in task detail
+// ---------------------------------------------------------------------------
+
+class _TaskLogsExpansion extends StatefulWidget {
+  const _TaskLogsExpansion({
+    required this.logs,
+    required this.formatDate,
+  });
+  final List<Map<String, dynamic>> logs;
+  final String Function(String?) formatDate;
+
+  @override
+  State<_TaskLogsExpansion> createState() => _TaskLogsExpansionState();
+}
+
+class _TaskLogsExpansionState extends State<_TaskLogsExpansion> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: sp12,
+              vertical: sp8,
+            ),
+            decoration: BoxDecoration(
+              color: pageBg,
+              border: Border.all(color: borderColor.withAlpha(80)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 14,
+                  color: textMuted,
+                ),
+                const SizedBox(width: sp8),
+                Text(
+                  'LOGS (${widget.logs.length})',
+                  style: const TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: fontSizeSmall,
+                    color: textMuted,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded)
+          Container(
+            padding: const EdgeInsets.all(sp8),
+            decoration: BoxDecoration(
+              color: pageBg,
+              border: Border.all(color: borderColor.withAlpha(60)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final log in widget.logs)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: sp4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.formatDate(log['timestamp']?.toString()),
+                          style: const TextStyle(
+                            fontFamily: fontBody,
+                            fontSize: 9,
+                            color: textMuted,
+                          ),
+                        ),
+                        const SizedBox(width: sp8),
+                        Flexible(
+                          child: RichText(
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text:
+                                      '${log['event']?.toString() ?? ''}: ',
+                                  style: const TextStyle(
+                                    fontFamily: fontBody,
+                                    fontSize: 9,
+                                    color: accentTeal,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: log['detail']?.toString() ?? '',
+                                  style: const TextStyle(
+                                    fontFamily: fontBody,
+                                    fontSize: 9,
+                                    color: textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
