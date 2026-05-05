@@ -508,6 +508,16 @@ class _AgentDialogState extends State<_AgentDialog> {
   late Future<List<_ProviderOption>> _providersFuture;
   String? _selectedProviderId;
 
+  List<String> _selectedMcpIds = [];
+  List<String> _selectedCustomToolIds = [];
+  List<String> _selectedKnowledgeIds = [];
+  List<String> _selectedBuiltinTools = [];
+  final _mcpTagsCtrl = TextEditingController();
+  final _knowledgeTagsCtrl = TextEditingController();
+  late Future<List<_McpServer>> _mcpsFuture;
+  late Future<List<_CustomTool>> _customToolsFuture;
+  late Future<List<_KnowledgeSource>> _knowledgeFuture;
+
   bool get _isEdit => widget.existing != null;
 
   @override
@@ -522,6 +532,13 @@ class _AgentDialogState extends State<_AgentDialog> {
     _modelCtrl = TextEditingController(text: a?.model ?? '');
     _selectedProviderId = a?.providerId;
     _providersFuture = _fetchProviderOptions(widget.client);
+    _selectedMcpIds = List.from(a?.mcpServerIds ?? []);
+    _selectedCustomToolIds = List.from(a?.customToolIds ?? []);
+    _selectedKnowledgeIds = List.from(a?.knowledgeSourceIds ?? []);
+    _selectedBuiltinTools = List.from(a?.builtinTools ?? []);
+    _mcpsFuture = _fetchMcpServers(widget.client);
+    _customToolsFuture = _fetchCustomTools(widget.client);
+    _knowledgeFuture = _fetchKnowledgeSources(widget.client);
   }
 
   @override
@@ -530,6 +547,8 @@ class _AgentDialogState extends State<_AgentDialog> {
     _descCtrl.dispose();
     _systemPromptCtrl.dispose();
     _modelCtrl.dispose();
+    _mcpTagsCtrl.dispose();
+    _knowledgeTagsCtrl.dispose();
     super.dispose();
   }
 
@@ -573,6 +592,14 @@ class _AgentDialogState extends State<_AgentDialog> {
         if (_modelCtrl.text.trim().isNotEmpty) 'model': _modelCtrl.text.trim(),
         if (_selectedProviderId != null && _selectedProviderId!.isNotEmpty)
           'provider_id': _selectedProviderId,
+        'mcp_server_ids': _selectedMcpIds,
+        if (_mcpTagsCtrl.text.trim().isNotEmpty)
+          'mcp_server_tags': _mcpTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
+        'custom_tool_ids': _selectedCustomToolIds,
+        'knowledge_source_ids': _selectedKnowledgeIds,
+        if (_knowledgeTagsCtrl.text.trim().isNotEmpty)
+          'knowledge_tags': _knowledgeTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
+        'builtin_tools': _selectedBuiltinTools,
       };
       if (_isEdit) {
         await _updateAgent(widget.client, widget.existing!.id, body);
@@ -775,6 +802,96 @@ class _AgentDialogState extends State<_AgentDialog> {
                     ),
                   ],
                 ),
+                const SizedBox(height: sp12),
+                // MCP SERVERS ──────────────────────────────────────────
+                FutureBuilder<List<_McpServer>>(
+                  future: _mcpsFuture,
+                  builder: (context, snap) {
+                    final items = (snap.data ?? []).map((s) => (id: s.id, name: s.name)).toList();
+                    return _MultiSelectChipField(
+                      label: 'MCP SERVERS',
+                      selected: _selectedMcpIds,
+                      items: items,
+                      accentColor: accentSlate,
+                      loading: snap.connectionState == ConnectionState.waiting,
+                      onChanged: (v) => setState(() => _selectedMcpIds = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: sp12),
+                // CUSTOM TOOLS ─────────────────────────────────────────
+                FutureBuilder<List<_CustomTool>>(
+                  future: _customToolsFuture,
+                  builder: (context, snap) {
+                    final items = (snap.data ?? []).map((t) => (id: t.id, name: t.name)).toList();
+                    return _MultiSelectChipField(
+                      label: 'CUSTOM TOOLS',
+                      selected: _selectedCustomToolIds,
+                      items: items,
+                      accentColor: accentTeal,
+                      loading: snap.connectionState == ConnectionState.waiting,
+                      onChanged: (v) => setState(() => _selectedCustomToolIds = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: sp12),
+                // KNOWLEDGE SOURCES ────────────────────────────────────
+                FutureBuilder<List<_KnowledgeSource>>(
+                  future: _knowledgeFuture,
+                  builder: (context, snap) {
+                    final items = (snap.data ?? []).map((k) => (id: k.id, name: k.name)).toList();
+                    return _MultiSelectChipField(
+                      label: 'KNOWLEDGE SOURCES',
+                      selected: _selectedKnowledgeIds,
+                      items: items,
+                      accentColor: accentLavender,
+                      loading: snap.connectionState == ConnectionState.waiting,
+                      onChanged: (v) => setState(() => _selectedKnowledgeIds = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: sp12),
+                // BUILTIN TOOLS ────────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('BUILTIN TOOLS', style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentAmber, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: sp4),
+                    Wrap(
+                      spacing: sp4,
+                      runSpacing: sp4,
+                      children: [
+                        for (final tool in ['bash', 'read', 'write', 'edit', 'glob', 'grep', 'web_fetch', 'web_search'])
+                          FilterChip(
+                            label: Text(tool, style: TextStyle(fontFamily: fontBody, fontSize: 11, color: _selectedBuiltinTools.contains(tool) ? Colors.white : textPrimary)),
+                            selected: _selectedBuiltinTools.contains(tool),
+                            onSelected: (v) => setState(() {
+                              if (v) { _selectedBuiltinTools.add(tool); } else { _selectedBuiltinTools.remove(tool); }
+                            }),
+                            selectedColor: accentAmber,
+                            backgroundColor: pageBg,
+                            side: BorderSide(color: accentAmber.withAlpha(80)),
+                            padding: const EdgeInsets.symmetric(horizontal: sp4),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: sp12),
+                // MCP TAGS ─────────────────────────────────────────────
+                _AgentDialogField(
+                  label: 'MCP TAGS (comma-separated)',
+                  controller: _mcpTagsCtrl,
+                  hint: 'tag1, tag2',
+                ),
+                const SizedBox(height: sp12),
+                // KNOWLEDGE TAGS ───────────────────────────────────────
+                _AgentDialogField(
+                  label: 'KNOWLEDGE TAGS (comma-separated)',
+                  controller: _knowledgeTagsCtrl,
+                  hint: 'tag1, tag2',
+                ),
                 const SizedBox(height: sp24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -864,6 +981,110 @@ class _AgentDialogField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _MultiSelectChipField — reusable chip-based multi-select input
+// ---------------------------------------------------------------------------
+typedef _IdName = ({String id, String name});
+
+class _MultiSelectChipField extends StatelessWidget {
+  const _MultiSelectChipField({
+    required this.label,
+    required this.selected,
+    required this.items,
+    required this.onChanged,
+    required this.accentColor,
+    this.loading = false,
+  });
+
+  final String label;
+  final List<String> selected;
+  final List<_IdName> items;
+  final ValueChanged<List<String>> onChanged;
+  final Color accentColor;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(label, style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentColor, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: loading ? null : () => _showPicker(context),
+              icon: Icon(Icons.add, size: 14, color: accentColor),
+              label: Text('ADD', style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentColor)),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: sp4, vertical: 2), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            ),
+          ],
+        ),
+        const SizedBox(height: sp4),
+        if (selected.isEmpty)
+          Text('None selected', style: const TextStyle(fontFamily: fontBody, fontSize: 11, color: textMuted))
+        else
+          Wrap(
+            spacing: sp4,
+            runSpacing: sp4,
+            children: [
+              for (final id in selected)
+                Chip(
+                  label: Text(items.firstWhere((e) => e.id == id, orElse: () => (id: id, name: id)).name, style: const TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  backgroundColor: pageBg,
+                  side: BorderSide(color: accentColor.withAlpha(120)),
+                  deleteIcon: const Icon(Icons.close, size: 14),
+                  onDeleted: () => onChanged(selected.where((e) => e != id).toList()),
+                  padding: const EdgeInsets.symmetric(horizontal: sp4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context) async {
+    final current = List<String>.from(selected);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setS) {
+          return AlertDialog(
+            backgroundColor: cardBg,
+            title: Text(label, style: const TextStyle(fontFamily: fontBody, fontSize: 13, color: textPrimary)),
+            content: SizedBox(
+              width: 360,
+              child: items.isEmpty
+                  ? const Text('No items available.', style: TextStyle(fontFamily: fontBody, color: textMuted))
+                  : ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final item in items)
+                          CheckboxListTile(
+                            value: current.contains(item.id),
+                            title: Text(item.name, style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary)),
+                            activeColor: accentColor,
+                            dense: true,
+                            onChanged: (v) => setS(() { if (v == true) { current.add(item.id); } else { current.remove(item.id); } }),
+                          ),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('CANCEL', style: TextStyle(fontFamily: fontBody, color: textMuted))),
+              TextButton(
+                onPressed: () { onChanged(current); Navigator.of(ctx).pop(); },
+                child: Text('APPLY', style: TextStyle(fontFamily: fontBody, color: accentColor)),
+              ),
+            ],
+          );
+        });
+      },
     );
   }
 }

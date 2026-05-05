@@ -1207,6 +1207,44 @@ class _OverrideRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// _Skill model + fetch helper
+// ---------------------------------------------------------------------------
+class _Skill {
+  const _Skill({required this.id, required this.name});
+  final String id;
+  final String name;
+  factory _Skill.fromJson(Map<String, dynamic> j) => _Skill(
+    id: j['id']?.toString() ?? '', name: j['name']?.toString() ?? '');
+}
+
+Future<List<_Skill>> _fetchSkills(http.Client client) async {
+  final response = await client.get(AppLinks.apiUri('/skills'));
+  if (response.statusCode < 200 || response.statusCode >= 300) return [];
+  final decoded = jsonDecode(response.body);
+  if (decoded is! List) return [];
+  return decoded.whereType<Map<String, dynamic>>().map(_Skill.fromJson).toList();
+}
+
+// ---------------------------------------------------------------------------
+// _Guardrail model + fetch helper
+// ---------------------------------------------------------------------------
+class _Guardrail {
+  const _Guardrail({required this.id, required this.name});
+  final String id;
+  final String name;
+  factory _Guardrail.fromJson(Map<String, dynamic> j) => _Guardrail(
+    id: j['id']?.toString() ?? '', name: j['name']?.toString() ?? '');
+}
+
+Future<List<_Guardrail>> _fetchGuardrails(http.Client client) async {
+  final response = await client.get(AppLinks.apiUri('/guardrails'));
+  if (response.statusCode < 200 || response.statusCode >= 300) return [];
+  final decoded = jsonDecode(response.body);
+  if (decoded is! List) return [];
+  return decoded.whereType<Map<String, dynamic>>().map(_Guardrail.fromJson).toList();
+}
+
+// ---------------------------------------------------------------------------
 // Agent option model (lightweight, for dropdown in _WorkflowDialog)
 // ---------------------------------------------------------------------------
 
@@ -1246,10 +1284,50 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   late Future<List<_AgentOption>> _agentsFuture;
   String? _selectedAgentId;
 
+  // New fields
+  List<String> _selectedSkillIds = [];
+  List<String> _selectedGuardrailIds = [];
+  String _outputFormat = 'json';
+  bool _infiniteSession = true;
+  bool _bypassMemory = false;
+  bool _autoMemory = false;
+  String? _reasoningEffort;
+  final _skillTagsCtrl = TextEditingController();
+  final _guardrailTagsCtrl = TextEditingController();
+  final _repoUrlCtrl = TextEditingController();
+  final _repoBranchCtrl = TextEditingController();
+  final _repoTokenCtrl = TextEditingController();
+  late Future<List<_Skill>> _skillsFuture;
+  late Future<List<_Guardrail>> _wfGuardrailsFuture;
+
+  // Credential overrides (token → env-var mapping at create time)
+  final List<_CredOverride> _credOverrides = [];
+  List<_TokenRef> _credTokens = [];
+  List<String> _credEnvVarKeys = [];
+
   @override
   void initState() {
     super.initState();
     _agentsFuture = _fetchAgentOptions(widget.client);
+    _skillsFuture = _fetchSkills(widget.client);
+    _wfGuardrailsFuture = _fetchGuardrails(widget.client);
+    _loadCredentialData();
+  }
+
+  Future<void> _loadCredentialData() async {
+    try {
+      final results = await Future.wait([
+        _fetchTokens(widget.client),
+        _fetchEnvVarKeys(widget.client),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _credTokens = results[0] as List<_TokenRef>;
+        _credEnvVarKeys = results[1] as List<String>;
+      });
+    } catch (_) {
+      // Best-effort; overrides section will show empty dropdowns
+    }
   }
 
   Future<List<_AgentOption>> _fetchAgentOptions(http.Client client) async {
@@ -1265,6 +1343,11 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _titleCtrl.dispose();
     _modelCtrl.dispose();
     _maxTurnsCtrl.dispose();
+    _skillTagsCtrl.dispose();
+    _guardrailTagsCtrl.dispose();
+    _repoUrlCtrl.dispose();
+    _repoBranchCtrl.dispose();
+    _repoTokenCtrl.dispose();
     super.dispose();
   }
 
@@ -1280,16 +1363,33 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     }
     setState(() => _saving = true);
     try {
+      final body = <String, dynamic>{
+        'title': _titleCtrl.text.trim(),
+        'agent_id': _selectedAgentId!,
+        if (_modelCtrl.text.trim().isNotEmpty) 'model': _modelCtrl.text.trim(),
+        'max_turns': int.tryParse(_maxTurnsCtrl.text.trim()) ?? 10,
+        'credential_overrides': {
+          for (final o in _credOverrides) o.envVar: o.tokenName,
+        },
+        'skill_ids': _selectedSkillIds,
+        if (_skillTagsCtrl.text.trim().isNotEmpty)
+          'skill_tags': _skillTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
+        'guardrail_ids': _selectedGuardrailIds,
+        if (_guardrailTagsCtrl.text.trim().isNotEmpty)
+          'guardrail_tags': _guardrailTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
+        'output_format': _outputFormat,
+        'infinite_session': _infiniteSession,
+        'bypass_memory': _bypassMemory,
+        'auto_memory': _autoMemory,
+        if (_reasoningEffort != null) 'reasoning_effort': _reasoningEffort,
+        if (_repoUrlCtrl.text.trim().isNotEmpty) 'repo_url': _repoUrlCtrl.text.trim(),
+        if (_repoBranchCtrl.text.trim().isNotEmpty) 'repo_branch': _repoBranchCtrl.text.trim(),
+        if (_repoTokenCtrl.text.trim().isNotEmpty) 'repo_token_name': _repoTokenCtrl.text.trim(),
+      };
       final response = await widget.client.post(
         AppLinks.apiUri('/workflows'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'title': _titleCtrl.text.trim(),
-          'agent_id': _selectedAgentId!,
-          if (_modelCtrl.text.trim().isNotEmpty) 'model': _modelCtrl.text.trim(),
-          'max_turns': int.tryParse(_maxTurnsCtrl.text.trim()) ?? 10,
-          'credential_overrides': <String, String>{},
-        }),
+        body: jsonEncode(body),
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final decoded = jsonDecode(response.body);
@@ -1324,153 +1424,386 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
       child: Padding(
         padding: const EdgeInsets.all(sp24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480, minWidth: 320),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header ──────────────────────────────────────────────────
-              Row(
-                children: [
-                  const Icon(
-                    Icons.account_tree_outlined,
-                    color: accentLavender,
-                    size: 20,
-                  ),
-                  const SizedBox(width: sp8),
-                  const Expanded(
-                    child: Text(
-                      'NEW WORKFLOW',
+          constraints: const BoxConstraints(maxWidth: 520, minWidth: 320),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header ──────────────────────────────────────────────────
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.account_tree_outlined,
+                      color: accentLavender,
+                      size: 20,
+                    ),
+                    const SizedBox(width: sp8),
+                    const Expanded(
+                      child: Text(
+                        'NEW WORKFLOW',
+                        style: TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: 13,
+                          color: accentLavender,
+                          letterSpacing: 1.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: textMuted, size: 18),
+                      onPressed: () => Navigator.of(context).pop(),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: sp16),
+                _WfDialogField(
+                  label: 'TITLE',
+                  controller: _titleCtrl,
+                  hint: 'My workflow',
+                ),
+                const SizedBox(height: sp12),
+                // Agent dropdown ──────────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'AGENT *',
                       style: TextStyle(
                         fontFamily: fontBody,
-                        fontSize: 13,
+                        fontSize: 10,
                         color: accentLavender,
-                        letterSpacing: 1.5,
+                        letterSpacing: 1.2,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: textMuted, size: 18),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: sp16),
-              _WfDialogField(
-                label: 'TITLE',
-                controller: _titleCtrl,
-                hint: 'My workflow',
-              ),
-              const SizedBox(height: sp12),
-              // Agent dropdown ──────────────────────────────────────────
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'AGENT *',
-                    style: TextStyle(
-                      fontFamily: fontBody,
-                      fontSize: 10,
-                      color: accentLavender,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: sp4),
-                  FutureBuilder<List<_AgentOption>>(
-                    future: _agentsFuture,
-                    builder: (context, snap) {
-                      final agents = snap.data ?? [];
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: sp12,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: pageBg,
-                          border: Border.all(
-                            color: accentLavender.withAlpha(80),
+                    const SizedBox(height: sp4),
+                    FutureBuilder<List<_AgentOption>>(
+                      future: _agentsFuture,
+                      builder: (context, snap) {
+                        final agents = snap.data ?? [];
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: sp12,
+                            vertical: 2,
                           ),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                        child: DropdownButton<String?>(
-                          value: _selectedAgentId,
-                          isExpanded: true,
-                          underline: const SizedBox(),
-                          dropdownColor: cardBg,
-                          style: const TextStyle(
-                            fontFamily: fontBody,
-                            fontSize: 12,
-                            color: textPrimary,
+                          decoration: BoxDecoration(
+                            color: pageBg,
+                            border: Border.all(
+                              color: accentLavender.withAlpha(80),
+                            ),
+                            borderRadius: BorderRadius.circular(2),
                           ),
-                          hint: Text(
-                            snap.connectionState == ConnectionState.waiting
-                                ? 'Loading agents…'
-                                : 'Select an agent',
+                          child: DropdownButton<String?>(
+                            value: _selectedAgentId,
+                            isExpanded: true,
+                            underline: const SizedBox(),
+                            dropdownColor: cardBg,
                             style: const TextStyle(
                               fontFamily: fontBody,
                               fontSize: 12,
-                              color: textMuted,
+                              color: textPrimary,
+                            ),
+                            hint: Text(
+                              snap.connectionState == ConnectionState.waiting
+                                  ? 'Loading agents…'
+                                  : 'Select an agent',
+                              style: const TextStyle(
+                                fontFamily: fontBody,
+                                fontSize: 12,
+                                color: textMuted,
+                              ),
+                            ),
+                            items: [
+                              for (final a in agents)
+                                DropdownMenuItem<String?>(
+                                  value: a.id,
+                                  child: Text(
+                                    a.name,
+                                    style: const TextStyle(
+                                      fontFamily: fontBody,
+                                      fontSize: 12,
+                                      color: textPrimary,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => _selectedAgentId = v),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'MODEL',
+                  controller: _modelCtrl,
+                  hint: 'gpt-4o (optional)',
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'MAX TURNS',
+                  controller: _maxTurnsCtrl,
+                  hint: '10',
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: sp12),
+                // SKILLS ───────────────────────────────────────────────
+                FutureBuilder<List<_Skill>>(
+                  future: _skillsFuture,
+                  builder: (context, snap) {
+                    final items = (snap.data ?? []).map((s) => (id: s.id, name: s.name)).toList();
+                    return _MultiSelectChipField(
+                      label: 'SKILLS',
+                      selected: _selectedSkillIds,
+                      items: items,
+                      accentColor: accentTeal,
+                      loading: snap.connectionState == ConnectionState.waiting,
+                      onChanged: (v) => setState(() => _selectedSkillIds = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: sp12),
+                // SKILL TAGS ───────────────────────────────────────────
+                _WfDialogField(
+                  label: 'SKILL TAGS (comma-separated)',
+                  controller: _skillTagsCtrl,
+                  hint: 'tag1, tag2',
+                ),
+                const SizedBox(height: sp12),
+                // GUARDRAILS ───────────────────────────────────────────
+                FutureBuilder<List<_Guardrail>>(
+                  future: _wfGuardrailsFuture,
+                  builder: (context, snap) {
+                    final items = (snap.data ?? []).map((g) => (id: g.id, name: g.name)).toList();
+                    return _MultiSelectChipField(
+                      label: 'GUARDRAILS',
+                      selected: _selectedGuardrailIds,
+                      items: items,
+                      accentColor: accentSlate,
+                      loading: snap.connectionState == ConnectionState.waiting,
+                      onChanged: (v) => setState(() => _selectedGuardrailIds = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: sp12),
+                // GUARDRAIL TAGS ───────────────────────────────────────
+                _WfDialogField(
+                  label: 'GUARDRAIL TAGS (comma-separated)',
+                  controller: _guardrailTagsCtrl,
+                  hint: 'tag1, tag2',
+                ),
+                const SizedBox(height: sp12),
+                // OUTPUT FORMAT ────────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('OUTPUT FORMAT', style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentLavender, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: sp4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: sp12, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: pageBg,
+                        border: Border.all(color: accentLavender.withAlpha(80)),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: DropdownButton<String>(
+                        value: _outputFormat,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        dropdownColor: cardBg,
+                        style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary),
+                        items: const [
+                          DropdownMenuItem(value: 'json', child: Text('json', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary))),
+                          DropdownMenuItem(value: 'markdown', child: Text('markdown', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary))),
+                        ],
+                        onChanged: (v) => setState(() => _outputFormat = v ?? 'json'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: sp12),
+                // REASONING EFFORT ────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('REASONING EFFORT', style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentLavender, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: sp4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: sp12, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: pageBg,
+                        border: Border.all(color: accentLavender.withAlpha(80)),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: DropdownButton<String?>(
+                        value: _reasoningEffort,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        dropdownColor: cardBg,
+                        style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary),
+                        hint: const Text('None (default)', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textMuted)),
+                        items: const [
+                          DropdownMenuItem<String?>(value: null, child: Text('None (default)', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textMuted))),
+                          DropdownMenuItem(value: 'low', child: Text('low', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary))),
+                          DropdownMenuItem(value: 'medium', child: Text('medium', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary))),
+                          DropdownMenuItem(value: 'high', child: Text('high', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary))),
+                        ],
+                        onChanged: (v) => setState(() => _reasoningEffort = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: sp8),
+                // TOGGLES ──────────────────────────────────────────────
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('INFINITE SESSION', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  value: _infiniteSession,
+                  activeThumbColor: accentLavender,
+                  onChanged: (v) => setState(() => _infiniteSession = v),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('BYPASS MEMORY', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  value: _bypassMemory,
+                  activeThumbColor: accentLavender,
+                  onChanged: (v) => setState(() => _bypassMemory = v),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('AUTO MEMORY', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  value: _autoMemory,
+                  activeThumbColor: accentLavender,
+                  onChanged: (v) => setState(() => _autoMemory = v),
+                ),
+                const SizedBox(height: sp12),
+                const SizedBox(height: sp12),
+                // CREDENTIAL OVERRIDES ────────────────────────────────────
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'CREDENTIAL OVERRIDES',
+                          style: TextStyle(
+                            fontFamily: fontBody,
+                            fontSize: 10,
+                            color: accentAmber,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: (_credEnvVarKeys.isEmpty || _credTokens.isEmpty)
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _credOverrides.add(_CredOverride(
+                                      envVar: _credEnvVarKeys.first,
+                                      tokenName: _credTokens.first.name,
+                                    ));
+                                  });
+                                },
+                          icon: const Icon(Icons.add, size: 14, color: accentAmber),
+                          label: const Text(
+                            'ADD',
+                            style: TextStyle(
+                              fontFamily: fontBody,
+                              fontSize: 10,
+                              color: accentAmber,
                             ),
                           ),
-                          items: [
-                            for (final a in agents)
-                              DropdownMenuItem<String?>(
-                                value: a.id,
-                                child: Text(
-                                  a.name,
-                                  style: const TextStyle(
-                                    fontFamily: fontBody,
-                                    fontSize: 12,
-                                    color: textPrimary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          onChanged: (v) =>
-                              setState(() => _selectedAgentId = v),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: sp4,
+                              vertical: 2,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
                         ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: sp12),
-              _WfDialogField(
-                label: 'MODEL',
-                controller: _modelCtrl,
-                hint: 'gpt-4o (optional)',
-              ),
-              const SizedBox(height: sp12),
-              _WfDialogField(
-                label: 'MAX TURNS',
-                controller: _maxTurnsCtrl,
-                hint: '10',
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: sp24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  RetroButton(
-                    label: 'CANCEL',
-                    onPressed: () => Navigator.of(context).pop(),
-                    color: accentSlate,
-                  ),
-                  const SizedBox(width: sp8),
-                  RetroButton(
-                    label: _saving ? 'SAVING…' : 'CREATE',
-                    onPressed: _saving ? null : _save,
-                    color: accentLavender,
-                    icon: _saving ? null : Icons.check,
-                  ),
-                ],
-              ),
-            ],
+                      ],
+                    ),
+                    const SizedBox(height: sp4),
+                    if (_credOverrides.isEmpty)
+                      Text(
+                        _credEnvVarKeys.isEmpty
+                            ? 'No custom tool credentials found.'
+                            : 'None — plugin uses default env vars.',
+                        style: const TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: 11,
+                          color: textMuted,
+                        ),
+                      )
+                    else
+                      ...List.generate(_credOverrides.length, (i) {
+                        final override = _credOverrides[i];
+                        return _OverrideRow(
+                          credOverride: override,
+                          envVarKeys: _credEnvVarKeys,
+                          tokens: _credTokens,
+                          onEnvVarChanged: (val) {
+                            if (val != null) setState(() => override.envVar = val);
+                          },
+                          onTokenChanged: (val) {
+                            if (val != null) setState(() => override.tokenName = val);
+                          },
+                          onRemove: () => setState(() => _credOverrides.removeAt(i)),
+                        );
+                      }),
+                  ],
+                ),
+                // REPO ─────────────────────────────────────────────────
+                _WfDialogField(
+                  label: 'REPO URL (optional)',
+                  controller: _repoUrlCtrl,
+                  hint: 'https://github.com/org/repo',
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'REPO BRANCH (optional)',
+                  controller: _repoBranchCtrl,
+                  hint: 'main',
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'REPO TOKEN NAME (optional)',
+                  controller: _repoTokenCtrl,
+                  hint: 'GITHUB_TOKEN',
+                ),
+                const SizedBox(height: sp24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    RetroButton(
+                      label: 'CANCEL',
+                      onPressed: () => Navigator.of(context).pop(),
+                      color: accentSlate,
+                    ),
+                    const SizedBox(width: sp8),
+                    RetroButton(
+                      label: _saving ? 'SAVING…' : 'CREATE',
+                      onPressed: _saving ? null : _save,
+                      color: accentLavender,
+                      icon: _saving ? null : Icons.check,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1536,6 +1869,110 @@ class _WfDialogField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _MultiSelectChipField — reusable chip-based multi-select input
+// ---------------------------------------------------------------------------
+typedef _IdName = ({String id, String name});
+
+class _MultiSelectChipField extends StatelessWidget {
+  const _MultiSelectChipField({
+    required this.label,
+    required this.selected,
+    required this.items,
+    required this.onChanged,
+    required this.accentColor,
+    this.loading = false,
+  });
+
+  final String label;
+  final List<String> selected;
+  final List<_IdName> items;
+  final ValueChanged<List<String>> onChanged;
+  final Color accentColor;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(label, style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentColor, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: loading ? null : () => _showPicker(context),
+              icon: Icon(Icons.add, size: 14, color: accentColor),
+              label: Text('ADD', style: TextStyle(fontFamily: fontBody, fontSize: 10, color: accentColor)),
+              style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: sp4, vertical: 2), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            ),
+          ],
+        ),
+        const SizedBox(height: sp4),
+        if (selected.isEmpty)
+          Text('None selected', style: const TextStyle(fontFamily: fontBody, fontSize: 11, color: textMuted))
+        else
+          Wrap(
+            spacing: sp4,
+            runSpacing: sp4,
+            children: [
+              for (final id in selected)
+                Chip(
+                  label: Text(items.firstWhere((e) => e.id == id, orElse: () => (id: id, name: id)).name, style: const TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  backgroundColor: pageBg,
+                  side: BorderSide(color: accentColor.withAlpha(120)),
+                  deleteIcon: const Icon(Icons.close, size: 14),
+                  onDeleted: () => onChanged(selected.where((e) => e != id).toList()),
+                  padding: const EdgeInsets.symmetric(horizontal: sp4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context) async {
+    final current = List<String>.from(selected);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setS) {
+          return AlertDialog(
+            backgroundColor: cardBg,
+            title: Text(label, style: const TextStyle(fontFamily: fontBody, fontSize: 13, color: textPrimary)),
+            content: SizedBox(
+              width: 360,
+              child: items.isEmpty
+                  ? const Text('No items available.', style: TextStyle(fontFamily: fontBody, color: textMuted))
+                  : ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final item in items)
+                          CheckboxListTile(
+                            value: current.contains(item.id),
+                            title: Text(item.name, style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary)),
+                            activeColor: accentColor,
+                            dense: true,
+                            onChanged: (v) => setS(() { if (v == true) { current.add(item.id); } else { current.remove(item.id); } }),
+                          ),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('CANCEL', style: TextStyle(fontFamily: fontBody, color: textMuted))),
+              TextButton(
+                onPressed: () { onChanged(current); Navigator.of(ctx).pop(); },
+                child: Text('APPLY', style: TextStyle(fontFamily: fontBody, color: accentColor)),
+              ),
+            ],
+          );
+        });
+      },
     );
   }
 }
