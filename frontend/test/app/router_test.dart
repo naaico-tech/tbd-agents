@@ -26,6 +26,7 @@ Future<DashboardSnapshot> _dashboardSnapshot() async {
         createdAt: null,
       ),
     ],
+    recentTasks: [],
   );
 }
 

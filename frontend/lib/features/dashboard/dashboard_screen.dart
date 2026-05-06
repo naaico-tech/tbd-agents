@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   http.Client? _ownedClient;
   late Future<DashboardSnapshot> _snapshotFuture;
+  Timer? _autoRefreshTimer;
 
   http.Client get _client => _ownedClient ??= http.Client();
 
@@ -26,10 +28,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _snapshotFuture = widget.snapshotFuture ?? fetchDashboardSnapshot(_client);
+    if (widget.snapshotFuture == null) {
+      _autoRefreshTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => _reload(),
+      );
+    }
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _ownedClient?.close();
     super.dispose();
   }
@@ -81,6 +90,7 @@ class DashboardSnapshot {
     required this.scheduledAgentsCount,
     required this.taskExecutionsCount,
     required this.recentWorkflows,
+    required this.recentTasks,
   });
 
   final int agentsCount;
@@ -93,6 +103,23 @@ class DashboardSnapshot {
   final int scheduledAgentsCount;
   final int taskExecutionsCount;
   final List<WorkflowSummary> recentWorkflows;
+  final List<TaskExecutionSummary> recentTasks;
+}
+
+class TaskExecutionSummary {
+  const TaskExecutionSummary({
+    required this.id,
+    required this.workflowTitle,
+    required this.status,
+    required this.model,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String workflowTitle;
+  final String status;
+  final String model;
+  final DateTime? createdAt;
 }
 
 class WorkflowSummary {
@@ -148,10 +175,30 @@ Future<DashboardSnapshot> fetchDashboardSnapshot(http.Client client) async {
         item['id'] as String: item['name'] as String,
   };
 
+  final workflowTitles = <String, String>{
+    for (final item in workflows)
+      if (item is Map<String, dynamic> && item['id'] is String)
+        item['id'] as String:
+            (item['title']?.toString().trim().isNotEmpty ?? false)
+                ? item['title'].toString().trim()
+                : item['id'].toString().substring(0, 8),
+  };
+
   final recentWorkflows =
       workflows
           .whereType<Map<String, dynamic>>()
           .map((workflow) => _toWorkflowSummary(workflow, agentNames))
+          .toList()
+        ..sort((a, b) {
+          final left = a.createdAt?.millisecondsSinceEpoch ?? 0;
+          final right = b.createdAt?.millisecondsSinceEpoch ?? 0;
+          return right.compareTo(left);
+        });
+
+  final recentTasks =
+      tasks
+          .whereType<Map<String, dynamic>>()
+          .map((t) => _toTaskSummary(t, workflowTitles))
           .toList()
         ..sort((a, b) {
           final left = a.createdAt?.millisecondsSinceEpoch ?? 0;
@@ -170,6 +217,7 @@ Future<DashboardSnapshot> fetchDashboardSnapshot(http.Client client) async {
     scheduledAgentsCount: scheduledAgents.length,
     taskExecutionsCount: tasks.length,
     recentWorkflows: recentWorkflows.take(5).toList(),
+    recentTasks: recentTasks.take(10).toList(),
   );
 }
 
@@ -225,6 +273,23 @@ int _toInt(Object? value) {
     return value.toInt();
   }
   return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+TaskExecutionSummary _toTaskSummary(
+  Map<String, dynamic> task,
+  Map<String, String> workflowTitles,
+) {
+  final id = task['id']?.toString() ?? 'unknown';
+  final workflowId = task['workflow_id']?.toString();
+  return TaskExecutionSummary(
+    id: id,
+    workflowTitle: workflowId == null
+        ? '—'
+        : (workflowTitles[workflowId] ?? workflowId.substring(0, 8)),
+    status: task['status']?.toString() ?? 'unknown',
+    model: task['model']?.toString() ?? '—',
+    createdAt: DateTime.tryParse(task['created_at']?.toString() ?? ''),
+  );
 }
 
 class _DashboardHeader extends StatelessWidget {
@@ -417,6 +482,13 @@ class _DashboardContent extends StatelessWidget {
           accentColor: accentSlate,
           minHeight: 220,
           child: _RecentWorkflowsTable(workflows: snapshot.recentWorkflows),
+        ),
+        const SizedBox(height: sp24),
+        SectionFrame(
+          title: 'Recent Task Executions',
+          accentColor: accentLavender,
+          minHeight: 220,
+          child: _RecentTasksTable(tasks: snapshot.recentTasks),
         ),
       ],
     );
@@ -713,5 +785,166 @@ class _RecentWorkflowsTable extends StatelessWidget {
       'Dec',
     ];
     return months[month - 1];
+  }
+}
+
+// ── Recent Task Executions Table ─────────────────────────────────────────────
+
+class _RecentTasksTable extends StatelessWidget {
+  const _RecentTasksTable({required this.tasks});
+
+  final List<TaskExecutionSummary> tasks;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tasks.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(sp16),
+        child: Text(
+          'No task executions yet. Run a task to see results here.',
+          style: TextStyle(
+            fontFamily: fontBody,
+            fontSize: 16,
+            color: textMuted,
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 800),
+        child: Table(
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          columnWidths: const {
+            0: FlexColumnWidth(1.6),
+            1: FlexColumnWidth(2.0),
+            2: FlexColumnWidth(1.2),
+            3: FlexColumnWidth(1.4),
+            4: FlexColumnWidth(1.2),
+          },
+          children: [
+            _headerRow(),
+            for (final task in tasks) _taskRow(task),
+          ],
+        ),
+      ),
+    );
+  }
+
+  TableRow _headerRow() {
+    const headerStyle = TextStyle(
+      fontFamily: fontDisplay,
+      fontSize: 8,
+      color: textMuted,
+      letterSpacing: 0.6,
+    );
+    return TableRow(
+      children: [
+        _cell('TASK ID', style: headerStyle, isHeader: true),
+        _cell('WORKFLOW', style: headerStyle, isHeader: true),
+        _cell('STATUS', style: headerStyle, isHeader: true),
+        _cell('MODEL', style: headerStyle, isHeader: true),
+        _cell('CREATED', style: headerStyle, isHeader: true),
+      ],
+    );
+  }
+
+  TableRow _taskRow(TaskExecutionSummary task) {
+    final shortId = task.id.length > 8 ? task.id.substring(0, 8) : task.id;
+    return TableRow(
+      children: [
+        _cell(
+          shortId,
+          style: const TextStyle(
+            fontFamily: fontBody,
+            fontSize: 14,
+            color: accentTeal,
+          ),
+        ),
+        _cell(
+          task.workflowTitle,
+          style: const TextStyle(
+            fontFamily: fontBody,
+            fontSize: 16,
+            color: textPrimary,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: sp12, vertical: sp16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: RetroChip(
+              label: task.status,
+              color: _statusColor(task.status),
+              textColor: cardBg,
+            ),
+          ),
+        ),
+        _cell(
+          task.model,
+          style: const TextStyle(
+            fontFamily: fontBody,
+            fontSize: 16,
+            color: textPrimary,
+          ),
+        ),
+        _cell(
+          _formatDate(task.createdAt),
+          style: const TextStyle(
+            fontFamily: fontBody,
+            fontSize: 16,
+            color: textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _cell(String text, {required TextStyle style, bool isHeader = false}) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: isHeader ? borderColor : borderColor.withAlpha(90),
+            width: 1,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: sp12, vertical: sp16),
+      child: Text(text, style: style),
+    );
+  }
+
+  Color _statusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+        return accentTeal;
+      case 'running':
+        return accentAmber;
+      case 'failed':
+        return accentPrimary;
+      case 'pending':
+        return accentSlate;
+      case 'halted':
+      case 'max_turns_reached':
+        return accentLavender;
+      default:
+        return accentSlate;
+    }
+  }
+
+  String _formatDate(DateTime? value) {
+    if (value == null) return '—';
+    final day = value.day.toString().padLeft(2, '0');
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final month = months[value.month - 1];
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$day $month, $hour:$minute';
   }
 }
