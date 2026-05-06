@@ -10,6 +10,7 @@ class ProviderCreate(BaseModel):
     provider_type: ProviderType
     api_key_token_name: str
     base_url: str | None = None
+    auth_type: str = "x-api-key"
     azure_api_version: str = "2024-12-01-preview"
     azure_deployment: str | None = None
     description: str = ""
@@ -20,6 +21,7 @@ class ProviderUpdate(BaseModel):
     provider_type: ProviderType | None = None
     api_key_token_name: str | None = None
     base_url: str | None = None
+    auth_type: str | None = None
     azure_api_version: str | None = None
     azure_deployment: str | None = None
     description: str | None = None
@@ -31,6 +33,7 @@ class ProviderResponse(BaseModel):
     provider_type: ProviderType
     api_key_token_name: str
     base_url: str | None
+    auth_type: str = "x-api-key"
     azure_api_version: str = "2024-12-01-preview"
     azure_deployment: str | None = None
     description: str

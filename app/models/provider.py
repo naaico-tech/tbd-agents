@@ -45,6 +45,10 @@ class Provider(Document):
     provider_type: ProviderType
     api_key_token_name: str  # name of a Token document in the token store
     base_url: str | None = None  # required for azure_openai and custom types
+    # Auth header style used when base_url is set for the anthropic provider type.
+    # "x-api-key" (default) — direct Anthropic API key header.
+    # "bearer"              — Authorization: Bearer <key> for OpenRouter/LiteLLM.
+    auth_type: str = "x-api-key"
     azure_api_version: str = "2024-12-01-preview"  # Azure OpenAI API version
     azure_deployment: str | None = None  # Azure deployment name (defaults to workflow model)
     description: str = ""

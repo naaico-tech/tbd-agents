@@ -5,21 +5,19 @@ The client provides access to the Claude Agent SDK beta APIs (environments,
 agents, sessions) which handle the full agentic loop server-side — analogous
 to how ``copilot_client.py`` builds a ``CopilotClient``.
 
-Third-party gateway compatibility
-----------------------------------
-Anthropic's own API authenticates via ``x-api-key`` (``api_key`` param).
-Gateways like OpenRouter use ``Authorization: Bearer`` (``auth_token`` param).
-When *base_url* is set to a non-Anthropic URL, this module automatically
-switches to Bearer-token auth so the request is accepted by the gateway.
+Auth header types
+-----------------
+``x-api-key`` (default)
+    Standard Anthropic direct authentication — sends the API key in the
+    ``x-api-key`` request header.  Use when calling ``api.anthropic.com``
+    directly.
 
-OpenRouter example::
-
-    provider.base_url = "https://openrouter.ai/api"
-    provider.api_key  = "<your-openrouter-key>"
-
-OpenRouter will then route the Agent SDK calls to whichever Claude model is
-specified by the workflow (using ``ANTHROPIC_DEFAULT_SONNET_MODEL`` /
-``ANTHROPIC_DEFAULT_OPUS_MODEL`` env overrides if needed).
+``bearer``
+    Sends the API key as ``Authorization: Bearer <key>``.  Required for
+    third-party gateways such as OpenRouter (``https://openrouter.ai/api``)
+    and most LiteLLM deployments that forward to OpenRouter or other
+    providers.  The SDK's ``api_key`` field is set to an empty string so
+    the ``x-api-key`` header is not also emitted.
 """
 
 import logging
@@ -28,44 +26,39 @@ from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
-_ANTHROPIC_DOMAIN = "anthropic.com"
 
+def build_claude_client(
+    api_key: str,
+    base_url: str | None = None,
+    auth_type: str = "x-api-key",
+) -> AsyncAnthropic:
+    """Create an AsyncAnthropic client for the Claude Agent SDK.
 
-def build_claude_client(api_key: str, base_url: str | None = None) -> AsyncAnthropic:
-    """Create an AsyncAnthropic client authenticated with the given API key.
-
-    When *base_url* is provided the client routes all requests through that
-    URL, enabling third-party gateways (OpenRouter, LiteLLM, …) to be used in
-    place of the default ``https://api.anthropic.com`` endpoint.
-
-    Auth-header selection:
-
-    * **Direct Anthropic** (no *base_url*, or *base_url* contains
-      ``anthropic.com``): sends ``x-api-key: <api_key>``.
-    * **Third-party gateway** (*base_url* set to a non-Anthropic host):
-      sends ``Authorization: Bearer <api_key>`` and clears ``api_key`` so the
-      SDK does not also send the ``x-api-key`` header (which gateways reject).
+    Args:
+        api_key:   The API key (or token) used to authenticate.
+        base_url:  Optional override for the API root URL.  When set,
+                   all SDK requests are routed through this URL instead
+                   of the default ``https://api.anthropic.com``.
+        auth_type: ``"x-api-key"`` (default) or ``"bearer"``.  Controls
+                   which HTTP auth header carries *api_key*.
 
     The returned client exposes the Claude Agent SDK via ``client.beta``::
 
         client = build_claude_client(api_key)
-        env = await client.beta.environments.create(name="my-env")
-        agent = await client.beta.agents.create(model="claude-sonnet-4-6", name="my-agent")
+        env    = await client.beta.environments.create(name="my-env")
+        agent  = await client.beta.agents.create(model="claude-sonnet-4-6", name="a")
         session = await client.beta.sessions.create(
             environment_id=env.id,
             agent={"type": "agent", "id": agent.id, "version": agent.version},
         )
     """
-    is_anthropic_direct = not base_url or _ANTHROPIC_DOMAIN in base_url
-
-    if is_anthropic_direct:
-        kwargs: dict = {"api_key": api_key}
+    if auth_type == "bearer":
+        # Gateways like OpenRouter authenticate via Authorization: Bearer.
+        # Clear api_key so the SDK does not also emit the x-api-key header.
+        kwargs: dict = {"auth_token": api_key, "api_key": ""}
+        logger.debug("Claude client: using Bearer auth (base_url=%s)", base_url)
     else:
-        # Third-party gateways (OpenRouter, LiteLLM, …) authenticate via
-        # Authorization: Bearer, not x-api-key.  Set api_key="" to prevent
-        # the SDK from emitting both headers simultaneously.
-        kwargs = {"auth_token": api_key, "api_key": ""}
-        logger.debug("Claude client: using Bearer auth for third-party gateway %s", base_url)
+        kwargs = {"api_key": api_key}
 
     if base_url:
         kwargs["base_url"] = base_url

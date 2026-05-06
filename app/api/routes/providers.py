@@ -17,6 +17,7 @@ def _to_response(provider: Provider) -> ProviderResponse:
         provider_type=provider.provider_type,
         api_key_token_name=provider.api_key_token_name,
         base_url=provider.base_url,
+        auth_type=provider.auth_type,
         azure_api_version=provider.azure_api_version,
         azure_deployment=provider.azure_deployment,
         description=provider.description,

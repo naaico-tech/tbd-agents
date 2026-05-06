@@ -1590,6 +1590,7 @@ async def _run_with_claude_sdk(
     task_exec: TaskExecution | None,
     *,
     base_url: str | None = None,
+    auth_type: str = "x-api-key",
     repo_path: str | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
@@ -1637,7 +1638,7 @@ async def _run_with_claude_sdk(
     claude_session_id: str | None = None
 
     try:
-        client = build_claude_client(api_key, base_url=base_url)
+        client = build_claude_client(api_key, base_url=base_url, auth_type=auth_type)
 
         # ── Discover local (stdio) MCP tools ─────────────────────────────────
         custom_tools: list[dict] = []
@@ -2811,7 +2812,8 @@ async def run_agent(
                 await _log(
                     workflow,
                     "provider_base_url",
-                    f"Routing Claude Agent SDK through custom base_url: {sdk_base_url}",
+                    f"Routing Claude Agent SDK through custom base_url: {sdk_base_url} "
+                    f"(auth_type={custom_provider.auth_type})",
                     task_exec,
                 )
             return await _run_with_claude_sdk(
@@ -2823,6 +2825,7 @@ async def run_agent(
                 custom_provider_key,
                 task_exec,
                 base_url=sdk_base_url,
+                auth_type=custom_provider.auth_type,
                 repo_path=repo_path,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,

@@ -471,6 +471,7 @@ class _Provider {
     required this.providerType,
     required this.apiKeyTokenName,
     this.baseUrl,
+    this.authType = 'x-api-key',
     this.description = '',
   });
 
@@ -479,6 +480,7 @@ class _Provider {
   final String providerType;
   final String apiKeyTokenName;
   final String? baseUrl;
+  final String authType;
   final String description;
 
   factory _Provider.fromJson(Map<String, dynamic> j) => _Provider(
@@ -487,6 +489,7 @@ class _Provider {
     providerType: j['provider_type']?.toString() ?? '',
     apiKeyTokenName: j['api_key_token_name']?.toString() ?? '',
     baseUrl: j['base_url']?.toString(),
+    authType: j['auth_type']?.toString() ?? 'x-api-key',
     description: j['description']?.toString() ?? '',
   );
 }
@@ -4781,6 +4784,7 @@ class _ProviderDialogState extends State<_ProviderDialog> {
   late final TextEditingController _baseUrlCtrl;
   late final TextEditingController _descCtrl;
   late String _providerType;
+  late String _authType;
   bool _saving = false;
 
   @override
@@ -4799,6 +4803,7 @@ class _ProviderDialogState extends State<_ProviderDialog> {
     final stored = widget.provider?.providerType ?? _kProviderTypes.first;
     _providerType =
         _kProviderTypes.contains(stored) ? stored : _kProviderTypes.first;
+    _authType = widget.provider?.authType ?? 'x-api-key';
   }
 
   @override
@@ -4837,6 +4842,7 @@ class _ProviderDialogState extends State<_ProviderDialog> {
         'api_key_token_name': _apiKeyTokenNameCtrl.text.trim(),
         if (_baseUrlCtrl.text.trim().isNotEmpty)
           'base_url': _baseUrlCtrl.text.trim(),
+        if (_providerType == 'anthropic') 'auth_type': _authType,
         'description': _descCtrl.text.trim(),
       };
       final http.Response response;
@@ -5021,18 +5027,84 @@ class _ProviderDialogState extends State<_ProviderDialog> {
                   hint: 'https://api.openai.com/v1',
                 ),
                 if (_providerType == 'anthropic') ...[
-                  const SizedBox(height: sp4),
-                  const Text(
-                    'Uses the Anthropic Claude Agent SDK. Leave blank to call Anthropic '
-                    'directly (x-api-key auth).\n'
-                    'OpenRouter: set base_url to https://openrouter.ai/api and enter '
-                    'your OpenRouter API key — Bearer auth is used automatically.\n'
-                    'LiteLLM: set base_url to your proxy root (e.g. http://localhost:4000).',
-                    style: TextStyle(
-                      fontFamily: fontBody,
-                      fontSize: 9,
-                      color: textMuted,
-                    ),
+                  const SizedBox(height: sp12),
+                  // ── Auth type (anthropic only) ──────────────────────────
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'AUTH TYPE',
+                        style: TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: 9,
+                          color: textMuted,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(height: sp4),
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: accentSlate),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: sp8,
+                          vertical: 2,
+                        ),
+                        child: DropdownButton<String>(
+                          value: _authType,
+                          isExpanded: true,
+                          underline: const SizedBox(),
+                          dropdownColor: cardBg,
+                          style: const TextStyle(
+                            fontFamily: fontBody,
+                            fontSize: 11,
+                            color: textPrimary,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'x-api-key',
+                              child: Text(
+                                'x-api-key  (Anthropic direct)',
+                                style: TextStyle(
+                                  fontFamily: fontBody,
+                                  fontSize: 11,
+                                  color: textPrimary,
+                                ),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'bearer',
+                              child: Text(
+                                'Bearer  (OpenRouter / proxy)',
+                                style: TextStyle(
+                                  fontFamily: fontBody,
+                                  fontSize: 11,
+                                  color: textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) setState(() => _authType = val);
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: sp4),
+                      Text(
+                        _authType == 'bearer'
+                            ? 'Bearer: Authorization: Bearer <key>. '
+                                'Use with OpenRouter (base_url: https://openrouter.ai/api) '
+                                'or LiteLLM proxies.'
+                            : 'x-api-key: default Anthropic auth header. '
+                                'Leave base_url blank to use api.anthropic.com directly.',
+                        style: const TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: 9,
+                          color: textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
                 const SizedBox(height: sp12),
