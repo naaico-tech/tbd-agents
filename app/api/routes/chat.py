@@ -309,8 +309,8 @@ async def start_chat_session(
     existing = await Workflow.find_one(
         Workflow.github_user == github_user,
         Workflow.agent_id == str(agent.id),
-        Workflow.title == chat_title,
         Workflow.status == WorkflowStatus.ACTIVE,
+        Workflow.infinite_session == True,  # noqa: E712 – beanie query, not Python bool
     )
 
     if existing:

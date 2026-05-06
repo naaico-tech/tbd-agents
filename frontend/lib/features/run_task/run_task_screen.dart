@@ -224,8 +224,8 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
                   .whereType<Map<String, dynamic>>()
                   .map(
                     (l) => {
-                      'type': l['event_type']?.toString() ?? 'log',
-                      'msg': l['message']?.toString() ?? '',
+                      'type': l['event']?.toString() ?? 'log',
+                      'msg': l['detail']?.toString() ?? '',
                     },
                   )
                   .toList(),
@@ -233,7 +233,8 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
         }
       });
       // Stop polling when task is terminal
-      if (status == 'completed' || status == 'failed') {
+      if (status == 'completed' || status == 'failed' ||
+          status == 'halted' || status == 'max_turns_reached') {
         _pollTimer?.cancel();
         _pollTimer = null;
         if (mounted) setState(() => _isRunning = false);

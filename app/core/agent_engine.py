@@ -24,6 +24,7 @@ import re
 import sys
 from io import StringIO
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 # Compatibility: UTC alias for Python 3.9-3.10 support
 UTC = timezone.utc
@@ -115,12 +116,14 @@ async def _fire_webhook(
     payload: dict,
 ) -> None:
     """Fire-and-forget POST to webhook_url. Errors are logged, not raised."""
+    parsed = urlparse(webhook_url)
+    safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(webhook_url, json=payload, headers={"Content-Type": "application/json"})
-            logger.info("Webhook %s → %d", webhook_url, resp.status_code)
+            logger.info("Webhook %s → %d", safe_url, resp.status_code)
     except Exception as exc:
-        logger.warning("Webhook delivery failed for %s: %s", webhook_url, exc)
+        logger.warning("Webhook delivery failed for %s: %s", safe_url, exc)
 
 
 async def _log(
@@ -1987,7 +1990,7 @@ async def _run_with_claude_sdk(
 
         # Fire webhook if configured
         if task_exec and workflow.webhook_url:
-            asyncio.create_task(_fire_webhook(
+            await _fire_webhook(
                 workflow.webhook_url,
                 {
                     "task_id": str(task_exec.id),
@@ -1999,7 +2002,7 @@ async def _run_with_claude_sdk(
                     "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
                     "timestamp": datetime.now(UTC).isoformat(),
                 },
-            ))
+            )
     except Exception as exc:
         logger.exception("Claude SDK agent task failed: %s", exc)
         await _publish_status(workflow, "failed")
@@ -2434,7 +2437,7 @@ async def _run_with_custom_provider(
 
         # Fire webhook if configured and task completed successfully
         if task_exec and workflow.webhook_url and task_final_status == TaskStatus.COMPLETED:
-            asyncio.create_task(_fire_webhook(
+            await _fire_webhook(
                 workflow.webhook_url,
                 {
                     "task_id": str(task_exec.id),
@@ -2446,7 +2449,7 @@ async def _run_with_custom_provider(
                     "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
                     "timestamp": datetime.now(UTC).isoformat(),
                 },
-            ))
+            )
 
     except httpx.HTTPStatusError as exc:
         # Streaming responses need an explicit read() before .text is accessible.
@@ -3242,7 +3245,7 @@ async def run_agent(
 
                 # Fire webhook if configured and task completed successfully
                 if task_exec and workflow.webhook_url and task_final_status == TaskStatus.COMPLETED:
-                    asyncio.create_task(_fire_webhook(
+                    await _fire_webhook(
                         workflow.webhook_url,
                         {
                             "task_id": str(task_exec.id),
@@ -3254,7 +3257,7 @@ async def run_agent(
                             "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
                             "timestamp": datetime.now(UTC).isoformat(),
                         },
-                    ))
+                    )
 
     except Exception as e:
         await _log(workflow, "error", str(e), task_exec)
