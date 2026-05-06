@@ -46,7 +46,7 @@ git clone <repo-url> && cd tbd-agents
 cp .env.example .env
 # Edit .env and fill in at least GITHUB_TOKEN
 
-docker-compose up --build
+docker-compose-dev.yml up --build
 ```
 
 This starts four services:
@@ -74,7 +74,7 @@ This starts four services:
 
 ```bash
 # Run 3 worker containers instead of 1
-docker-compose up --build --scale worker=3
+docker-compose-dev.yml up --build --scale worker=3
 ```
 
 Each worker defaults to `--concurrency=4`, so 3 containers = 12 concurrent agent executions.
@@ -156,7 +156,7 @@ The API and worker are now running. Send prompts via the API or dashboard and th
  │  DD_API_KEY        │  —                        │  Datadog API key                            │
  │  DD_APP_KEY        │  —                        │  Datadog App key                            │
  │  DD_SITE           │  datadoghq.com            │  Datadog site                               │
- │  ATLASSIAN_API_TOK │  —                        │  Atlassian API token                        │
+ │  ATLASSIAN_API_TOKEN │  —                        │  Atlassian API token                        │
  │  ATLASSIAN_EMAIL   │  —                        │  Atlassian account email                    │
  │  ATLASSIAN_URL     │  —                        │  Atlassian site URL                         │
  └────────────────────┴───────────────────────────┴─────────────────────────────────────────────┘

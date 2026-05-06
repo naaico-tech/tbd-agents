@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.guardrail import GuardrailType
-from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from app.schemas.agent import AgentCreate, AgentUpdate
 from app.schemas.guardrail import GuardrailCreate, GuardrailUpdate
 from app.schemas.mcp import McpServerCreate, McpServerUpdate, McpTestResponse
 from app.schemas.skill import SkillCreate, SkillUpdate

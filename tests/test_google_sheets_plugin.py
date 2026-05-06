@@ -293,7 +293,6 @@ def test_execute_unknown_operation(plugin):
     service = MagicMock()
     mock_http_error = type("HttpError", (Exception,), {})
     with patch("app.plugins.google_sheets.GoogleSheetsPlugin._get_client", return_value=service):
-        import importlib
         import sys
         # Provide a fake googleapiclient.errors module
         fake_errors = MagicMock()

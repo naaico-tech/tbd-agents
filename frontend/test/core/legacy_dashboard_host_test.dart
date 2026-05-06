@@ -26,7 +26,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('/dashboard?embed=1&chrome=none&page=agents'),
+      find.text('/dashboard-legacy?embed=1&chrome=none&page=agents'),
       findsOneWidget,
     );
     expect(find.text('OPEN LEGACY'), findsNothing);

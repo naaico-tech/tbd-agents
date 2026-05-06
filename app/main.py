@@ -166,6 +166,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(chat.router)
+app.include_router(chat.workflow_chat_router)
 app.include_router(custom_tools.router)
 app.include_router(export_import.router)
 app.include_router(guardrails.router)
@@ -184,16 +185,17 @@ app.include_router(workflows.router)
 app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 
 
-@app.get("/dashboard-new-ui", include_in_schema=False)
-@app.get("/dashboard-new-ui/{asset_path:path}", include_in_schema=False)
-async def dashboard_new_ui(asset_path: str = ""):
+@app.get("/dashboard", include_in_schema=False)
+@app.get("/dashboard/{asset_path:path}", include_in_schema=False)
+async def dashboard_flutter(asset_path: str = ""):
     resolved_path = _resolve_dashboard_path(asset_path)
     if resolved_path is not None:
         return FileResponse(resolved_path)
     return FileResponse(LEGACY_STATIC_DIR / "index.html")
 
 
-@app.get("/dashboard", include_in_schema=False)
 @app.get("/dashboard-legacy", include_in_schema=False)
-async def dashboard_legacy():
+@app.get("/dashboard-new-ui", include_in_schema=False)
+@app.get("/dashboard-new-ui/{asset_path:path}", include_in_schema=False)
+async def dashboard_legacy(asset_path: str = ""):
     return FileResponse(LEGACY_STATIC_DIR / "index.html")

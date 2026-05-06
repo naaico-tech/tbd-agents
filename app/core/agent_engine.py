@@ -24,6 +24,7 @@ import re
 import sys
 from io import StringIO
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 # Compatibility: UTC alias for Python 3.9-3.10 support
 UTC = timezone.utc
@@ -108,6 +109,21 @@ _CAVEMAN_REPLACEMENTS = (
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+async def _fire_webhook(
+    webhook_url: str,
+    payload: dict,
+) -> None:
+    """Fire-and-forget POST to webhook_url. Errors are logged, not raised."""
+    parsed = urlparse(webhook_url)
+    safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(webhook_url, json=payload, headers={"Content-Type": "application/json"})
+            logger.info("Webhook %s → %d", safe_url, resp.status_code)
+    except Exception as exc:
+        logger.warning("Webhook delivery failed for %s: %s", safe_url, exc)
 
 
 async def _log(
@@ -1701,10 +1717,14 @@ async def _run_with_claude_sdk(
         await _log(workflow, "claude_env_created", environment.id, task_exec)
 
         # ── Create agent ─────────────────────────────────────────────────────
+        # NOTE: The Anthropic agents beta API (/v1/agents) requires `system`
+        # to be a plain string.  The cache-block format (list[dict]) is only
+        # accepted by the messages API and would cause a 400
+        # "system: value must be a string" error here.
         agent_kwargs: dict = {
             "model": model,
             "name": f"tbd-agent-{workflow.agent_id}",
-            "system": _build_anthropic_system_blocks(system_prompt, static_prefix_len),
+            "system": system_prompt,
         }
         if native_mcp_servers:
             agent_kwargs["mcp_servers"] = native_mcp_servers
@@ -1968,10 +1988,24 @@ async def _run_with_claude_sdk(
 
         await workflow.save()
 
+        # Fire webhook if configured
+        if task_exec and workflow.webhook_url:
+            await _fire_webhook(
+                workflow.webhook_url,
+                {
+                    "task_id": str(task_exec.id),
+                    "workflow_id": str(workflow.id),
+                    "workflow_title": workflow.title,
+                    "prompt": user_prompt,
+                    "response": final_text,
+                    "status": "completed",
+                    "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
     except Exception as exc:
-        await _log(workflow, "error", str(exc), task_exec)
+        logger.exception("Claude SDK agent task failed: %s", exc)
         await _publish_status(workflow, "failed")
-        logger.exception("Claude Agent SDK run failed for workflow %s", workflow.id)
         if task_exec:
             task_exec.status = TaskStatus.FAILED
             task_exec.finished_at = datetime.now(UTC)
@@ -2400,6 +2434,22 @@ async def _run_with_custom_provider(
             await task_exec.save()
 
         await workflow.save()
+
+        # Fire webhook if configured and task completed successfully
+        if task_exec and workflow.webhook_url and task_final_status == TaskStatus.COMPLETED:
+            await _fire_webhook(
+                workflow.webhook_url,
+                {
+                    "task_id": str(task_exec.id),
+                    "workflow_id": str(workflow.id),
+                    "workflow_title": workflow.title,
+                    "prompt": user_prompt,
+                    "response": final_text,
+                    "status": "completed",
+                    "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
 
     except httpx.HTTPStatusError as exc:
         # Streaming responses need an explicit read() before .text is accessible.
@@ -3192,6 +3242,22 @@ async def run_agent(
                     await task_exec.save()
 
                 await workflow.save()
+
+                # Fire webhook if configured and task completed successfully
+                if task_exec and workflow.webhook_url and task_final_status == TaskStatus.COMPLETED:
+                    await _fire_webhook(
+                        workflow.webhook_url,
+                        {
+                            "task_id": str(task_exec.id),
+                            "workflow_id": str(workflow.id),
+                            "workflow_title": workflow.title,
+                            "prompt": user_prompt,
+                            "response": final_text,
+                            "status": "completed",
+                            "elapsed_seconds": (task_exec.finished_at - task_exec.started_at).total_seconds() if task_exec.started_at and task_exec.finished_at else None,
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        },
+                    )
 
     except Exception as e:
         await _log(workflow, "error", str(e), task_exec)

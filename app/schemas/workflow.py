@@ -1,7 +1,48 @@
+import ipaddress
+import socket
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+# Private/loopback ranges blocked to prevent SSRF
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local / metadata
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _validate_webhook_url(v: str | None) -> str | None:
+    if v is None:
+        return v
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("webhook_url must use http or https scheme")
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("webhook_url must contain a valid host")
+    # Block metadata endpoint by hostname
+    if host in ("metadata.google.internal", "169.254.169.254"):
+        raise ValueError("webhook_url targets a disallowed host")
+    # Resolve hostname and check for private/loopback addresses
+    try:
+        addrs = {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except socket.gaierror:
+        addrs = set()
+    for addr_str in addrs:
+        try:
+            addr = ipaddress.ip_address(addr_str)
+        except ValueError:
+            continue
+        if any(addr in net for net in _BLOCKED_NETWORKS):
+            raise ValueError("webhook_url targets a private or reserved IP address")
+    return v
 
 
 class UsageStatsResponse(BaseModel):
@@ -33,6 +74,12 @@ class WorkflowCreate(BaseModel):
     repo_branch: str | None = None  # Branch to checkout
     repo_token_name: str | None = None  # Token Store key for private repos
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _check_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
 
 
 class WorkflowUpdate(BaseModel):
@@ -55,7 +102,13 @@ class WorkflowUpdate(BaseModel):
     repo_branch: str | None = None
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] | None = None  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
     status: str | None = None  # active | inactive
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _check_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
 
 
 class PromptRequest(BaseModel):
@@ -80,6 +133,7 @@ class LogEntryResponse(BaseModel):
 
 class PromptResponse(BaseModel):
     workflow_id: str
+    task_id: str | None = None
     status: str
     current_turn: int
     max_turns: int
@@ -118,6 +172,7 @@ class WorkflowResponse(BaseModel):
     repo_branch: str | None = None
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
+    webhook_url: str | None = None  # URL to POST to after task completion
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

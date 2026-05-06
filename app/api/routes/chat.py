@@ -9,6 +9,10 @@ POST   /api/agents/{agent_id}/chat                      — send a message
 GET    /api/agents/{agent_id}/chat/sessions             — list sessions
 GET    /api/agents/{agent_id}/chat/sessions/{session_id} — session detail
 DELETE /api/agents/{agent_id}/chat/sessions/{session_id} — delete session
+
+Workflow-backed chat session endpoints
+---------------------------------------
+POST   /api/chat/start  — get or create a dedicated chat workflow for an agent
 """
 
 import json
@@ -17,11 +21,14 @@ import logging
 from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.api.deps import extract_optional_token, get_current_user
+from app.config import settings
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
+from app.models.workflow import Workflow, WorkflowStatus
 from app.observability import sse_connections_active
 from app.schemas.chat import (
     ChatMessageResponse,
@@ -259,3 +266,75 @@ async def delete_chat_session(
     await ChatMessage.find({"session_id": session.id}).delete()
     await session.delete()
     return None
+
+
+# ── Workflow-backed chat session router ───────────────────────────────────────
+
+workflow_chat_router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+class ChatStartRequest(BaseModel):
+    agent_id: str
+
+
+class ChatStartResponse(BaseModel):
+    workflow_id: str
+    agent_name: str
+    agent_id: str
+
+
+@workflow_chat_router.post("/start", response_model=ChatStartResponse, status_code=200)
+async def start_chat_session(
+    body: ChatStartRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get or create a dedicated chat workflow for the given agent.
+
+    Looks for an existing active workflow with title matching ``Chat: {agent.name}``
+    owned by this user.  If found, returns it.  If not, creates a new one.
+    This ensures each user has one persistent chat workflow per agent.
+    """
+    github_user = current_user.get("login") or "local"
+
+    try:
+        agent = await Agent.get(PydanticObjectId(body.agent_id))
+    except Exception:
+        agent = None
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    chat_title = f"Chat: {agent.name}"
+
+    # Look for existing active chat workflow for this user + agent
+    existing = await Workflow.find_one(
+        Workflow.github_user == github_user,
+        Workflow.agent_id == str(agent.id),
+        Workflow.status == WorkflowStatus.ACTIVE,
+        Workflow.infinite_session == True,  # noqa: E712 – beanie query, not Python bool
+    )
+
+    if existing:
+        return ChatStartResponse(
+            workflow_id=str(existing.id),
+            agent_name=agent.name,
+            agent_id=str(agent.id),
+        )
+
+    # Create new chat workflow
+    model = agent.model or settings.default_model
+    new_wf = Workflow(
+        title=chat_title,
+        agent_id=str(agent.id),
+        github_user=github_user,
+        model=model,
+        infinite_session=True,
+        status=WorkflowStatus.ACTIVE,
+        max_turns=50,
+    )
+    await new_wf.insert()
+
+    return ChatStartResponse(
+        workflow_id=str(new_wf.id),
+        agent_name=agent.name,
+        agent_id=str(agent.id),
+    )

@@ -78,6 +78,7 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
         credential_overrides=wf.credential_overrides,
+        webhook_url=wf.webhook_url,
         usage=_usage_response(wf),
         logs=[LogEntryResponse(**le.model_dump()) for le in wf.logs],
         messages=[MessageResponse(**m.model_dump()) for m in wf.messages],
@@ -122,6 +123,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
         credential_overrides=body.credential_overrides,
+        webhook_url=body.webhook_url,
     )
     await wf.insert()
     return await _to_response(wf)
@@ -179,6 +181,7 @@ async def send_prompt(
 
     return PromptResponse(
         workflow_id=str(wf.id),
+        task_id=str(task_exec.id),
         status="running",
         current_turn=wf.current_turn,
         max_turns=wf.max_turns,
