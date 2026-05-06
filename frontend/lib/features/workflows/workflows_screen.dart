@@ -5023,13 +5023,11 @@ class _ProviderDialogState extends State<_ProviderDialog> {
                 if (_providerType == 'anthropic') ...[
                   const SizedBox(height: sp4),
                   const Text(
-                    'Uses the Anthropic Claude Agent SDK — leave blank for the default '
-                    'Anthropic endpoint. For a self-hosted LiteLLM proxy that implements '
-                    'the full Anthropic beta APIs, set base_url to your proxy '
-                    '(e.g. http://localhost:4000).\n'
-                    'NOTE: OpenRouter is NOT compatible with this provider type — it only '
-                    'supports the OpenAI-compatible API. To use OpenRouter, choose '
-                    "'custom' type with base_url 'https://openrouter.ai/api/v1'.",
+                    'Uses the Anthropic Claude Agent SDK. Leave blank to call Anthropic '
+                    'directly (x-api-key auth).\n'
+                    'OpenRouter: set base_url to https://openrouter.ai/api and enter '
+                    'your OpenRouter API key — Bearer auth is used automatically.\n'
+                    'LiteLLM: set base_url to your proxy root (e.g. http://localhost:4000).',
                     style: TextStyle(
                       fontFamily: fontBody,
                       fontSize: 9,

@@ -2011,19 +2011,20 @@ async def _run_with_claude_sdk(
             )
     except Exception as exc:
         exc_str = str(exc)
-        # Detect HTML response — indicates the base_url points to a web UI rather
-        # than an Anthropic-compatible API (e.g. OpenRouter, which only supports
-        # the OpenAI-compatible /chat/completions path, not the Anthropic Agent SDK).
+        # Detect HTML response — indicates the base_url is wrong (e.g. pointing to
+        # the OpenAI-compat /api/v1 path instead of /api, or a completely wrong URL).
         if exc_str.lstrip().startswith("<!") or "<html" in exc_str[:200].lower():
             user_msg = (
                 "Claude Agent SDK error: the provider base_url returned an HTML page "
-                "instead of a valid API response. This usually means the endpoint does "
-                "not implement the Anthropic Agent SDK beta APIs "
-                "(/v1/environments, /v1/agents, /v1/sessions). "
-                "If you are using OpenRouter, set the provider type to 'custom' and "
-                "use base_url 'https://openrouter.ai/api/v1' instead."
+                "instead of a valid API response. "
+                "For OpenRouter, set base_url to 'https://openrouter.ai/api' "
+                "(not '/api/v1'). "
+                "For LiteLLM, use your proxy root URL (e.g. 'http://localhost:4000'). "
+                "The Anthropic Agent SDK beta endpoints "
+                "(/v1/environments, /v1/agents, /v1/sessions) must be reachable at "
+                "the configured base URL."
             )
-            logger.error("Claude SDK agent task failed (incompatible endpoint): %s", user_msg)
+            logger.error("Claude SDK agent task failed (bad base_url endpoint): %s", user_msg)
         else:
             user_msg = f"Claude SDK agent task failed: {exc_str[:500]}"
             logger.exception("Claude SDK agent task failed: %s", exc)
