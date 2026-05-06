@@ -13,8 +13,12 @@ from anthropic import AsyncAnthropic
 logger = logging.getLogger(__name__)
 
 
-def build_claude_client(api_key: str) -> AsyncAnthropic:
+def build_claude_client(api_key: str, base_url: str | None = None) -> AsyncAnthropic:
     """Create an AsyncAnthropic client authenticated with the given API key.
+
+    When *base_url* is provided the client routes all requests through that URL,
+    enabling third-party Anthropic-compatible gateways (e.g. LiteLLM) to be
+    used in place of the default ``https://api.anthropic.com`` endpoint.
 
     The returned client exposes the Claude Agent SDK via ``client.beta``::
 
@@ -26,4 +30,7 @@ def build_claude_client(api_key: str) -> AsyncAnthropic:
             agent={"type": "agent", "id": agent.id, "version": agent.version},
         )
     """
-    return AsyncAnthropic(api_key=api_key)
+    kwargs: dict = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return AsyncAnthropic(**kwargs)

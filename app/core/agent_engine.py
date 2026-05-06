@@ -1589,6 +1589,7 @@ async def _run_with_claude_sdk(
     api_key: str,
     task_exec: TaskExecution | None,
     *,
+    base_url: str | None = None,
     repo_path: str | None = None,
     mcp_config: dict | None = None,
     allowed_tools_set: set[str] | None = None,
@@ -1596,10 +1597,15 @@ async def _run_with_claude_sdk(
 ) -> str | None:
     """Execute a prompt using the Claude Agent SDK (beta.agents/sessions).
 
-    Creates an environment, agent, and session on Anthropic's infrastructure,
-    then streams events. The Agent SDK handles the full agentic loop
+    Creates an environment, agent, and session on Anthropic's infrastructure
+    (or a compatible third-party gateway when *base_url* is provided), then
+    streams events. The Agent SDK handles the full agentic loop
     (planning, tool invocation, response generation) server-side — analogous
     to how the Copilot SDK path works.
+
+    When *base_url* is set and ``CLAUDE_SDK_THIRD_PARTY_PROVIDERS_ENABLED`` is
+    ``True``, all SDK requests are routed through that URL, enabling use with
+    Anthropic-compatible gateways such as LiteLLM.
 
     MCP server handling:
     - URL-based (SSE/HTTP) servers are passed as native MCP servers to the
@@ -1631,7 +1637,7 @@ async def _run_with_claude_sdk(
     claude_session_id: str | None = None
 
     try:
-        client = build_claude_client(api_key)
+        client = build_claude_client(api_key, base_url=base_url)
 
         # ── Discover local (stdio) MCP tools ─────────────────────────────────
         custom_tools: list[dict] = []
@@ -2779,6 +2785,17 @@ async def run_agent(
     if custom_provider and custom_provider_key:
         # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
+            # Honor provider.base_url when the feature flag is enabled, allowing
+            # third-party Anthropic-compatible gateways (e.g. LiteLLM) to be used.
+            sdk_base_url: str | None = None
+            if settings.claude_sdk_third_party_providers_enabled and custom_provider.base_url:
+                sdk_base_url = custom_provider.base_url
+                await _log(
+                    workflow,
+                    "provider_base_url",
+                    f"Routing Claude Agent SDK through custom base_url: {sdk_base_url}",
+                    task_exec,
+                )
             return await _run_with_claude_sdk(
                 workflow,
                 user_prompt,
@@ -2787,7 +2804,8 @@ async def run_agent(
                 custom_provider,
                 custom_provider_key,
                 task_exec,
-                    repo_path=repo_path,
+                base_url=sdk_base_url,
+                repo_path=repo_path,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
                 builtin_tools=agent.builtin_tools or None,

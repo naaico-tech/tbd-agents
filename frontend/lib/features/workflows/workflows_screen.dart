@@ -5020,6 +5020,20 @@ class _ProviderDialogState extends State<_ProviderDialog> {
                   controller: _baseUrlCtrl,
                   hint: 'https://api.openai.com/v1',
                 ),
+                if (_providerType == 'anthropic') ...[
+                  const SizedBox(height: sp4),
+                  const Text(
+                    'For anthropic: leave blank to use the default Anthropic endpoint. '
+                    'Set to a LiteLLM or compatible Anthropic proxy URL to route the '
+                    'Claude Agent SDK through a third-party gateway '
+                    '(e.g. http://localhost:4000).',
+                    style: TextStyle(
+                      fontFamily: fontBody,
+                      fontSize: 9,
+                      color: textMuted,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: sp12),
                 // ── Description ──────────────────────────────────────────
                 _SlateDialogField(

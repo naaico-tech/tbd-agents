@@ -29,9 +29,16 @@ class Provider(Document):
     the corresponding provider backend.
 
     - ``github_copilot``: uses the stored key as the GitHub PAT for the SDK.
-    - ``openai`` / ``anthropic`` / ``azure_openai`` / ``custom``: issues
-      requests directly to the provider's OpenAI-compatible chat completions
-      endpoint using the resolved API key.
+    - ``anthropic``: uses the Claude Agent SDK (``beta.agents``/``beta.sessions``).
+      When ``base_url`` is set and the ``CLAUDE_SDK_THIRD_PARTY_PROVIDERS_ENABLED``
+      flag is ``True``, all SDK requests are routed through that URL. This enables
+      third-party Anthropic-compatible gateways such as LiteLLM (self-hosted) to
+      serve as the backend. The gateway must implement the full Anthropic beta API
+      (``/v1/environments``, ``/v1/agents``, ``/v1/sessions``) to be compatible.
+      If omitted, the default ``https://api.anthropic.com`` endpoint is used.
+    - ``openai`` / ``azure_openai`` / ``custom``: issues requests directly to the
+      provider's OpenAI-compatible chat completions endpoint using the resolved
+      API key. ``base_url`` overrides the default endpoint.
     """
 
     name: Indexed(str, unique=True)
