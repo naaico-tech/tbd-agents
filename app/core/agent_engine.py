@@ -3296,6 +3296,7 @@ async def run_agent(
                     custom_provider,
                     custom_provider_key,
                     task_exec,
+                    auth_type=custom_provider.auth_type,
                     repo_path=repo_path,
                     mcp_config=mcp_config,
                     allowed_tools_set=allowed_tools_set,
