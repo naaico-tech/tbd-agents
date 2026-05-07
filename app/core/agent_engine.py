@@ -1061,11 +1061,15 @@ async def _connect_mcp_and_list_tools(
     mcp_config: dict,
     allowed_tools_set: set[str] | None,
     exit_stack,
+    *,
+    formatter=None,
 ) -> tuple[list[dict], dict]:
     """Connect to MCP servers and list their tools.
 
-    Returns ``(openai_tools, tool_server_map)`` where ``tool_server_map``
+    Returns ``(tools, tool_server_map)`` where ``tool_server_map``
     maps tool names to ``(session, server_name)`` tuples for later invocation.
+    The *formatter* callable converts each MCP Tool object to the target API
+    format (default: :func:`_mcp_tool_to_openai` for OpenAI-compat format).
 
     The caller-provided ``exit_stack`` (``AsyncExitStack``) manages the
     lifetime of all MCP connections so they stay open for tool invocations.
@@ -1075,7 +1079,10 @@ async def _connect_mcp_and_list_tools(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamablehttp_client
 
-    openai_tools: list[dict] = []
+    if formatter is None:
+        formatter = _mcp_tool_to_openai
+
+    tools: list[dict] = []
     tool_server_map: dict[str, tuple[ClientSession, str]] = {}
 
     for server_name, server_cfg in mcp_config.items():
@@ -1128,12 +1135,12 @@ async def _connect_mcp_and_list_tools(
                 # Respect allowed_tools filter
                 if allowed_tools_set is not None and tool.name not in allowed_tools_set:
                     continue
-                openai_tools.append(_mcp_tool_to_openai(tool))
+                tools.append(formatter(tool))
                 tool_server_map[tool.name] = (session, server_name)
         except Exception as exc:
             logger.warning("Failed to connect MCP server '%s' for BYOK tools: %s", server_name, exc)
 
-    return openai_tools, tool_server_map
+    return tools, tool_server_map
 
 
 # ── Custom Python tool helpers ────────────────────────────────────────────────
@@ -1358,6 +1365,39 @@ STORE_MEMORY_TOOL_CLAUDE = {
     },
 }
 
+# Anthropic messages API format for store_memory (no "type": "custom" wrapper)
+STORE_MEMORY_TOOL_ANTHROPIC = {
+    "name": "store_memory",
+    "description": (
+        "Save a key-value memory for future reference across conversations. "
+        "Use this to remember important facts, decisions, user preferences, "
+        "or context that should persist."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string",
+                "description": "A short descriptive key for the memory",
+            },
+            "value": {
+                "type": "string",
+                "description": "The content to remember",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["session", "agent", "global"],
+                "description": "Memory scope: session (this workflow), agent (this agent), global (all agents)",
+            },
+            "metadata": {
+                "type": "object",
+                "description": "Optional metadata tags",
+            },
+        },
+        "required": ["key", "value"],
+    },
+}
+
 
 async def _execute_mcp_tool(
     tool_name: str,
@@ -1453,6 +1493,68 @@ def _mcp_tool_to_claude_custom(tool) -> dict:
         "description": _clip_tool_description(tool.description),
         "input_schema": schema,
     }
+
+
+def _mcp_tool_to_anthropic(tool) -> dict:
+    """Convert an MCP Tool object to Anthropic messages API tool format."""
+    schema = dict(tool.inputSchema) if tool.inputSchema else {"type": "object", "properties": {}}
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
+    defs = schema.get("$defs", {})
+    if defs:
+        schema = _resolve_refs(schema, defs)
+    schema = _sanitize_json_schema(schema)
+    schema = {k: v for k, v in schema.items() if k in _ALLOWED_SCHEMA_KEYS}
+    return {
+        "name": tool.name,
+        "description": _clip_tool_description(tool.description),
+        "input_schema": schema,
+    }
+
+
+def _extract_anthropic_text(content) -> str:
+    """Extract joined text from Anthropic messages API response content blocks."""
+    parts = []
+    for block in content:
+        if hasattr(block, "type") and block.type == "text":
+            parts.append(block.text)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text", ""))
+    return "\n".join(parts)
+
+
+def _anthropic_block_to_dict(block) -> dict:
+    """Convert an Anthropic SDK content block to a plain serializable dict."""
+    if hasattr(block, "type"):
+        if block.type == "text":
+            return {"type": "text", "text": block.text}
+        if block.type == "tool_use":
+            return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+    return {"type": "text", "text": str(block)}
+
+
+def _anthropic_content_to_str(content) -> str:
+    """Convert Anthropic message content (str or list of blocks) to plain text for compaction."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                t = item.get("type", "")
+                if t == "text":
+                    parts.append(item.get("text", ""))
+                elif t == "tool_use":
+                    parts.append(f"[Tool call: {item.get('name', '')}({json.dumps(item.get('input', {}))})]")
+                elif t == "tool_result":
+                    parts.append(f"[Tool result: {item.get('content', '')}]")
+            elif hasattr(item, "type"):
+                if item.type == "text":
+                    parts.append(item.text)
+                elif item.type == "tool_use":
+                    parts.append(f"[Tool call: {item.name}]")
+        return "\n".join(parts)
+    return str(content)
 
 
 async def _connect_local_mcp_and_list_tools(
@@ -2028,6 +2130,412 @@ async def _run_with_claude_sdk(
                 await client.beta.environments.delete(claude_environment_id)
         except Exception:
             logger.debug("Claude Agent SDK cleanup failed (non-critical)")
+        agent_tasks_active.dec()
+        agent_tasks_total.labels(
+            status=task_exec.status if task_exec else "completed",
+            model=model,
+            reasoning_effort="default",
+        ).inc()
+
+    return final_text
+
+
+async def _run_with_anthropic_messages(
+    workflow: Workflow,
+    user_prompt: str,
+    system_prompt: str,
+    provider: Provider,
+    api_key: str,
+    task_exec: TaskExecution | None,
+    *,
+    repo_path: str | None = None,
+    mcp_config: dict | None = None,
+    allowed_tools_set: set[str] | None = None,
+    auth_type: str = "x-api-key",
+) -> str | None:
+    """Execute a prompt via an Anthropic-compatible gateway using the Anthropic messages API.
+
+    Used when the agent's provider type is ``anthropic`` but a custom ``base_url`` is set
+    (gateway mode — e.g. OpenRouter, LiteLLM).  Uses ``AsyncAnthropic(base_url=...)`` with
+    ``messages.create`` and a client-side agentic loop, preserving Anthropic-native tool
+    formats, extended thinking support, and API features.
+
+    This path cannot use the Claude Agent SDK beta endpoints (``/v1/environments``,
+    ``/v1/agents``) because those are Anthropic-exclusive server-side infrastructure — they
+    do not exist on third-party gateways.
+
+    Provider routing decision:
+    - ``anthropic`` + no ``base_url``  →  ``_run_with_claude_sdk``  (Anthropic server-side SDK)
+    - ``anthropic`` + ``base_url`` set →  this function  (client-side, any Anthropic-compat gateway)
+    - all other types                  →  ``_run_with_custom_provider``  (OpenAI-compat format)
+    """
+    from contextlib import AsyncExitStack
+    from urllib.parse import urlparse as _urlparse
+
+    from app.services.claude_client import build_claude_client
+
+    model = workflow.model
+    max_turns = workflow.max_turns
+    task_start_time = datetime.now(UTC)
+    agent_tasks_active.inc()
+    final_text: str | None = None
+    tool_call_count = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cache_read_tokens = 0
+    total_cache_write_tokens = 0
+    total_cost = 0.0
+
+    mcp_exit_stack = AsyncExitStack()
+    await mcp_exit_stack.__aenter__()
+
+    try:
+        _parsed = _urlparse(provider.base_url or "")
+        gateway_display = f"{_parsed.scheme}://{_parsed.netloc}"
+        await _log(
+            workflow,
+            "provider_gateway",
+            f"Anthropic provider '{provider.name}' using gateway mode: {gateway_display} "
+            f"(model={model}, auth_type={auth_type}). Using Anthropic messages API with client-side loop.",
+            task_exec,
+        )
+
+        client = build_claude_client(api_key, base_url=provider.base_url, auth_type=auth_type)
+
+        # ── Discover MCP tools in Anthropic format ────────────────────────────
+        anthropic_tools: list[dict] = []
+        tool_server_map: dict = {}
+
+        if mcp_config:
+            anthropic_tools, tool_server_map = await _connect_mcp_and_list_tools(
+                mcp_config, allowed_tools_set, mcp_exit_stack,
+                formatter=_mcp_tool_to_anthropic,
+            )
+            if anthropic_tools:
+                tools_chars = len(json.dumps(anthropic_tools, ensure_ascii=False, separators=(",", ":")))
+                tools_tokens = _estimate_tools_tokens(anthropic_tools)
+                await _log(
+                    workflow,
+                    "tools_discovered",
+                    f"{len(anthropic_tools)} tool(s) available (~{tools_tokens} tokens, {tools_chars} chars): "
+                    f"{[t['name'] for t in anthropic_tools][:12]}",
+                    task_exec,
+                )
+
+        # ── Custom Python tools ───────────────────────────────────────────────
+        custom_python_tool_map: dict[str, CustomTool] = {}
+        custom_tool_runtime_env = _build_custom_tool_runtime_env(repo_path)
+        try:
+            _agent_for_custom = await Agent.get(workflow.agent_id)
+            if _agent_for_custom and _agent_for_custom.custom_tool_ids:
+                _, _ct_claude_defs, custom_python_tool_map = await _build_custom_tools_config(
+                    _agent_for_custom.custom_tool_ids
+                )
+                # Convert Claude SDK custom format to Anthropic messages format (drop "type": "custom")
+                _ct_anthropic_defs = [{k: v for k, v in t.items() if k != "type"} for t in _ct_claude_defs]
+                if _ct_anthropic_defs:
+                    anthropic_tools.extend(_ct_anthropic_defs)
+                    await _log(
+                        workflow, "custom_tools_loaded",
+                        f"{len(_ct_anthropic_defs)} custom Python tool(s): {[t['name'] for t in _ct_anthropic_defs]}",
+                        task_exec,
+                    )
+        except Exception as _ct_exc:
+            logger.debug("Custom tool lookup skipped: %s", _ct_exc)
+
+        if repo_path:
+            repo_tool = await _load_builtin_repo_inspector_tool()
+            _repo_openai_defs: list[dict] = []
+            _repo_claude_defs: list[dict] = []
+            repo_tool_added = _append_custom_tool_definition(
+                repo_tool, _repo_openai_defs, _repo_claude_defs, custom_python_tool_map,
+            )
+            if repo_tool_added:
+                _repo_anthropic_defs = [{k: v for k, v in t.items() if k != "type"} for t in _repo_claude_defs]
+                anthropic_tools.extend(_repo_anthropic_defs)
+                await _log(workflow, "repo_tool_loaded",
+                           "repo_inspector exposed for repository-aware file inspection", task_exec)
+
+        anthropic_tools.append(STORE_MEMORY_TOOL_ANTHROPIC)
+
+        await _log(
+            workflow,
+            "model_call",
+            f"Sending prompt to {model} via Anthropic gateway '{provider.name}' ({gateway_display})"
+            f" (tools: {len(anthropic_tools)})",
+            task_exec,
+        )
+
+        # Context compaction thresholds
+        _raw_cw = getattr(workflow, "context_window", None)
+        try:
+            context_window = int(_raw_cw) if _raw_cw is not None else 128_000
+        except (TypeError, ValueError):
+            context_window = 128_000
+        compaction_threshold = settings.compaction_token_threshold_pct
+
+        # Anthropic format: system is a top-level param, not a message
+        messages: list[dict] = [{"role": "user", "content": user_prompt}]
+
+        # ── Agentic loop ──────────────────────────────────────────────────────
+        iteration = 0
+        while True:
+            iteration += 1
+            # Estimate tokens (include system in estimate for accuracy)
+            _sys_msg = [{"role": "system", "content": system_prompt}]
+            _flat_msgs = _sys_msg + [
+                {"role": m["role"], "content": _anthropic_content_to_str(m["content"])}
+                for m in messages
+            ]
+            current_prompt_tokens = _estimate_request_tokens(_flat_msgs, anthropic_tools, model)
+
+            if iteration == 1 or current_prompt_tokens > context_window * compaction_threshold:
+                await _log(
+                    workflow,
+                    "request_context",
+                    f"Turn {iteration}: messages={len(messages)}, tools={len(anthropic_tools)}, "
+                    f"estimated_request_tokens={current_prompt_tokens}",
+                    task_exec,
+                )
+
+            if (
+                settings.compaction_enabled
+                and current_prompt_tokens > context_window * compaction_threshold
+                and len(messages) > 4
+            ):
+                await _log(
+                    workflow, "compaction_start",
+                    f"Compacting context (request≈{current_prompt_tokens} tokens, "
+                    f"messages={len(messages)}, tools={len(anthropic_tools)})",
+                    task_exec,
+                )
+                _msgs_before = len(messages)
+                # Flatten to OpenAI-compat format for compaction, then restore
+                _compact_input = _sys_msg + [
+                    {"role": m["role"], "content": _anthropic_content_to_str(m["content"])}
+                    for m in messages
+                ]
+                _compact_output = _compact_messages(_compact_input, model=model, context_window=context_window)
+                messages = [{"role": m["role"], "content": m["content"]} for m in _compact_output if m["role"] != "system"]
+                _dropped = _msgs_before - len(messages) + 1
+                context_compactions_total.labels(model=model).inc()
+                context_compaction_messages_dropped.labels(model=model).observe(max(0, _dropped))
+                await _log(
+                    workflow, "compaction_complete",
+                    f"Compacted to {len(messages)} messages", task_exec,
+                )
+
+            # ── API call ─────────────────────────────────────────────────────
+            try:
+                response = await client.messages.create(
+                    model=model,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=anthropic_tools if anthropic_tools else [],
+                    max_tokens=8192,
+                )
+            except Exception as exc:
+                await _log(workflow, "error", f"Anthropic gateway API error: {exc}", task_exec)
+                raise
+
+            usage_data = getattr(response, "usage", None)
+            if usage_data:
+                total_input_tokens += getattr(usage_data, "input_tokens", 0) or 0
+                total_output_tokens += getattr(usage_data, "output_tokens", 0) or 0
+                total_cache_read_tokens += getattr(usage_data, "cache_read_input_tokens", 0) or 0
+                total_cache_write_tokens += getattr(usage_data, "cache_creation_input_tokens", 0) or 0
+
+            # ── Handle tool use ───────────────────────────────────────────────
+            tool_use_blocks = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
+            if tool_use_blocks and response.stop_reason in ("tool_use", None):
+                # Append full assistant turn
+                messages.append({
+                    "role": "assistant",
+                    "content": [_anthropic_block_to_dict(b) for b in response.content],
+                })
+
+                tool_results: list[dict] = []
+                for block in tool_use_blocks:
+                    tool_name = block.name
+                    tool_args = block.input if isinstance(block.input, dict) else {}
+                    tool_call_count += 1
+
+                    if tool_name == "manage_todo_list":
+                        progress = _parse_todo_list(tool_args)
+                        if progress:
+                            await _update_progress(workflow, task_exec, progress)
+
+                    await _log(
+                        workflow, "tool_call", tool_name, task_exec,
+                        tool_input=json.dumps(tool_args)[:500],
+                    )
+
+                    try:
+                        if tool_name == "store_memory":
+                            tool_result = await _handle_store_memory(workflow.agent_id, tool_args)
+                        elif tool_name in custom_python_tool_map:
+                            tool_result = await _execute_custom_tool(
+                                tool_name, tool_args, custom_python_tool_map,
+                                runtime_env=custom_tool_runtime_env,
+                                credential_overrides=workflow.credential_overrides or None,
+                            )
+                        else:
+                            tool_result = await _execute_mcp_tool(tool_name, tool_args, tool_server_map)
+                    except Exception as tool_exc:
+                        tool_result = f"Tool execution error: {tool_exc}"
+                        logger.warning("Tool '%s' raised an exception: %s", tool_name, tool_exc)
+
+                    tool_result_for_model = _format_tool_result_for_context(
+                        tool_result, prefer_tsv=workflow.tsv_tool_results,
+                    )
+                    await _log(
+                        workflow, "tool_result", f"{tool_name} completed", task_exec,
+                        tool_output=tool_result_for_model[:500],
+                    )
+                    if tool_name == "store_memory":
+                        await _log_store_memory_result(workflow, task_exec, tool_result)
+
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": _truncate_tool_result(
+                            tool_result_for_model, settings.tool_result_context_max_chars,
+                        ),
+                    })
+
+                # All tool results go back as a single user turn
+                messages.append({"role": "user", "content": tool_results})
+
+                # Check max turns
+                if tool_call_count >= max_turns:
+                    await _log(
+                        workflow, "max_turns",
+                        f"Reached max tool turns ({max_turns}), requesting final answer",
+                        task_exec,
+                    )
+                    messages.append({
+                        "role": "user",
+                        "content": "You have reached the maximum number of tool calls. "
+                        "Please provide your final answer based on the information gathered so far.",
+                    })
+                    final_response = await client.messages.create(
+                        model=model, system=system_prompt, messages=messages,
+                        max_tokens=8192,
+                    )
+                    fu = getattr(final_response, "usage", None)
+                    if fu:
+                        total_input_tokens += getattr(fu, "input_tokens", 0) or 0
+                        total_output_tokens += getattr(fu, "output_tokens", 0) or 0
+                    final_text = _extract_anthropic_text(final_response.content)
+                    break
+
+                continue
+
+            # ── Final text response ───────────────────────────────────────────
+            final_text = _extract_anthropic_text(response.content)
+            break
+
+        # ── Record usage & finalize ───────────────────────────────────────────
+        usage = UsageStats(
+            total_input_tokens=total_input_tokens,
+            total_output_tokens=total_output_tokens,
+            total_cache_read_tokens=total_cache_read_tokens,
+            total_cache_write_tokens=total_cache_write_tokens,
+            total_cost=total_cost,
+        )
+        workflow.usage = usage
+        if total_input_tokens:
+            tokens_total.labels(direction="input", model=model).inc(total_input_tokens)
+        if total_output_tokens:
+            tokens_total.labels(direction="output", model=model).inc(total_output_tokens)
+        if total_cache_read_tokens:
+            tokens_total.labels(direction="cache_read", model=model).inc(total_cache_read_tokens)
+        if total_cache_write_tokens:
+            tokens_total.labels(direction="cache_write", model=model).inc(total_cache_write_tokens)
+        if tool_call_count:
+            tool_calls_total.labels(tool_name="anthropic_gateway_aggregate").inc(tool_call_count)
+        tool_calls_per_task.labels(model=model).observe(tool_call_count)
+
+        workflow.messages.append(Message(role="assistant", content=final_text or ""))
+
+        if final_text:
+            output_violations = await enforce_output_guardrails(workflow, final_text)
+            if output_violations:
+                await _log(
+                    workflow, "output_guardrail_violation",
+                    "; ".join(output_violations), task_exec,
+                )
+                await event_bus.publish(
+                    str(workflow.id), "output_guardrail_violation",
+                    {"violations": output_violations},
+                )
+
+        if final_text and workflow.output_format == OutputFormat.JSON:
+            final_text = json.dumps({"response": final_text})
+
+        await _log(workflow, "model_response", (final_text or "")[:200], task_exec)
+
+        if tool_call_count >= max_turns:
+            task_final_status = TaskStatus.MAX_TURNS_REACHED
+        else:
+            task_final_status = TaskStatus.COMPLETED
+
+        await _log(
+            workflow, "completed",
+            f"Final status: {task_final_status} (tool_calls: {tool_call_count})",
+            task_exec,
+        )
+        await _publish_status(workflow, task_final_status)
+
+        task_duration = (datetime.now(UTC) - task_start_time).total_seconds()
+        agent_task_duration_seconds.labels(model=model, status=task_final_status).observe(task_duration)
+        if usage.total_cost > 0:
+            cost_per_task_dollars.labels(model=model).observe(usage.total_cost)
+
+        if task_exec:
+            task_exec.status = task_final_status
+            task_exec.finished_at = datetime.now(UTC)
+            task_exec.tool_calls = tool_call_count
+            task_exec.response = final_text
+            task_exec.usage = usage
+            task_exec.messages = [m for m in workflow.messages if m.role == "assistant"][-20:]
+            await task_exec.save()
+
+        await workflow.save()
+
+        if task_exec and workflow.webhook_url and task_final_status == TaskStatus.COMPLETED:
+            await _fire_webhook(
+                workflow.webhook_url,
+                {
+                    "task_id": str(task_exec.id),
+                    "workflow_id": str(workflow.id),
+                    "workflow_title": workflow.title,
+                    "prompt": user_prompt,
+                    "response": final_text,
+                    "status": "completed",
+                    "elapsed_seconds": (
+                        (task_exec.finished_at - task_exec.started_at).total_seconds()
+                        if task_exec.started_at and task_exec.finished_at else None
+                    ),
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
+            )
+
+    except Exception as exc:
+        await _log(workflow, "error", f"Anthropic gateway error: {exc}", task_exec)
+        await _publish_status(workflow, "failed")
+        logger.exception("Anthropic messages path failed for workflow %s", workflow.id)
+        if task_exec:
+            task_exec.status = TaskStatus.FAILED
+            task_exec.finished_at = datetime.now(UTC)
+            await task_exec.save()
+        final_text = None
+        await workflow.save()
+    finally:
+        try:
+            await mcp_exit_stack.__aexit__(None, None, None)
+        except Exception:
+            pass
         agent_tasks_active.dec()
         agent_tasks_total.labels(
             status=task_exec.status if task_exec else "completed",
@@ -2777,20 +3285,37 @@ async def run_agent(
 
     # ── Route to custom provider if set ──────────────────────────────────────
     if custom_provider and custom_provider_key:
-        # Use native Claude SDK for Anthropic providers
         if custom_provider.provider_type == ProviderType.ANTHROPIC:
-            return await _run_with_claude_sdk(
+            if not custom_provider.base_url:
+                # Direct Anthropic API — use the Claude Agent SDK (server-side agentic loop)
+                return await _run_with_claude_sdk(
+                    workflow,
+                    user_prompt,
+                    system_prompt,
+                    _static_prefix_len,
+                    custom_provider,
+                    custom_provider_key,
+                    task_exec,
+                    repo_path=repo_path,
+                    mcp_config=mcp_config,
+                    allowed_tools_set=allowed_tools_set,
+                    builtin_tools=agent.builtin_tools or None,
+                )
+            # Gateway mode (base_url set, e.g. OpenRouter, LiteLLM) — use Anthropic
+            # messages API with client-side agentic loop.  The Claude Agent SDK beta
+            # endpoints (/v1/environments, /v1/agents) only exist on api.anthropic.com
+            # and cannot be routed through third-party gateways.
+            return await _run_with_anthropic_messages(
                 workflow,
                 user_prompt,
                 system_prompt,
-                _static_prefix_len,
                 custom_provider,
                 custom_provider_key,
                 task_exec,
-                    repo_path=repo_path,
+                repo_path=repo_path,
                 mcp_config=mcp_config,
                 allowed_tools_set=allowed_tools_set,
-                builtin_tools=agent.builtin_tools or None,
+                auth_type=custom_provider.auth_type,
             )
         return await _run_with_custom_provider(
             workflow,

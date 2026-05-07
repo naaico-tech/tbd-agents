@@ -13,6 +13,25 @@
 
 ---
 
+## 🔀 Provider Routing
+
+When an agent has a custom provider configured, the engine selects an execution path based on the provider type and whether a `base_url` is set:
+
+| Provider type / condition | Execution path | Function |
+|---------------------------|---------------|----------|
+| `github_copilot` | Copilot SDK — GitHub Copilot infra | `_run_with_copilot_sdk` |
+| `anthropic` + **no** `base_url` | Claude Agent SDK — server-side agentic loop on Anthropic infra (`/v1/environments`, `/v1/agents`) | `_run_with_claude_sdk` |
+| `anthropic` + `base_url` set (gateway mode) | Anthropic messages API — client-side agentic loop via `messages.create`. Works with OpenRouter, LiteLLM, and any gateway implementing `/v1/messages` | `_run_with_anthropic_messages` |
+| `openai` / `azure_openai` / `custom` | OpenAI-compatible chat completions loop via `/v1/chat/completions` | `_run_with_custom_provider` |
+
+### Why gateways can't use the Claude Agent SDK
+
+The Claude Agent SDK beta endpoints (`/v1/environments`, `/v1/agents`, `/v1/sessions`) are Anthropic-exclusive server-side infrastructure. Third-party gateways such as OpenRouter and LiteLLM only implement the standard Anthropic messages API (`/v1/messages`). Routing the SDK through a gateway `base_url` would cause 404 errors on those beta endpoints.
+
+The `_run_with_anthropic_messages` path solves this by implementing the agentic loop client-side using `AsyncAnthropic(base_url=...).messages.create()`, which all Anthropic-compatible gateways support.
+
+---
+
 ## 🗺️ High-Level Overview
 
 ```
