@@ -81,6 +81,13 @@ class WorkflowCreate(BaseModel):
     def _check_webhook_url(cls, v: str | None) -> str | None:
         return _validate_webhook_url(v)
 
+    error_webhook_url: str | None = None  # URL to POST to on task failure
+
+    @field_validator("error_webhook_url")
+    @classmethod
+    def _check_error_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
+
 
 class WorkflowUpdate(BaseModel):
     title: str | None = None
@@ -103,11 +110,17 @@ class WorkflowUpdate(BaseModel):
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] | None = None  # env_var → token_name overrides for custom tools
     webhook_url: str | None = None  # URL to POST to after task completion
+    error_webhook_url: str | None = None  # URL to POST to on task failure
     status: str | None = None  # active | inactive
 
     @field_validator("webhook_url")
     @classmethod
     def _check_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
+
+    @field_validator("error_webhook_url")
+    @classmethod
+    def _check_error_webhook_url(cls, v: str | None) -> str | None:
         return _validate_webhook_url(v)
 
 
@@ -173,6 +186,7 @@ class WorkflowResponse(BaseModel):
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
     webhook_url: str | None = None  # URL to POST to after task completion
+    error_webhook_url: str | None = None  # URL to POST to on task failure
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

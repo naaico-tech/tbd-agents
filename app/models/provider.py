@@ -28,14 +28,33 @@ class Provider(Document):
     set, the agent engine resolves the API key and routes execution through
     the corresponding provider backend.
 
+    Provider routing decision table
+    --------------------------------
+    +---------------------------------+------------------------------------------+
+    | Provider type / condition       | Execution path                           |
+    +=================================+==========================================+
+    | ``github_copilot``              | Copilot SDK (GitHub Copilot infra)       |
+    +---------------------------------+------------------------------------------+
+    | ``anthropic`` + no ``base_url`` | Claude Agent SDK — server-side agentic   |
+    |                                 | loop on Anthropic infrastructure         |
+    |                                 | (``/v1/environments``, ``/v1/agents``)   |
+    +---------------------------------+------------------------------------------+
+    | ``anthropic`` + ``base_url``    | Anthropic messages API — client-side     |
+    | set (gateway mode)              | agentic loop via ``messages.create``.    |
+    |                                 | Works with OpenRouter, LiteLLM, and any  |
+    |                                 | gateway that implements ``/v1/messages`` |
+    +---------------------------------+------------------------------------------+
+    | ``openai`` / ``azure_openai``   | OpenAI-compatible chat completions loop  |
+    | / ``custom``                    | via ``/v1/chat/completions``             |
+    +---------------------------------+------------------------------------------+
+
     - ``github_copilot``: uses the stored key as the GitHub PAT for the SDK.
-    - ``anthropic``: uses the Claude Agent SDK (``beta.agents``/``beta.sessions``).
-      When ``base_url`` is set and the ``CLAUDE_SDK_THIRD_PARTY_PROVIDERS_ENABLED``
-      flag is ``True``, all SDK requests are routed through that URL. This enables
-      third-party Anthropic-compatible gateways such as LiteLLM (self-hosted) to
-      serve as the backend. The gateway must implement the full Anthropic beta API
-      (``/v1/environments``, ``/v1/agents``, ``/v1/sessions``) to be compatible.
-      If omitted, the default ``https://api.anthropic.com`` endpoint is used.
+    - ``anthropic``: when ``base_url`` is **not** set, uses the Claude Agent SDK
+      (``beta.agents`` / ``beta.sessions``) on the default Anthropic endpoint.
+      When ``base_url`` **is** set, the engine routes through the Anthropic
+      messages API (``messages.create``) with a client-side agentic loop so the
+      request targets the gateway — third-party gateways only expose
+      ``/v1/messages``, not the SDK beta endpoints.
     - ``openai`` / ``azure_openai`` / ``custom``: issues requests directly to the
       provider's OpenAI-compatible chat completions endpoint using the resolved
       API key. ``base_url`` overrides the default endpoint.

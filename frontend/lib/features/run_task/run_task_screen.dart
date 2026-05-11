@@ -149,10 +149,13 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
         _currentTurn = (decoded['current_turn'] as num?)?.toInt();
         _maxTurns = (decoded['max_turns'] as num?)?.toInt();
         _output = decoded['response']?.toString();
+        _taskId = decoded['task_id']?.toString();
       });
 
-      // Discover task ID and start live polling
-      await _discoverTaskId(workflowId);
+      // Fall back to discovery only when the prompt response omitted task_id
+      if (_taskId == null) {
+        await _discoverTaskId(workflowId);
+      }
       _startPolling(workflowId);
     } catch (e) {
       if (!mounted) return;

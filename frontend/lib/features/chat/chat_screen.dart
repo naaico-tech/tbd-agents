@@ -22,6 +22,13 @@ class _ChatAgent {
     id: j['id']?.toString() ?? '',
     name: j['name']?.toString() ?? 'Unknown',
   );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is _ChatAgent && other.id == id);
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 enum _MsgRole { user, assistant }
@@ -230,7 +237,14 @@ class _ChatScreenState extends State<ChatScreen> {
             });
             _scrollToBottom();
           } else if (type == 'done') {
-            // streaming complete
+            if (mounted) {
+              setState(() {
+                assistantMsg.isStreaming = false;
+                _streaming = false;
+              });
+              _scrollToBottom();
+            }
+            return; // streaming complete — finally still runs (harmless)
           } else if (type == 'error') {
             final errMsg = event['message']?.toString() ?? 'Unknown error';
             if (!mounted) break;
