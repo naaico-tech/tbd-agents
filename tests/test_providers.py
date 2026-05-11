@@ -206,6 +206,7 @@ def mock_workflow():
     wf.skill_ids = []
     wf.messages = []
     wf.usage = None
+    wf.error_webhook_url = None
     wf.save = AsyncMock()
     return wf
 
@@ -498,6 +499,7 @@ class TestRunAgentProviderRouting:
         wf.repo_url = None
         wf.max_turns = 5
         wf.messages = []
+        wf.error_webhook_url = None
         wf.save = AsyncMock()
         return wf
 
