@@ -126,6 +126,64 @@ async def _fire_webhook(
         logger.warning("Webhook delivery failed for %s: %s", safe_url, exc)
 
 
+def _classify_error(exc: BaseException) -> tuple[str, str, int | None]:
+    """Return (error_type, error_message, error_code) for a caught exception.
+
+    error_type is one of:
+      rate_limit_exceeded | authentication_error | connection_error |
+      timeout_error | http_error | api_error | internal_error
+    error_code is an HTTP status code when applicable, else None.
+    """
+    import anthropic as _anthropic  # local import to avoid circular dep at module level
+
+    if isinstance(exc, _anthropic.RateLimitError):
+        return ("rate_limit_exceeded", str(exc), 429)
+    if isinstance(exc, _anthropic.AuthenticationError):
+        return ("authentication_error", str(exc), 401)
+    if isinstance(exc, _anthropic.APIConnectionError):
+        return ("connection_error", str(exc), None)
+    if isinstance(exc, _anthropic.APITimeoutError):
+        return ("timeout_error", str(exc), None)
+    if isinstance(exc, _anthropic.APIStatusError):
+        return ("api_error", str(exc), exc.status_code)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return ("http_error", f"HTTP {status}: {exc.response.text[:200]}", status)
+    if isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout):
+        return ("connection_error", str(exc), None)
+    if isinstance(exc, httpx.TimeoutException | TimeoutError):
+        return ("timeout_error", str(exc), None)
+    return ("internal_error", str(exc), None)
+
+
+async def _fire_error_webhook(
+    workflow: "Workflow",
+    exc: BaseException,
+    task_exec: "TaskExecution | None",
+    user_prompt: str,
+) -> None:
+    """Fire the error_webhook_url if configured, with a structured error payload."""
+    if not workflow.error_webhook_url:
+        return
+    error_type, error_message, error_code = _classify_error(exc)
+    elapsed: float | None = None
+    if task_exec and task_exec.started_at and task_exec.finished_at:
+        elapsed = (task_exec.finished_at - task_exec.started_at).total_seconds()
+    payload: dict = {
+        "task_id": str(task_exec.id) if task_exec else None,
+        "workflow_id": str(workflow.id),
+        "workflow_title": workflow.title,
+        "prompt": user_prompt,
+        "status": "failed",
+        "error_type": error_type,
+        "error_message": error_message,
+        "error_code": error_code,
+        "elapsed_seconds": elapsed,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    await _fire_webhook(workflow.error_webhook_url, payload)
+
+
 async def _log(
     workflow: Workflow,
     event: str,
@@ -2114,6 +2172,7 @@ async def _run_with_claude_sdk(
             await task_exec.save()
         final_text = None
         await workflow.save()
+        await _fire_error_webhook(workflow, exc, task_exec, user_prompt)
     finally:
         # Clean up local MCP connections
         try:
@@ -2531,6 +2590,7 @@ async def _run_with_anthropic_messages(
             await task_exec.save()
         final_text = None
         await workflow.save()
+        await _fire_error_webhook(workflow, exc, task_exec, user_prompt)
     finally:
         try:
             await mcp_exit_stack.__aexit__(None, None, None)
@@ -2978,6 +3038,7 @@ async def _run_with_custom_provider(
             await task_exec.save()
         final_text = None
         await workflow.save()
+        await _fire_error_webhook(workflow, exc, task_exec, user_prompt)
     except Exception as exc:
         await _log(workflow, "error", str(exc), task_exec)
         await _publish_status(workflow, "failed")
@@ -2988,6 +3049,7 @@ async def _run_with_custom_provider(
             await task_exec.save()
         final_text = None
         await workflow.save()
+        await _fire_error_webhook(workflow, exc, task_exec, user_prompt)
     finally:
         # Close MCP server connections
         try:
@@ -3795,6 +3857,7 @@ async def run_agent(
             await task_exec.save()
         final_text = None
         await workflow.save()
+        await _fire_error_webhook(workflow, e, task_exec, user_prompt)
     finally:
         agent_tasks_active.dec()
         agent_tasks_total.labels(

@@ -341,6 +341,7 @@ class _Workflow {
     this.repoBranch,
     this.repoTokenName,
     this.webhookUrl,
+    this.errorWebhookUrl,
   });
 
   final String id;
@@ -365,6 +366,7 @@ class _Workflow {
   final String? repoBranch;
   final String? repoTokenName;
   final String? webhookUrl;
+  final String? errorWebhookUrl;
 
   factory _Workflow.fromJson(Map<String, dynamic> json) => _Workflow(
     id: json['id']?.toString() ?? '',
@@ -391,6 +393,7 @@ class _Workflow {
     repoBranch: json['repo_branch']?.toString(),
     repoTokenName: json['repo_token_name']?.toString(),
     webhookUrl: json['webhook_url']?.toString(),
+    errorWebhookUrl: json['error_webhook_url']?.toString(),
   );
 }
 
@@ -1451,6 +1454,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   final _repoBranchCtrl = TextEditingController();
   final _repoTokenCtrl = TextEditingController();
   final _webhookUrlCtrl = TextEditingController();
+  final _errorWebhookUrlCtrl = TextEditingController();
   late Future<List<_Skill>> _skillsFuture;
   late Future<List<_Guardrail>> _wfGuardrailsFuture;
 
@@ -1483,6 +1487,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _repoBranchCtrl.text = w?.repoBranch ?? '';
     _repoTokenCtrl.text = w?.repoTokenName ?? '';
     _webhookUrlCtrl.text = w?.webhookUrl ?? '';
+    _errorWebhookUrlCtrl.text = w?.errorWebhookUrl ?? '';
     // Pre-populate credential overrides from existing workflow
     if (w != null) {
       _credOverrides.addAll(
@@ -1545,6 +1550,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _repoBranchCtrl.dispose();
     _repoTokenCtrl.dispose();
     _webhookUrlCtrl.dispose();
+    _errorWebhookUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -1584,6 +1590,9 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         body['webhook_url'] = _webhookUrlCtrl.text.trim().isEmpty
             ? null
             : _webhookUrlCtrl.text.trim();
+        body['error_webhook_url'] = _errorWebhookUrlCtrl.text.trim().isEmpty
+            ? null
+            : _errorWebhookUrlCtrl.text.trim();
         body['repo_url'] = _repoUrlCtrl.text.trim().isEmpty
             ? null
             : _repoUrlCtrl.text.trim();
@@ -1639,6 +1648,9 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         }
         if (_webhookUrlCtrl.text.trim().isNotEmpty) {
           body['webhook_url'] = _webhookUrlCtrl.text.trim();
+        }
+        if (_errorWebhookUrlCtrl.text.trim().isNotEmpty) {
+          body['error_webhook_url'] = _errorWebhookUrlCtrl.text.trim();
         }
       }
       final response = _isEdit
@@ -2085,6 +2097,12 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                   label: 'WEBHOOK URL (optional)',
                   controller: _webhookUrlCtrl,
                   hint: 'https://your-server.com/webhook',
+                ),
+                const SizedBox(height: sp12),
+                _WfDialogField(
+                  label: 'ERROR WEBHOOK URL (optional)',
+                  controller: _errorWebhookUrlCtrl,
+                  hint: 'https://your-server.com/error-webhook',
                 ),
                 const SizedBox(height: sp24),
                 Row(
