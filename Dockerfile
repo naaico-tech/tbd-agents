@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.pub-cache \
 
 COPY frontend/ ./
 RUN --mount=type=cache,target=/root/.pub-cache \
-    flutter build web --release --base-href /dashboard-new-ui/
+    flutter build web --release --base-href /dashboard/
 
 
 FROM node:22-bookworm-slim AS node-runtime
