@@ -334,6 +334,8 @@ class _Workflow {
     this.infiniteSession = true,
     this.bypassMemory = false,
     this.autoMemory = false,
+    this.tsvToolResults = false,
+    this.caveman = false,
     this.reasoningEffort,
     this.repoUrl,
     this.repoBranch,
@@ -356,6 +358,8 @@ class _Workflow {
   final bool infiniteSession;
   final bool bypassMemory;
   final bool autoMemory;
+  final bool tsvToolResults;
+  final bool caveman;
   final String? reasoningEffort;
   final String? repoUrl;
   final String? repoBranch;
@@ -380,6 +384,8 @@ class _Workflow {
     infiniteSession: json['infinite_session'] as bool? ?? true,
     bypassMemory: json['bypass_memory'] as bool? ?? false,
     autoMemory: json['auto_memory'] as bool? ?? false,
+    tsvToolResults: json['tsv_tool_results'] as bool? ?? false,
+    caveman: json['caveman'] as bool? ?? false,
     reasoningEffort: json['reasoning_effort']?.toString(),
     repoUrl: json['repo_url']?.toString(),
     repoBranch: json['repo_branch']?.toString(),
@@ -543,6 +549,49 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
     });
   }
 
+  Future<void> _confirmDelete(
+    BuildContext ctx,
+    _Workflow workflow,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => _ConfirmDeleteDialog(
+        message: "Delete workflow '${workflow.title.isNotEmpty ? workflow.title : workflow.id}'?",
+        accentColor: accentLavender,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final response = await _client.delete(
+        AppLinks.apiUri('/workflows/${workflow.id}'),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final decoded = jsonDecode(response.body);
+        throw Exception(
+          decoded['detail'] ?? 'Delete failed (${response.statusCode})',
+        );
+      }
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Workflow '${workflow.title.isNotEmpty ? workflow.title : workflow.id}' deleted.",
+          ),
+          backgroundColor: accentTeal,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delete failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<_Workflow>>(
@@ -629,6 +678,7 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
                                 workflow: wf,
                                 client: _client,
                                 onSaved: _reload,
+                                onDelete: () => _confirmDelete(context, wf),
                               ),
                           ],
                         ),
@@ -651,11 +701,13 @@ class _WorkflowCard extends StatelessWidget {
     required this.workflow,
     required this.client,
     required this.onSaved,
+    this.onDelete,
   });
 
   final _Workflow workflow;
   final http.Client client;
   final VoidCallback onSaved;
+  final VoidCallback? onDelete;
 
   String get _displayTitle =>
       workflow.title.isNotEmpty ? workflow.title : workflow.agentId;
@@ -771,6 +823,23 @@ class _WorkflowCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (onDelete != null) ...[
+                    const SizedBox(width: sp8),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: accentPrimary,
+                        size: 20,
+                      ),
+                      onPressed: onDelete,
+                      tooltip: 'Delete workflow',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -834,6 +903,19 @@ class _CredentialOverridesDialogState
             .map((e) => _CredOverride(envVar: e.key, tokenName: e.value))
             .toList();
         _loading = false;
+        // Bug 5: Sanitize any overrides whose envVar or tokenName no longer
+        // exist in the current lists (e.g. tool was removed).
+        if (allKeys.isNotEmpty) {
+          for (final o in _overrides) {
+            if (!allKeys.contains(o.envVar)) {
+              o.envVar = allKeys.first;
+            }
+            if (tokens.isNotEmpty &&
+                !tokens.any((t) => t.name == o.tokenName)) {
+              o.tokenName = tokens.first.name;
+            }
+          }
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -1360,6 +1442,8 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   late bool _infiniteSession;
   late bool _bypassMemory;
   late bool _autoMemory;
+  late bool _tsvToolResults;
+  late bool _caveman;
   late String? _reasoningEffort;
   final _skillTagsCtrl = TextEditingController();
   final _guardrailTagsCtrl = TextEditingController();
@@ -1390,6 +1474,8 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _infiniteSession = w?.infiniteSession ?? true;
     _bypassMemory = w?.bypassMemory ?? false;
     _autoMemory = w?.autoMemory ?? false;
+    _tsvToolResults = w?.tsvToolResults ?? false;
+    _caveman = w?.caveman ?? false;
     _reasoningEffort = w?.reasoningEffort;
     _skillTagsCtrl.text = (w?.skillTags ?? []).join(', ');
     _guardrailTagsCtrl.text = (w?.guardrailTags ?? []).join(', ');
@@ -1421,6 +1507,19 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
       setState(() {
         _credTokens = results[0] as List<_TokenRef>;
         _credEnvVarKeys = results[1] as List<String>;
+        // Bug 5: Sanitize any pre-populated overrides whose envVar or tokenName
+        // no longer matches the fetched lists (e.g. tool/token was removed).
+        if (_credEnvVarKeys.isNotEmpty) {
+          for (final o in _credOverrides) {
+            if (!_credEnvVarKeys.contains(o.envVar)) {
+              o.envVar = _credEnvVarKeys.first;
+            }
+            if (_credTokens.isNotEmpty &&
+                !_credTokens.any((t) => t.name == o.tokenName)) {
+              o.tokenName = _credTokens.first.name;
+            }
+          }
+        }
       });
     } catch (_) {
       // Best-effort; overrides section will show empty dropdowns
@@ -1470,22 +1569,78 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
           for (final o in _credOverrides) o.envVar: o.tokenName,
         },
         'skill_ids': _selectedSkillIds,
-        if (_skillTagsCtrl.text.trim().isNotEmpty)
-          'skill_tags': _skillTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
         'guardrail_ids': _selectedGuardrailIds,
-        if (_guardrailTagsCtrl.text.trim().isNotEmpty)
-          'guardrail_tags': _guardrailTagsCtrl.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
         'output_format': _outputFormat,
         'infinite_session': _infiniteSession,
         'bypass_memory': _bypassMemory,
         'auto_memory': _autoMemory,
+        'tsv_tool_results': _tsvToolResults,
+        'caveman': _caveman,
         if (_isEdit) 'status': _isActive ? 'active' : 'inactive',
-        if (_reasoningEffort != null) 'reasoning_effort': _reasoningEffort,
-        if (_repoUrlCtrl.text.trim().isNotEmpty) 'repo_url': _repoUrlCtrl.text.trim(),
-        if (_repoBranchCtrl.text.trim().isNotEmpty) 'repo_branch': _repoBranchCtrl.text.trim(),
-        if (_repoTokenCtrl.text.trim().isNotEmpty) 'repo_token_name': _repoTokenCtrl.text.trim(),
-        if (_webhookUrlCtrl.text.trim().isNotEmpty) 'webhook_url': _webhookUrlCtrl.text.trim(),
       };
+      // Bug 3: In edit mode, always include optional fields so they can be
+      // cleared by the user. In create mode, only include when non-empty.
+      if (_isEdit) {
+        body['webhook_url'] = _webhookUrlCtrl.text.trim().isEmpty
+            ? null
+            : _webhookUrlCtrl.text.trim();
+        body['repo_url'] = _repoUrlCtrl.text.trim().isEmpty
+            ? null
+            : _repoUrlCtrl.text.trim();
+        body['repo_branch'] = _repoBranchCtrl.text.trim().isEmpty
+            ? null
+            : _repoBranchCtrl.text.trim();
+        body['repo_token_name'] = _repoTokenCtrl.text.trim().isEmpty
+            ? null
+            : _repoTokenCtrl.text.trim();
+        body['reasoning_effort'] = _reasoningEffort; // null is valid (clears it)
+        body['skill_tags'] = _skillTagsCtrl.text.trim().isEmpty
+            ? <String>[]
+            : _skillTagsCtrl.text
+                .trim()
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+        body['guardrail_tags'] = _guardrailTagsCtrl.text.trim().isEmpty
+            ? <String>[]
+            : _guardrailTagsCtrl.text
+                .trim()
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+      } else {
+        if (_skillTagsCtrl.text.trim().isNotEmpty) {
+          body['skill_tags'] = _skillTagsCtrl.text
+              .trim()
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+        if (_guardrailTagsCtrl.text.trim().isNotEmpty) {
+          body['guardrail_tags'] = _guardrailTagsCtrl.text
+              .trim()
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+        if (_reasoningEffort != null) body['reasoning_effort'] = _reasoningEffort;
+        if (_repoUrlCtrl.text.trim().isNotEmpty) {
+          body['repo_url'] = _repoUrlCtrl.text.trim();
+        }
+        if (_repoBranchCtrl.text.trim().isNotEmpty) {
+          body['repo_branch'] = _repoBranchCtrl.text.trim();
+        }
+        if (_repoTokenCtrl.text.trim().isNotEmpty) {
+          body['repo_token_name'] = _repoTokenCtrl.text.trim();
+        }
+        if (_webhookUrlCtrl.text.trim().isNotEmpty) {
+          body['webhook_url'] = _webhookUrlCtrl.text.trim();
+        }
+      }
       final response = _isEdit
           ? await widget.client.put(
               AppLinks.apiUri('/workflows/${widget.existing!.id}'),
@@ -1769,23 +1924,24 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                 ),
                 const SizedBox(height: sp8),
                 // TOGGLES ──────────────────────────────────────────────
-                SwitchListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Row(
-                    children: [
-                      const Text('STATUS', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
-                      const SizedBox(width: sp8),
-                      RetroChip(
-                        label: _isActive ? 'ACTIVE' : 'INACTIVE',
-                        color: _isActive ? const Color(0xFF4CAF50) : accentPrimary,
-                      ),
-                    ],
+                if (_isEdit)
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Row(
+                      children: [
+                        const Text('STATUS', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                        const SizedBox(width: sp8),
+                        RetroChip(
+                          label: _isActive ? 'ACTIVE' : 'INACTIVE',
+                          color: _isActive ? const Color(0xFF4CAF50) : accentPrimary,
+                        ),
+                      ],
+                    ),
+                    value: _isActive,
+                    activeThumbColor: const Color(0xFF4CAF50),
+                    onChanged: (v) => setState(() => _isActive = v),
                   ),
-                  value: _isActive,
-                  activeThumbColor: const Color(0xFF4CAF50),
-                  onChanged: (v) => setState(() => _isActive = v),
-                ),
                 SwitchListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -1809,6 +1965,22 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                   value: _autoMemory,
                   activeThumbColor: accentLavender,
                   onChanged: (v) => setState(() => _autoMemory = v),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('TSV TOOL RESULTS', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  value: _tsvToolResults,
+                  activeThumbColor: accentLavender,
+                  onChanged: (v) => setState(() => _tsvToolResults = v),
+                ),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('CAVEMAN', style: TextStyle(fontFamily: fontBody, fontSize: 11, color: textPrimary)),
+                  value: _caveman,
+                  activeThumbColor: accentLavender,
+                  onChanged: (v) => setState(() => _caveman = v),
                 ),
                 const SizedBox(height: sp12),
                 const SizedBox(height: sp12),

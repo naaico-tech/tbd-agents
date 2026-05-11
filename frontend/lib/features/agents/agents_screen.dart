@@ -24,6 +24,8 @@ class _Agent {
     required this.knowledgeSourceIds,
     required this.builtinTools,
     required this.createdAt,
+    required this.mcpServerTags,
+    required this.knowledgeTags,
   });
 
   final String id;
@@ -37,6 +39,8 @@ class _Agent {
   final List<String> knowledgeSourceIds;
   final List<String> builtinTools;
   final DateTime createdAt;
+  final List<String> mcpServerTags;
+  final List<String> knowledgeTags;
 
   factory _Agent.fromJson(Map<String, dynamic> j) => _Agent(
     id: j['id']?.toString() ?? '',
@@ -63,6 +67,8 @@ class _Agent {
         .toList(),
     createdAt:
         DateTime.tryParse(j['created_at']?.toString() ?? '') ?? DateTime.now(),
+    mcpServerTags: List<String>.from(j['mcp_server_tags'] ?? []),
+    knowledgeTags: List<String>.from(j['knowledge_tags'] ?? []),
   );
 }
 
@@ -282,7 +288,7 @@ class _AgentsScreenState extends State<AgentsScreen> {
                       context,
                       apiPath: '/agents/import',
                       resourceLabel: 'AGENTS',
-                    ),
+                    ).then((_) => _reload()),
                     icon: Icons.upload_outlined,
                     color: accentSlate,
                   ),
@@ -512,8 +518,12 @@ class _AgentDialogState extends State<_AgentDialog> {
   List<String> _selectedCustomToolIds = [];
   List<String> _selectedKnowledgeIds = [];
   List<String> _selectedBuiltinTools = [];
-  final _mcpTagsCtrl = TextEditingController();
-  final _knowledgeTagsCtrl = TextEditingController();
+  late final _mcpTagsCtrl = TextEditingController(
+    text: widget.existing?.mcpServerTags.join(', '),
+  );
+  late final _knowledgeTagsCtrl = TextEditingController(
+    text: widget.existing?.knowledgeTags.join(', '),
+  );
   late Future<List<_McpServer>> _mcpsFuture;
   late Future<List<_CustomTool>> _customToolsFuture;
   late Future<List<_KnowledgeSource>> _knowledgeFuture;
@@ -2368,7 +2378,7 @@ class _EnvVarRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
             ),
             padding: const EdgeInsets.symmetric(horizontal: sp8),
-            child: DropdownButton<String>(
+            child: DropdownButton<String?>(
               value: selectedToken,
               isExpanded: true,
               underline: const SizedBox(),
@@ -2387,7 +2397,7 @@ class _EnvVarRow extends StatelessWidget {
                 ),
               ),
               items: [
-                const DropdownMenuItem<String>(
+                const DropdownMenuItem<String?>(
                   value: null,
                   child: Text(
                     '— not mapped —',
@@ -2399,7 +2409,7 @@ class _EnvVarRow extends StatelessWidget {
                   ),
                 ),
                 ...availableTokens.map(
-                  (t) => DropdownMenuItem<String>(
+                  (t) => DropdownMenuItem<String?>(
                     value: t.name,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2661,7 +2671,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                       context,
                       apiPath: '/skills/import',
                       resourceLabel: 'SKILLS',
-                    ),
+                    ).then((_) => _reload()),
                     icon: Icons.upload_outlined,
                     color: accentLavender,
                   ),
@@ -4251,6 +4261,9 @@ class _Guardrail {
     required this.guardrailType,
     required this.tags,
     required this.enabled,
+    this.promptConfig,
+    this.requestConfig,
+    this.outputConfig,
   });
 
   final String id;
@@ -4259,6 +4272,9 @@ class _Guardrail {
   final String guardrailType;
   final List<String> tags;
   final bool enabled;
+  final Map<String, dynamic>? promptConfig;
+  final Map<String, dynamic>? requestConfig;
+  final Map<String, dynamic>? outputConfig;
 
   factory _Guardrail.fromJson(Map<String, dynamic> j) => _Guardrail(
     id: j['id']?.toString() ?? '',
@@ -4269,6 +4285,9 @@ class _Guardrail {
         .map((e) => e.toString())
         .toList(),
     enabled: j['enabled'] == true,
+    promptConfig: j['prompt_config'] as Map<String, dynamic>?,
+    requestConfig: j['request_config'] as Map<String, dynamic>?,
+    outputConfig: j['output_config'] as Map<String, dynamic>?,
   );
 }
 
@@ -4618,6 +4637,38 @@ class _GuardrailDialogState extends State<_GuardrailDialog> {
       _guardrailType = g.guardrailType;
       _enabled = g.enabled;
       _tagsCtrl.text = g.tags.join(', ');
+      // Populate type-specific config controllers from existing guardrail
+      final pc = g.promptConfig;
+      final rc = g.requestConfig;
+      final oc = g.outputConfig;
+      if (pc != null) {
+        _forbiddenCtrl.text =
+            (pc['forbidden_patterns'] as List<dynamic>? ?? []).join('\n');
+        _requiredCtrl.text =
+            (pc['required_patterns'] as List<dynamic>? ?? []).join('\n');
+        if (pc['max_length'] != null) {
+          _maxLenCtrl.text = pc['max_length'].toString();
+        }
+        _piiDetection = pc['detect_pii'] == true;
+      }
+      if (rc != null) {
+        final schema = rc['json_schema'];
+        if (schema != null) {
+          _jsonSchemaCtrl.text =
+              schema is String ? schema : jsonEncode(schema);
+        }
+      }
+      if (oc != null) {
+        _forbiddenCtrl.text =
+            (oc['forbidden_patterns'] as List<dynamic>? ?? []).join('\n');
+        _requiredCtrl.text =
+            (oc['required_patterns'] as List<dynamic>? ?? []).join('\n');
+        if (oc['max_length'] != null) {
+          _maxLenCtrl.text = oc['max_length'].toString();
+        }
+        _piiDetection = oc['pii_detection'] == true;
+        _mustBeValidJson = oc['must_be_valid_json'] == true;
+      }
     }
   }
 
@@ -4660,7 +4711,7 @@ class _GuardrailDialogState extends State<_GuardrailDialog> {
     }
     if (_guardrailType == 'request') {
       final raw = _jsonSchemaCtrl.text.trim();
-      if (raw.isEmpty) return {};
+      if (raw.isEmpty) return null;  // was {}, now null to avoid backend 422
       try {
         return {'json_schema': jsonDecode(raw)};
       } catch (_) {

@@ -223,11 +223,11 @@ Future<DashboardSnapshot> fetchDashboardSnapshot(http.Client client) async {
 
 Future<List<dynamic>> _fetchList(http.Client client, String path) async {
   final response = await client.get(AppLinks.apiUri(path));
-  if (response.statusCode == 204 || response.body.trim().isEmpty) {
-    return const [];
-  }
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw Exception('Failed to load $path (${response.statusCode})');
+  }
+  if (response.statusCode == 204 || response.body.trim().isEmpty) {
+    return const [];
   }
 
   final decoded = jsonDecode(response.body);
@@ -281,11 +281,14 @@ TaskExecutionSummary _toTaskSummary(
 ) {
   final id = task['id']?.toString() ?? 'unknown';
   final workflowId = task['workflow_id']?.toString();
+  final apiTitle = task['workflow_title']?.toString();
   return TaskExecutionSummary(
     id: id,
-    workflowTitle: workflowId == null
-        ? '—'
-        : (workflowTitles[workflowId] ?? workflowId.substring(0, 8)),
+    workflowTitle: (apiTitle != null && apiTitle.trim().isNotEmpty)
+        ? apiTitle.trim()
+        : workflowId == null
+            ? '—'
+            : (workflowTitles[workflowId] ?? workflowId.substring(0, 8)),
     status: task['status']?.toString() ?? 'unknown',
     model: task['model']?.toString() ?? '—',
     createdAt: DateTime.tryParse(task['created_at']?.toString() ?? ''),
