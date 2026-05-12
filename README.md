@@ -76,7 +76,7 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 🧩 **Skills system**<br>Modular instruction sets that can be installed per workflow to shape agent behaviour.
 
-📚 **Knowledge bases**<br>Attach Qdrant vector DBs or upload files/text tagged for retrieval; agents pull relevant knowledge automatically.
+📚 **Knowledge bases**<br>Attach Qdrant or PostgreSQL pgvector vector stores, or upload files/text tagged for retrieval; swap backends with a single env var.
 
 📦 **Import/Export**<br>Export and import Skills, Agents, Workflows, and Knowledge Bases as JSON bundles for backup or cross-environment migration.
 
@@ -123,6 +123,24 @@ Your GitHub PAT needs the `copilot` scope — [create one here](https://github.c
 | `http://localhost:8000/api` | API base path |
 
 See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for detailed local development instructions.
+
+### Choosing a Vector Store
+
+TBD Agents supports two vector store backends. Select one by setting
+`COMPOSE_PROFILES` in your `.env`:
+
+| Profile | Backend | When to use |
+|---------|---------|-------------|
+| `qdrant` | [Qdrant](https://qdrant.tech) (default) | New deployments, purpose-built vector DB |
+| `pgvector` | [PostgreSQL + pgvector](https://github.com/pgvector/pgvector) | You already run Postgres, want a single DB |
+
+```env
+# .env
+COMPOSE_PROFILES=qdrant    # or: pgvector
+VECTOR_STORE_BACKEND=qdrant  # must match the profile above
+```
+
+See the [pgvector guide](docs/guide/pgvector.md) for full setup instructions.
 
 ---
 
@@ -417,7 +435,7 @@ curl -X PUT http://localhost:8000/api/agents/<AGENT_ID> \
   -d '{"knowledge_source_ids": ["<SOURCE_ID>"]}'
 ```
 
-For local development, uncomment the `qdrant` service in `docker-compose.yml` and use `http://qdrant:6333` as the URL.
+For local development, set `COMPOSE_PROFILES=qdrant` in your `.env`, run `docker compose up`, and use `http://qdrant:6333` as the URL.
 
 ---
 

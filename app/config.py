@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Set QDRANT_URL to enable; semantic features silently degrade without it.
     qdrant_url: str | None = None
     qdrant_api_key: str | None = None
+    # Vector store backend selection
+    vector_store_backend: str = "qdrant"  # "qdrant" | "pgvector"
+    # PgVector settings (used when vector_store_backend = "pgvector")
+    pgvector_dsn: str | None = None  # e.g. postgresql+asyncpg://user:pass@localhost:5432/dbname
+    pgvector_table_prefix: str = "vs"  # table name prefix for vector collections
     # Conversation compaction
     compaction_enabled: bool = True
     compaction_token_threshold_pct: float = 0.75  # compact at 75% of context window

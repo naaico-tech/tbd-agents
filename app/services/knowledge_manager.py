@@ -1,17 +1,18 @@
 import logging
+import re
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape, quoteattr
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 
+from app.config import settings
 from app.models.knowledge_item import KnowledgeContentType, KnowledgeItem
 from app.models.knowledge_source import (
     KnowledgeSource,
     KnowledgeSourceStatus,
     KnowledgeSourceType,
 )
-from app.config import settings
 from app.observability import semantic_retrieval_hits_total, semantic_retrieval_results
 from app.services import token_manager
 from app.services.embeddings import embeddings_service
@@ -48,12 +49,13 @@ def _chunk_text(text: str, chunk_chars: int, overlap_chars: int) -> list[str]:
 
 
 class KnowledgeManager:
-    """Manages knowledge sources (Qdrant vector DB and MongoDB/GridFS items)."""
+    """Manages knowledge sources (Qdrant vector DB, pgvector, and MongoDB/GridFS items)."""
 
     async def test_connection(self, source: KnowledgeSource) -> dict:
         """Test connectivity for a knowledge source.
 
         For VECTOR_DB (Qdrant): connects and verifies the collection exists.
+        For PGVECTOR: connects via asyncpg and checks the pgvector extension.
         For MONGO_DB: always succeeds (local storage).
         """
         if source.source_type == KnowledgeSourceType.MONGO_DB:
@@ -62,6 +64,53 @@ class KnowledgeManager:
             source.updated_at = datetime.now(UTC)
             await source.save()
             return {"success": True}
+
+        if source.source_type == KnowledgeSourceType.PGVECTOR:
+            try:
+                import asyncpg
+
+                collection = source.connection_config.get("collection", "")
+                dsn_token_name = source.connection_config.get("dsn_token_name")
+
+                if dsn_token_name:
+                    dsn = await token_manager.get_token_value(dsn_token_name)
+                else:
+                    dsn = source.connection_config.get("dsn", "")
+
+                if not dsn:
+                    raise ValueError("No DSN configured for pgvector source")
+
+                conn = await asyncpg.connect(dsn)
+                try:
+                    row = await conn.fetchrow(
+                        "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
+                    )
+                    if row is None:
+                        raise RuntimeError(
+                            "pgvector extension is not installed in the target database"
+                        )
+                    logger.info(
+                        "pgvector extension confirmed; collection='%s'", collection
+                    )
+                finally:
+                    await conn.close()
+
+                source.status = KnowledgeSourceStatus.CONNECTED
+                source.last_error = None
+                source.updated_at = datetime.now(UTC)
+                await source.save()
+                return {
+                    "success": True,
+                    "status": "connected",
+                    "extension": "vector",
+                    "collection": collection,
+                }
+            except Exception as exc:
+                source.status = KnowledgeSourceStatus.ERROR
+                source.last_error = str(exc)[:500]
+                source.updated_at = datetime.now(UTC)
+                await source.save()
+                return {"success": False, "error": str(exc)[:500]}
 
         # VECTOR_DB (Qdrant)
         try:
@@ -159,6 +208,96 @@ class KnowledgeManager:
         finally:
             await client.close()
 
+    async def query_pgvector(
+        self,
+        source: KnowledgeSource,
+        limit: int = 10,
+        query: str | None = None,
+    ) -> list[dict]:
+        """Retrieve documents from a pgvector source.
+
+        When *query* is provided and embeddings are available, performs a
+        cosine-similarity search using the ``<=>`` operator.  Otherwise falls
+        back to a recency-ordered ``SELECT`` on the collection table.
+
+        The table is expected to have at least the columns:
+          - ``id``      — primary key
+          - ``text``    — document text
+          - ``embedding`` — ``vector`` column (present when semantic search is used)
+          - ``metadata`` — ``jsonb`` column (optional)
+        """
+        import asyncpg
+
+        collection = source.connection_config.get("collection", "")
+        dsn_token_name = source.connection_config.get("dsn_token_name")
+
+        if dsn_token_name:
+            dsn = await token_manager.get_token_value(dsn_token_name)
+        else:
+            dsn = source.connection_config.get("dsn", "")
+
+        if not dsn:
+            raise ValueError("No DSN configured for pgvector source")
+        if not collection:
+            raise ValueError("No collection (table name suffix) configured for pgvector source")
+        if not re.match(r"^[a-zA-Z0-9_]+$", collection):
+            raise ValueError(f"Invalid collection name: {collection!r}")
+
+        table = f"langchain_pg_embedding_{collection}"
+
+        conn = await asyncpg.connect(dsn)
+        try:
+            # ── Semantic search ──────────────────────────────────────────
+            if query and settings.embeddings_enabled:
+                query_vec = await embeddings_service.embed_one(query)
+                if query_vec is not None:
+                    vec_literal = "[" + ",".join(str(v) for v in query_vec) + "]"
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT id::text, document AS text, cmetadata AS metadata,
+                               1 - (embedding <=> $1::vector) AS score
+                        FROM {table}
+                        ORDER BY embedding <=> $1::vector
+                        LIMIT $2
+                        """,
+                        vec_literal,
+                        limit,
+                    )
+                    hits = [
+                        {
+                            "id": row["id"],
+                            "text": row["text"] or "",
+                            "metadata": dict(row["metadata"]) if row["metadata"] else {},
+                            "score": float(row["score"]),
+                        }
+                        for row in rows
+                    ]
+                    semantic_retrieval_results.labels(type="knowledge").observe(len(hits))
+                    if hits:
+                        semantic_retrieval_hits_total.labels(type="knowledge").inc()
+                    return hits
+
+            # ── Recency fallback ─────────────────────────────────────────
+            rows = await conn.fetch(
+                f"""
+                SELECT id::text, document AS text, cmetadata AS metadata
+                FROM {table}
+                ORDER BY id DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "text": row["text"] or "",
+                    "metadata": dict(row["metadata"]) if row["metadata"] else {},
+                }
+                for row in rows
+            ]
+        finally:
+            await conn.close()
+
     async def store_text_item(
         self,
         source_id: str,
@@ -182,7 +321,11 @@ class KnowledgeManager:
 
         items: list[KnowledgeItem] = []
         for idx, chunk in enumerate(chunks):
-            embed = await embeddings_service.embed_one(chunk) if settings.embeddings_enabled else None
+            embed = (
+                await embeddings_service.embed_one(chunk)
+                if settings.embeddings_enabled
+                else None
+            )
             item_meta = dict(metadata or {})
             item_meta["chunk_index"] = idx
             item_meta["chunk_total"] = len(chunks)
@@ -326,11 +469,11 @@ class KnowledgeManager:
             for item in items:
                 if item.content_type == KnowledgeContentType.TEXT and item.text_content:
                     section_prefix = (
-                        f'<item name={quoteattr(item.name)} tags={quoteattr(",".join(item.tags))}>\n'
+                        f'<item name={quoteattr(item.name)}'
+                        f' tags={quoteattr(",".join(item.tags))}>\n'
                     )
-                    section_suffix = "\n</item>"
                     remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
-                    text_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                    text_budget = remaining_budget - len(section_prefix) - len("\n</item>")
                     if text_budget <= 0:
                         break
                     clipped_text = _clip_text(
@@ -357,9 +500,12 @@ class KnowledgeManager:
                         text = r.get("text", "")
                         if text:
                             section_prefix = f'<item source={quoteattr(source.name)}>\n'
-                            section_suffix = "\n</item>"
-                            remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
-                            text_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                            remaining_budget = (
+                                effective_max_chars - total_chars - (1 if sections else 0)
+                            )
+                            text_budget = (
+                                remaining_budget - len(section_prefix) - len("\n</item>")
+                            )
                             if text_budget <= 0:
                                 break
                             clipped_text = _clip_text(
@@ -375,6 +521,36 @@ class KnowledgeManager:
                 except Exception as exc:
                     logger.warning(
                         "Failed to query vector DB '%s': %s", source.name, exc
+                    )
+            elif source.source_type == KnowledgeSourceType.PGVECTOR:
+                try:
+                    remaining = max(1, effective_item_limit - len(sections))
+                    results = await self.query_pgvector(source, limit=remaining, query=query)
+                    for r in results:
+                        text = r.get("text", "")
+                        if text:
+                            section_prefix = f'<item source={quoteattr(source.name)}>\n'
+                            remaining_budget = (
+                                effective_max_chars - total_chars - (1 if sections else 0)
+                            )
+                            text_budget = (
+                                remaining_budget - len(section_prefix) - len("\n</item>")
+                            )
+                            if text_budget <= 0:
+                                break
+                            clipped_text = _clip_text(
+                                text,
+                                min(item_char_limit, text_budget),
+                            )
+                            appended = _append_section(
+                                f'{section_prefix}{escape(clipped_text)}\n</item>',
+                                dedupe_key=f"pgvector:{source.name}:{clipped_text}",
+                            )
+                            if not appended or len(sections) >= effective_item_limit:
+                                break
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to query pgvector source '%s': %s", source.name, exc
                     )
 
         if not sections:
