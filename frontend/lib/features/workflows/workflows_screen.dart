@@ -54,10 +54,16 @@ class _TokensScreenState extends State<TokensScreen> {
     try {
       final response = await _client.delete(AppLinks.apiUri('/tokens/$id'));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        final decoded = jsonDecode(response.body);
-        throw Exception(
-          decoded['detail'] ?? 'Delete failed (${response.statusCode})',
-        );
+        String detail;
+        try {
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Delete failed (${response.statusCode})';
+        } catch (_) {
+          detail = response.body.isNotEmpty
+              ? response.body
+              : 'Delete failed (${response.statusCode})';
+        }
+        throw Exception(detail);
       }
       if (!mounted) return;
       _reload();
@@ -208,10 +214,16 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
       final response =
           await _client.delete(AppLinks.apiUri('/providers/$id'));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        final decoded = jsonDecode(response.body);
-        throw Exception(
-          decoded['detail'] ?? 'Delete failed (${response.statusCode})',
-        );
+        String detail;
+        try {
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Delete failed (${response.statusCode})';
+        } catch (_) {
+          detail = response.body.isNotEmpty
+              ? response.body
+              : 'Delete failed (${response.statusCode})';
+        }
+        throw Exception(detail);
       }
       if (!mounted) return;
       _reload();
@@ -572,10 +584,16 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
         AppLinks.apiUri('/workflows/${workflow.id}'),
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        final decoded = jsonDecode(response.body);
-        throw Exception(
-          decoded['detail'] ?? 'Delete failed (${response.statusCode})',
-        );
+        String detail;
+        try {
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Delete failed (${response.statusCode})';
+        } catch (_) {
+          detail = response.body.isNotEmpty
+              ? response.body
+              : 'Delete failed (${response.statusCode})';
+        }
+        throw Exception(detail);
       }
       if (!mounted) return;
       _reload();
@@ -3450,10 +3468,16 @@ class _ScheduledAgentsScreenState extends State<ScheduledAgentsScreen> {
       final response =
           await _client.delete(AppLinks.apiUri('/scheduled-agents/$id'));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        final decoded = jsonDecode(response.body);
-        throw Exception(
-          decoded['detail'] ?? 'Delete failed (${response.statusCode})',
-        );
+        String detail;
+        try {
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Delete failed (${response.statusCode})';
+        } catch (_) {
+          detail = response.body.isNotEmpty
+              ? response.body
+              : 'Delete failed (${response.statusCode})';
+        }
+        throw Exception(detail);
       }
       if (!mounted) return;
       _reload();

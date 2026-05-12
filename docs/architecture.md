@@ -19,7 +19,7 @@ When an agent has a custom provider configured, the engine selects an execution 
 
 | Provider type / condition | Execution path | Function |
 |---------------------------|---------------|----------|
-| `github_copilot` | Copilot SDK — GitHub Copilot infra | `_run_with_copilot_sdk` |
+| `github_copilot` | Copilot SDK — GitHub Copilot infra; token is replaced with stored PAT and the SDK session runs inline | `run_agent` (inline) |
 | `anthropic` + **no** `base_url` | Claude Agent SDK — server-side agentic loop on Anthropic infra (`/v1/environments`, `/v1/agents`) | `_run_with_claude_sdk` |
 | `anthropic` + `base_url` set (gateway mode) | Anthropic messages API — client-side agentic loop via `messages.create`. Works with OpenRouter, LiteLLM, and any gateway implementing `/v1/messages` | `_run_with_anthropic_messages` |
 | `openai` / `azure_openai` / `custom` | OpenAI-compatible chat completions loop via `/v1/chat/completions` | `_run_with_custom_provider` |

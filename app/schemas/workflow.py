@@ -23,13 +23,13 @@ def _validate_webhook_url(v: str | None) -> str | None:
         return v
     parsed = urlparse(v)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("webhook_url must use http or https scheme")
+        raise ValueError("Webhook URL must use http or https scheme")
     host = parsed.hostname or ""
     if not host:
-        raise ValueError("webhook_url must contain a valid host")
+        raise ValueError("Webhook URL must contain a valid host")
     # Block metadata endpoint by hostname
     if host in ("metadata.google.internal", "169.254.169.254"):
-        raise ValueError("webhook_url targets a disallowed host")
+        raise ValueError("Webhook URL targets a disallowed host")
     # Resolve hostname and check for private/loopback addresses
     try:
         addrs = {info[4][0] for info in socket.getaddrinfo(host, None)}
@@ -41,7 +41,7 @@ def _validate_webhook_url(v: str | None) -> str | None:
         except ValueError:
             continue
         if any(addr in net for net in _BLOCKED_NETWORKS):
-            raise ValueError("webhook_url targets a private or reserved IP address")
+            raise ValueError("Webhook URL targets a private or reserved IP address")
     return v
 
 

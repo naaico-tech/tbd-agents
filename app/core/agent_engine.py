@@ -149,9 +149,9 @@ def _classify_error(exc: BaseException) -> tuple[str, str, int | None]:
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         return ("http_error", f"HTTP {status}: {exc.response.text[:200]}", status)
-    if isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout):
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return ("connection_error", str(exc), None)
-    if isinstance(exc, httpx.TimeoutException | TimeoutError):
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         return ("timeout_error", str(exc), None)
     return ("internal_error", str(exc), None)
 
@@ -2400,8 +2400,18 @@ async def _run_with_anthropic_messages(
                     for m in messages
                 ]
                 _compact_output = _compact_messages(_compact_input, model=model, context_window=context_window)
+                # Extract compaction note (injected as role=system by _compact_messages) before
+                # filtering system messages, then append it to the top-level system prompt so
+                # the model can see the context window note.
+                _compaction_note = next(
+                    (m["content"] for m in _compact_output
+                     if m.get("role") == "system" and "[Context compacted:" in m.get("content", "")),
+                    None,
+                )
                 messages = [{"role": m["role"], "content": m["content"]} for m in _compact_output if m["role"] != "system"]
-                _dropped = _msgs_before - len(messages) + 1
+                if _compaction_note:
+                    system_prompt = system_prompt + "\n\n" + _compaction_note
+                _dropped = _msgs_before - len(messages)  # based on actual pre/post message counts
                 context_compactions_total.labels(model=model).inc()
                 context_compaction_messages_dropped.labels(model=model).observe(max(0, _dropped))
                 await _log(
@@ -2416,7 +2426,7 @@ async def _run_with_anthropic_messages(
                     system=system_prompt,
                     messages=messages,
                     tools=anthropic_tools if anthropic_tools else [],
-                    max_tokens=8192,
+                    max_tokens=settings.anthropic_gateway_max_tokens,
                 )
             except Exception as exc:
                 await _log(workflow, "error", f"Anthropic gateway API error: {exc}", task_exec)
