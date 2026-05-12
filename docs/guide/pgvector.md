@@ -25,14 +25,28 @@ If you need sub-millisecond search over hundreds of millions of vectors, or you 
 
 ## Quick Start with Docker
 
-The `pgvector` service in `docker-compose.yml` is opt-in via a Compose profile so it does not start by default.
+The recommended way to select a vector store backend is via the `COMPOSE_PROFILES`
+variable in your `.env` file:
 
-```bash
-# Start only the pgvector container
-docker compose --profile pgvector up pgvector -d
+```env
+# .env — choose one
+COMPOSE_PROFILES=pgvector    # start pgvector
+# COMPOSE_PROFILES=qdrant   # (default) start Qdrant instead
 ```
 
-Verify the extension is active in the target database:
+Then start the stack normally:
+
+```bash
+docker compose up
+```
+
+Or, to start only the pgvector container without the full stack:
+
+```bash
+docker compose --profile pgvector up pgvector
+```
+
+Verify the extension is available:
 
 ```bash
 docker exec -it tbd-pgvector psql -U postgres -d tbd_agents \
@@ -299,6 +313,20 @@ GROUP BY state, wait_event_type;
 
 ## Migrating from Qdrant
 
+To switch vector stores at deploy time, update `COMPOSE_PROFILES` in your `.env` (and set `VECTOR_STORE_BACKEND` to match), then restart the stack:
+
+```env
+# .env
+COMPOSE_PROFILES=pgvector
+VECTOR_STORE_BACKEND=pgvector
+```
+
+```bash
+docker compose up
+```
+
+That is the only change needed to the Compose setup — no `docker-compose.yml` edits required.
+
 Switching `VECTOR_STORE_BACKEND` from `qdrant` to `pgvector` only affects the **global memory store** used by `memory_manager`. It does **not** affect existing `vector_db` (Qdrant) knowledge sources — those continue to work exactly as before regardless of the global backend setting.
 
 **Memory data is not automatically migrated.** If you need to carry over existing agent memories:
@@ -316,7 +344,7 @@ If you only want to use pgvector for new knowledge sources while keeping Qdrant 
 |---|---|---|
 | `ERROR: type "vector" does not exist` | pgvector extension not installed in the database | `CREATE EXTENSION IF NOT EXISTS vector;` |
 | Slow queries / sequential scan in `EXPLAIN` | Index not yet built, empty table, or stale statistics | `VACUUM ANALYZE vs_<collection>;` |
-| `connection refused` on port 5432 | pgvector container not running | `docker compose --profile pgvector up pgvector -d` |
+| `connection refused` on port 5432 | pgvector container not running | Set `COMPOSE_PROFILES=pgvector` in `.env` and run `docker compose up` |
 | `asyncpg.UndefinedTableError` during search | Collection table does not exist | Call `store.create_collection()` first, or add items via the API — the adapter creates the table automatically |
 | `{"success": false, "error": "pgvector extension is not installed..."}` on test | Extension missing | Connect to the DB as a superuser and run `CREATE EXTENSION IF NOT EXISTS vector;` |
 | Index not used after bulk insert | IVFFlat statistics are stale | `VACUUM ANALYZE vs_<collection>;` |
