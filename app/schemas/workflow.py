@@ -23,13 +23,13 @@ def _validate_webhook_url(v: str | None) -> str | None:
         return v
     parsed = urlparse(v)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("webhook_url must use http or https scheme")
+        raise ValueError("Webhook URL must use http or https scheme")
     host = parsed.hostname or ""
     if not host:
-        raise ValueError("webhook_url must contain a valid host")
+        raise ValueError("Webhook URL must contain a valid host")
     # Block metadata endpoint by hostname
     if host in ("metadata.google.internal", "169.254.169.254"):
-        raise ValueError("webhook_url targets a disallowed host")
+        raise ValueError("Webhook URL targets a disallowed host")
     # Resolve hostname and check for private/loopback addresses
     try:
         addrs = {info[4][0] for info in socket.getaddrinfo(host, None)}
@@ -41,7 +41,7 @@ def _validate_webhook_url(v: str | None) -> str | None:
         except ValueError:
             continue
         if any(addr in net for net in _BLOCKED_NETWORKS):
-            raise ValueError("webhook_url targets a private or reserved IP address")
+            raise ValueError("Webhook URL targets a private or reserved IP address")
     return v
 
 
@@ -81,6 +81,13 @@ class WorkflowCreate(BaseModel):
     def _check_webhook_url(cls, v: str | None) -> str | None:
         return _validate_webhook_url(v)
 
+    error_webhook_url: str | None = None  # URL to POST to on task failure
+
+    @field_validator("error_webhook_url")
+    @classmethod
+    def _check_error_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
+
 
 class WorkflowUpdate(BaseModel):
     title: str | None = None
@@ -103,11 +110,17 @@ class WorkflowUpdate(BaseModel):
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] | None = None  # env_var → token_name overrides for custom tools
     webhook_url: str | None = None  # URL to POST to after task completion
+    error_webhook_url: str | None = None  # URL to POST to on task failure
     status: str | None = None  # active | inactive
 
     @field_validator("webhook_url")
     @classmethod
     def _check_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
+
+    @field_validator("error_webhook_url")
+    @classmethod
+    def _check_error_webhook_url(cls, v: str | None) -> str | None:
         return _validate_webhook_url(v)
 
 
@@ -173,6 +186,7 @@ class WorkflowResponse(BaseModel):
     repo_token_name: str | None = None
     credential_overrides: dict[str, str] = {}  # env_var → token_name overrides for custom tools
     webhook_url: str | None = None  # URL to POST to after task completion
+    error_webhook_url: str | None = None  # URL to POST to on task failure
     usage: UsageStatsResponse | None = None
     logs: list[LogEntryResponse] = []
     messages: list[MessageResponse]

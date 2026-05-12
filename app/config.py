@@ -56,10 +56,8 @@ class Settings(BaseSettings):
     # Plugin system
     plugins_dir: str = "app/plugins"
     plugins_config: str = "app/plugins.yaml"
-    # Feature flag: allow anthropic provider type to use a custom base_url
-    # pointing to third-party Anthropic-compatible gateways (e.g. LiteLLM).
-    # Set to false to disable and always use the default Anthropic endpoint.
-    claude_sdk_third_party_providers_enabled: bool = True
+    # Max output tokens for Anthropic gateway (messages API) path; adjust for models with lower limits
+    anthropic_gateway_max_tokens: int = 8192
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

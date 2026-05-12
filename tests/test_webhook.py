@@ -3,9 +3,16 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anthropic
+import httpx
 import pytest
 
-from app.core.agent_engine import _fire_webhook
+from app.core.agent_engine import _classify_error, _fire_error_webhook, _fire_webhook
+
+
+def _make_httpx_response(status: int = 200) -> httpx.Response:
+    return httpx.Response(status, request=httpx.Request("GET", "http://example.com"))
+
 
 
 class TestFireWebhook:
@@ -131,3 +138,109 @@ class TestWorkflowWebhookField:
 
         fields = WorkflowResponse.model_fields
         assert "webhook_url" in fields
+
+
+class TestClassifyError:
+    """Unit tests for _classify_error()."""
+
+    def test_rate_limit_error(self):
+        """anthropic.RateLimitError → rate_limit_exceeded with status 429."""
+        exc = anthropic.RateLimitError(
+            "rate limited", response=_make_httpx_response(429), body=None
+        )
+        error_type, msg, code = _classify_error(exc)
+        assert error_type == "rate_limit_exceeded"
+        assert code == 429
+        assert "rate limited" in msg
+
+    def test_connect_error(self):
+        """httpx.ConnectError → connection_error with no status code."""
+        exc = httpx.ConnectError("connection refused")
+        error_type, msg, code = _classify_error(exc)
+        assert error_type == "connection_error"
+        assert code is None
+
+    def test_timeout_error(self):
+        """httpx.ReadTimeout → timeout_error with no status code."""
+        exc = httpx.ReadTimeout("read timed out")
+        error_type, msg, code = _classify_error(exc)
+        assert error_type == "timeout_error"
+        assert code is None
+
+    def test_http_status_error(self):
+        """httpx.HTTPStatusError with status 500 → http_error with status code 500."""
+        req = httpx.Request("GET", "http://example.com")
+        resp = httpx.Response(500, request=req, text="server error")
+        exc = httpx.HTTPStatusError("error", request=req, response=resp)
+        error_type, msg, code = _classify_error(exc)
+        assert error_type == "http_error"
+        assert code == 500
+        assert "500" in msg
+
+    def test_generic_error(self):
+        """RuntimeError → internal_error with no status code."""
+        exc = RuntimeError("something unexpected")
+        error_type, msg, code = _classify_error(exc)
+        assert error_type == "internal_error"
+        assert code is None
+        assert "something unexpected" in msg
+
+
+class TestFireErrorWebhook:
+    """Unit tests for _fire_error_webhook()."""
+
+    @pytest.mark.asyncio
+    async def test_no_call_when_url_is_none(self):
+        """When error_webhook_url is None, _fire_webhook is not called."""
+        workflow = MagicMock()
+        workflow.error_webhook_url = None
+
+        with patch("app.core.agent_engine._fire_webhook") as mock_fire:
+            await _fire_error_webhook(workflow, RuntimeError("oops"), None, "test prompt")
+
+        mock_fire.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fires_with_structured_payload(self):
+        """When error_webhook_url is set, _fire_webhook is called with a structured payload."""
+        workflow = MagicMock()
+        workflow.error_webhook_url = "https://example.com/error-hook"
+        workflow.id = "wf-123"
+        workflow.title = "Test Workflow"
+
+        exc = RuntimeError("boom")
+
+        captured = {}
+
+        async def fake_fire_webhook(url, payload):
+            captured["url"] = url
+            captured["payload"] = payload
+
+        with patch("app.core.agent_engine._fire_webhook", side_effect=fake_fire_webhook):
+            await _fire_error_webhook(workflow, exc, None, "my prompt")
+
+        assert captured["url"] == "https://example.com/error-hook"
+        payload = captured["payload"]
+        assert payload["status"] == "failed"
+        assert payload["error_type"] == "internal_error"
+        assert "boom" in payload["error_message"]
+        assert payload["error_code"] is None
+        assert payload["workflow_id"] == "wf-123"
+
+    @pytest.mark.asyncio
+    async def test_webhook_failure_does_not_propagate(self):
+        """Even if the underlying HTTP call fails, _fire_error_webhook does not raise."""
+        workflow = MagicMock()
+        workflow.error_webhook_url = "https://bad-host.invalid/error-hook"
+        workflow.id = "wf-999"
+        workflow.title = "Broken Workflow"
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=Exception("network failure"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.core.agent_engine.httpx.AsyncClient", return_value=mock_client):
+            # Should complete without raising
+            await _fire_error_webhook(workflow, RuntimeError("original error"), None, "prompt")
+

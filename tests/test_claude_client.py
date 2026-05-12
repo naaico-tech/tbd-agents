@@ -300,6 +300,7 @@ class TestClaudeExecutionRouting:
             mock_provider.name = "my-claude"
             mock_provider.provider_type = ProviderType.ANTHROPIC
             mock_provider.api_key_token_name = "claude-key"
+            mock_provider.base_url = None  # Direct Anthropic: no gateway base_url
             MockProvider.get = AsyncMock(return_value=mock_provider)
 
             mock_tm.get_token_value = AsyncMock(return_value="sk-ant-test-key")
