@@ -142,6 +142,23 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
+  # ── Optional: PgVector ───────────────────────────────────────────────────────
+  # Start with: docker compose --profile pgvector up
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: tbd-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGVECTOR_USER:-postgres}
+      POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-postgres}
+      POSTGRES_DB: ${PGVECTOR_DB:-tbd_agents}
+    ports:
+      - "${PGVECTOR_PORT:-5432}:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    profiles:
+      - pgvector
+
   # ── Observability Stack ─────────────────────────────────────────────────────
 
   otel-collector:
@@ -227,6 +244,7 @@ volumes:
   redis_data:
   repos_data:
   qdrant_data:
+  pgvector_data:
   prometheus_data:
   tempo_data:
   loki_data:

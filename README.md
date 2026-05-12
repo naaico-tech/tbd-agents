@@ -76,7 +76,7 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 🧩 **Skills system**<br>Modular instruction sets that can be installed per workflow to shape agent behaviour.
 
-📚 **Knowledge bases**<br>Attach Qdrant vector DBs or upload files/text tagged for retrieval; agents pull relevant knowledge automatically.
+📚 **Knowledge bases**<br>Attach Qdrant or PostgreSQL pgvector vector stores, or upload files/text tagged for retrieval; swap backends with a single env var.
 
 📦 **Import/Export**<br>Export and import Skills, Agents, Workflows, and Knowledge Bases as JSON bundles for backup or cross-environment migration.
 

@@ -8,6 +8,7 @@ from pydantic import Field
 class KnowledgeSourceType(StrEnum):
     VECTOR_DB = "vector_db"
     MONGO_DB = "mongo_db"
+    PGVECTOR = "pgvector"
 
 
 class KnowledgeSourceStatus(StrEnum):
@@ -20,7 +21,12 @@ class KnowledgeSource(Document):
     name: str
     description: str = ""
     source_type: KnowledgeSourceType
-    connection_config: dict = Field(default_factory=dict)  # vector_db: {url, collection, api_key_token_name}
+    connection_config: dict = Field(
+        default_factory=dict,
+        # vector_db:  {url, collection, api_key_token_name}
+        # pgvector:   {dsn, collection, dsn_token_name}
+        #               dsn_token_name is optional; when set it overrides `dsn`
+    )
     tags: list[str] = Field(default_factory=list)
     status: KnowledgeSourceStatus = KnowledgeSourceStatus.REGISTERED
     last_error: str | None = None

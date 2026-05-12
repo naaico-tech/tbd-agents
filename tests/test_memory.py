@@ -505,7 +505,7 @@ class TestMemoryManager:
             patch("app.services.memory_manager.Memory") as MockMemory,
             patch("app.services.memory_manager.memory_stm.push_memory", new_callable=AsyncMock),
             patch.object(manager, "_enforce_ltm_cap", new_callable=AsyncMock),
-            patch.object(manager, "_upsert_qdrant", new_callable=AsyncMock),
+            patch.object(manager, "_upsert_vector_store", new_callable=AsyncMock),
         ):
             mock_settings.embeddings_enabled = True
             mock_emb.embed_one = AsyncMock(return_value=[0.1, 0.2, 0.3])

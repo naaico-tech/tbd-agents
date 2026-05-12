@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.models.knowledge_item import KnowledgeContentType
 from app.models.knowledge_source import KnowledgeSourceStatus, KnowledgeSourceType
@@ -11,6 +11,42 @@ from app.models.knowledge_source import KnowledgeSourceStatus, KnowledgeSourceTy
 
 
 class KnowledgeSourceCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "My Qdrant DB",
+                    "description": "Qdrant vector store",
+                    "source_type": "vector_db",
+                    "connection_config": {
+                        "url": "http://localhost:6333",
+                        "collection": "my_collection",
+                        "api_key_token_name": "QDRANT_API_KEY",
+                    },
+                    "tags": ["qdrant"],
+                },
+                {
+                    "name": "My pgvector DB",
+                    "description": "PostgreSQL pgvector source",
+                    "source_type": "pgvector",
+                    "connection_config": {
+                        "dsn": "postgresql+asyncpg://user:pass@host:5432/dbname",
+                        "collection": "my_collection",
+                        "dsn_token_name": "MY_PG_TOKEN",
+                    },
+                    "tags": ["pgvector"],
+                },
+                {
+                    "name": "My MongoDB store",
+                    "description": "Local MongoDB / GridFS knowledge store",
+                    "source_type": "mongo_db",
+                    "connection_config": {},
+                    "tags": ["mongo"],
+                },
+            ]
+        }
+    )
+
     name: str
     description: str = ""
     source_type: KnowledgeSourceType

@@ -30,6 +30,23 @@ A knowledge source represents a connection to a data backend:
 |---|---|---|
 | `vector_db` | Qdrant | Semantic search over vector-embedded documents |
 | `mongo_db` | MongoDB | Structured storage with tag-based retrieval |
+| `pgvector` | PostgreSQL + pgvector | Semantic search backed by a PostgreSQL database with the `vector` extension |
+
+### pgvector Sources
+
+The `pgvector` source type lets you connect TBD Agents to any PostgreSQL 14+ database that has the [pgvector](https://github.com/pgvector/pgvector) extension installed. This is useful when your knowledge corpus already lives in Postgres, or when you prefer a single-database stack over a separate Qdrant service.
+
+A pgvector source performs semantic similarity search when a query string is available and embeddings are enabled; it falls back to a recency-ordered scan when no query is provided.
+
+**`connection_config` fields for `pgvector` sources:**
+
+| Field | Required | Description |
+|---|---|---|
+| `dsn` | Yes (or `dsn_token_name`) | asyncpg-compatible PostgreSQL connection string |
+| `collection` | Yes | Table name suffix used to identify the target table |
+| `dsn_token_name` | No | Name of a stored token whose value is the DSN — overrides `dsn` when set |
+
+For setup instructions, Docker Compose usage, indexing options, and observability queries, see the [PostgreSQL pgvector Backend](pgvector.md) guide.
 
 ### Source Lifecycle
 
