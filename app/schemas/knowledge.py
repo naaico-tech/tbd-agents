@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict
 from app.models.knowledge_item import KnowledgeContentType
 from app.models.knowledge_source import KnowledgeSourceStatus, KnowledgeSourceType
 
-
 # ── KnowledgeSource schemas ──────────────────────────────────────────────────
 
 

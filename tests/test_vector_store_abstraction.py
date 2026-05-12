@@ -4,6 +4,7 @@ Covers: factory routing, singleton behaviour, ABC contract on both adapters.
 All external I/O (asyncpg, qdrant-client) is mocked.
 """
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -27,11 +28,11 @@ class TestGetVectorStore:
 
     def setup_method(self):
         """Reset singleton before each test for isolation."""
-        reset_vector_store()
+        asyncio.run(reset_vector_store())
 
     def teardown_method(self):
         """Reset singleton after each test to avoid cross-test contamination."""
-        reset_vector_store()
+        asyncio.run(reset_vector_store())
 
     def test_returns_none_when_qdrant_backend_no_url(self):
         """When qdrant backend is selected but qdrant_url is None, returns None."""
@@ -77,14 +78,15 @@ class TestGetVectorStore:
             instance2 = get_vector_store()
         assert instance1 is instance2
 
-    def test_reset_clears_singleton(self):
+    @pytest.mark.asyncio
+    async def test_reset_clears_singleton(self):
         """After reset_vector_store(), the next call returns a fresh instance."""
         with patch("app.services.vector_store.factory.settings") as mock_settings:
             mock_settings.vector_store_backend = "pgvector"
             mock_settings.pgvector_dsn = "postgresql+asyncpg://user:pass@localhost:5432/db"
             mock_settings.pgvector_table_prefix = "vs"
             instance1 = get_vector_store()
-            reset_vector_store()
+            await reset_vector_store()
             instance2 = get_vector_store()
         assert instance1 is not instance2
 

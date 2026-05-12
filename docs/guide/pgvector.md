@@ -19,7 +19,7 @@ If you need sub-millisecond search over hundreds of millions of vectors, or you 
 
 - **PostgreSQL 14+** with the `vector` extension installed.
 - **OR Docker** — the bundled `pgvector/pgvector:pg16` image ships with the extension pre-installed and is the recommended choice for local development.
-- Python extras: `asyncpg>=0.29.0` and `pgvector>=0.3.0` (add the `pgvector` optional-dependency group; see [pyproject.toml](../../pyproject.toml)).
+- The `asyncpg` and `pgvector` packages are included in the project's standard dependencies and are installed automatically when you run `pip install -e .` or `uv sync`.
 
 ---
 

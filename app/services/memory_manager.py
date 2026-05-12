@@ -117,12 +117,11 @@ class MemoryManager:
 
             vector_size = len(mem.embedding)
 
-            if not await store.collection_exists(_MEMORY_COLLECTION):
-                await store.create_collection(
-                    _MEMORY_COLLECTION,
-                    vector_size=vector_size,
-                    distance="cosine",
-                )
+            await store.create_collection(
+                _MEMORY_COLLECTION,
+                vector_size=vector_size,
+                distance="cosine",
+            )
 
             point_id = f"{mem.agent_id}:{mem.scope}:{mem.key}"
             await store.upsert(

@@ -17,6 +17,7 @@ The backend is selected by ``settings.vector_store_backend``
 
 import logging
 from enum import StrEnum
+from urllib.parse import urlparse
 
 from app.config import settings
 from app.services.vector_store.base import AbstractVectorStore
@@ -24,6 +25,15 @@ from app.services.vector_store.base import AbstractVectorStore
 logger = logging.getLogger(__name__)
 
 _instance: AbstractVectorStore | None = None
+
+
+def _redact_dsn(dsn: str) -> str:
+    """Return a credential-free representation of *dsn* safe to write to logs."""
+    try:
+        p = urlparse(dsn)
+        return f"{p.scheme}://{p.hostname}:{p.port}{p.path}"
+    except Exception:
+        return "<dsn-redacted>"
 
 
 class VectorStoreBackend(StrEnum):
@@ -62,7 +72,7 @@ def get_vector_store() -> AbstractVectorStore | None:
 
         prefix: str = getattr(settings, "pgvector_table_prefix", "vs")
         _instance = PgvectorAdapter(dsn=dsn, table_prefix=prefix)
-        logger.info("VectorStore: using pgvector backend (dsn prefix=%s...)", dsn[:20])
+        logger.info("VectorStore: using pgvector backend (%s)", _redact_dsn(dsn))
 
     else:  # default: qdrant
         url: str | None = getattr(settings, "qdrant_url", None)
@@ -80,15 +90,20 @@ def get_vector_store() -> AbstractVectorStore | None:
     return _instance
 
 
-def reset_vector_store() -> None:
-    """Reset the singleton instance.
+async def reset_vector_store() -> None:
+    """Close and reset the singleton instance.
+
+    Closes any open connections before clearing the reference so that
+    connection pools and HTTP clients are released cleanly.
 
     Intended for use in tests to isolate each test from the shared singleton::
 
         from app.services.vector_store.factory import reset_vector_store
 
-        def setup_function():
-            reset_vector_store()
+        async def setup_function():
+            await reset_vector_store()
     """
     global _instance
+    if _instance is not None:
+        await _instance.close()
     _instance = None

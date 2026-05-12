@@ -34,8 +34,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=tbd-agents-api
       - OTEL_RESOURCE_ATTRIBUTES=service.version=0.1.0,deployment.environment=docker
-      - QDRANT_URL=http://qdrant:6333
-      - PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - PGVECTOR_DSN=${PGVECTOR_DSN:-postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents}
       - VECTOR_STORE_BACKEND=${VECTOR_STORE_BACKEND:-qdrant}
     depends_on:
       mongodb:

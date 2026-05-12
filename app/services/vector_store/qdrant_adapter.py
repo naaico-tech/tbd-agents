@@ -5,8 +5,8 @@ backend-agnostic API into Qdrant-specific calls.
 
 Key implementation notes
 ------------------------
-* String IDs are converted to deterministic 64-bit integers via
-  ``abs(hash(id)) % 2**63``.  The original string is stored in the point
+* String IDs are converted to deterministic 64-bit integers via a SHA-256
+  hash truncated to int64.  The original string is stored in the point
   payload under ``_str_id`` so that round-trips through search/scroll are
   lossless.
 * The client is created lazily on the first operation.
@@ -15,6 +15,7 @@ Key implementation notes
 """
 
 import asyncio
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -76,8 +77,12 @@ class QdrantAdapter(AbstractVectorStore):
 
     @staticmethod
     def _str_to_point_id(str_id: str) -> int:
-        """Convert a string ID to a deterministic Qdrant-compatible integer."""
-        return abs(hash(str_id)) % (2**63)
+        """Convert a string ID to a deterministic Qdrant-compatible integer.
+
+        Uses SHA-256 (truncated to 64 bits) so the result is stable across
+        process restarts regardless of ``PYTHONHASHSEED``.
+        """
+        return int(hashlib.sha256(str_id.encode()).hexdigest()[:16], 16) % (2**63)
 
     def _build_qdrant_filter(self, filters: dict[str, Any]) -> "Filter":
         """Translate a ``{"field": value}`` dict to a Qdrant :class:`Filter`."""

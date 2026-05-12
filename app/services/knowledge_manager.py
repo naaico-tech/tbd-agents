@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 from xml.sax.saxutils import escape, quoteattr
 
@@ -239,6 +240,8 @@ class KnowledgeManager:
             raise ValueError("No DSN configured for pgvector source")
         if not collection:
             raise ValueError("No collection (table name suffix) configured for pgvector source")
+        if not re.match(r"^[a-zA-Z0-9_]+$", collection):
+            raise ValueError(f"Invalid collection name: {collection!r}")
 
         table = f"langchain_pg_embedding_{collection}"
 
@@ -469,9 +472,8 @@ class KnowledgeManager:
                         f'<item name={quoteattr(item.name)}'
                         f' tags={quoteattr(",".join(item.tags))}>\n'
                     )
-                    section_suffix = "\n</item>"
                     remaining_budget = effective_max_chars - total_chars - (1 if sections else 0)
-                    text_budget = remaining_budget - len(section_prefix) - len(section_suffix)
+                    text_budget = remaining_budget - len(section_prefix) - len("\n</item>")
                     if text_budget <= 0:
                         break
                     clipped_text = _clip_text(
@@ -498,12 +500,11 @@ class KnowledgeManager:
                         text = r.get("text", "")
                         if text:
                             section_prefix = f'<item source={quoteattr(source.name)}>\n'
-                            section_suffix = "\n</item>"
                             remaining_budget = (
                                 effective_max_chars - total_chars - (1 if sections else 0)
                             )
                             text_budget = (
-                                remaining_budget - len(section_prefix) - len(section_suffix)
+                                remaining_budget - len(section_prefix) - len("\n</item>")
                             )
                             if text_budget <= 0:
                                 break
@@ -529,12 +530,11 @@ class KnowledgeManager:
                         text = r.get("text", "")
                         if text:
                             section_prefix = f'<item source={quoteattr(source.name)}>\n'
-                            section_suffix = "\n</item>"
                             remaining_budget = (
                                 effective_max_chars - total_chars - (1 if sections else 0)
                             )
                             text_budget = (
-                                remaining_budget - len(section_prefix) - len(section_suffix)
+                                remaining_budget - len(section_prefix) - len("\n</item>")
                             )
                             if text_budget <= 0:
                                 break

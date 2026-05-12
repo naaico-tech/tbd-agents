@@ -3,23 +3,16 @@
 Uses ``asyncpg`` for async PostgreSQL connections and the ``pgvector`` Python
 package to register the vector type codec.
 
-Required extras (not in default dependencies — add when enabling pgvector):
-
-.. code-block:: toml
-
-    # pyproject.toml
-    [project.optional-dependencies]
-    pgvector = [
-        "asyncpg>=0.29.0",
-        "pgvector>=0.3.0",
-    ]
+``asyncpg`` and ``pgvector`` are included in the project dependencies and are
+installed automatically with ``pip install -e .`` or ``uv sync``.
 
 Table layout
 ------------
 Each collection maps to a table named ``{table_prefix}_{sanitised_collection}``.
-A metadata registry table ``vs_collections`` tracks every collection's
-``vector_size`` and ``distance`` metric so that the correct pgvector distance
-operator (``<=>``, ``<->``, ``<#>``) can be selected at query time.
+A metadata registry table ``{table_prefix}_collections`` tracks every
+collection's ``vector_size`` and ``distance`` metric so that the correct
+pgvector distance operator (``<=>``, ``<->``, ``<#>``) can be selected at
+query time.
 
 Distance operators
 ------------------
@@ -83,9 +76,6 @@ _DISTANCE_CONFIG: dict[str, tuple[str, str, str]] = {
     ),
 }
 _DEFAULT_DISTANCE = "cosine"
-
-# Metadata registry table that lives in the same schema as the collection tables
-_META_TABLE = "vs_collections"
 
 
 def _sanitize_name(name: str) -> str:
@@ -154,6 +144,8 @@ class PgvectorAdapter(AbstractVectorStore):
         self._pool_max = pool_max
         self._pool = None
         self._init_lock = asyncio.Lock()
+        # Metadata registry table name derived from the table prefix
+        self._meta_table = f"{self._table_prefix}_collections"
         # In-memory cache of { collection_name: {"vector_size": int, "distance": str} }
         self._meta_cache: dict[str, dict[str, Any]] = {}
 
@@ -185,7 +177,7 @@ class PgvectorAdapter(AbstractVectorStore):
             # Bootstrap the metadata registry table
             async with self._pool.acquire() as conn:
                 await conn.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {_META_TABLE} (
+                    CREATE TABLE IF NOT EXISTS {self._meta_table} (
                         name        TEXT PRIMARY KEY,
                         vector_size INT  NOT NULL,
                         distance    TEXT NOT NULL,
@@ -204,7 +196,7 @@ class PgvectorAdapter(AbstractVectorStore):
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT vector_size, distance FROM {_META_TABLE} WHERE name = $1", name
+                f"SELECT vector_size, distance FROM {self._meta_table} WHERE name = $1", name
             )
         if row:
             meta = {"vector_size": row["vector_size"], "distance": row["distance"]}
@@ -250,7 +242,7 @@ class PgvectorAdapter(AbstractVectorStore):
                     WITH (lists = 100)
             """)
             await conn.execute(f"""
-                INSERT INTO {_META_TABLE} (name, vector_size, distance)
+                INSERT INTO {self._meta_table} (name, vector_size, distance)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (name) DO UPDATE
                     SET vector_size = EXCLUDED.vector_size,
@@ -264,11 +256,11 @@ class PgvectorAdapter(AbstractVectorStore):
         )
 
     async def collection_exists(self, name: str) -> bool:
-        """Return ``True`` if *name* is registered in ``vs_collections``."""
+        """Return ``True`` if *name* is registered in the metadata table."""
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT 1 FROM {_META_TABLE} WHERE name = $1", name
+                f"SELECT 1 FROM {self._meta_table} WHERE name = $1", name
             )
         return row is not None
 
@@ -389,12 +381,12 @@ class PgvectorAdapter(AbstractVectorStore):
             await conn.execute(f"DELETE FROM {table} WHERE id = ANY($1)", ids)
 
     async def delete_collection(self, collection: str) -> None:
-        """Drop the collection table and remove its entry from ``vs_collections``."""
+        """Drop the collection table and remove its entry from the metadata table."""
         pool = await self._ensure_pool()
         table = self._table_name(collection)
         async with pool.acquire() as conn:
             await conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-            await conn.execute(f"DELETE FROM {_META_TABLE} WHERE name = $1", collection)
+            await conn.execute(f"DELETE FROM {self._meta_table} WHERE name = $1", collection)
         self._meta_cache.pop(collection, None)
         logger.info("PgvectorAdapter: deleted collection '%s' (table=%s)", collection, table)
 

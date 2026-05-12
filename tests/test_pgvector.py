@@ -392,7 +392,6 @@ class TestMemoryManagerWithVectorStore:
     def mock_store(self):
         """A fully-mocked AbstractVectorStore for injection via get_vector_store."""
         store = AsyncMock(spec=AbstractVectorStore)
-        store.collection_exists = AsyncMock(return_value=False)
         store.create_collection = AsyncMock()
         store.upsert = AsyncMock()
         store.search = AsyncMock(return_value=[])
@@ -412,11 +411,10 @@ class TestMemoryManagerWithVectorStore:
     # ── _upsert_vector_store ──────────────────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_upsert_vector_store_creates_collection_when_missing(
+    async def test_upsert_vector_store_creates_collection(
         self, manager, mock_store, sample_memory
     ):
-        """When the collection does not exist, create_collection is called once."""
-        mock_store.collection_exists = AsyncMock(return_value=False)
+        """create_collection is always called because it is idempotent (IF NOT EXISTS)."""
         with patch("app.services.memory_manager.get_vector_store", return_value=mock_store):
             await manager._upsert_vector_store(sample_memory)
 
@@ -424,15 +422,14 @@ class TestMemoryManagerWithVectorStore:
         mock_store.upsert.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_upsert_vector_store_skips_create_when_exists(
+    async def test_upsert_vector_store_always_calls_create_collection(
         self, manager, mock_store, sample_memory
     ):
-        """When the collection already exists, create_collection is NOT called."""
-        mock_store.collection_exists = AsyncMock(return_value=True)
+        """create_collection is called unconditionally — it uses IF NOT EXISTS internally."""
         with patch("app.services.memory_manager.get_vector_store", return_value=mock_store):
             await manager._upsert_vector_store(sample_memory)
 
-        mock_store.create_collection.assert_not_awaited()
+        mock_store.create_collection.assert_awaited_once()
         mock_store.upsert.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -462,7 +459,6 @@ class TestMemoryManagerWithVectorStore:
         self, manager, mock_store, sample_memory
     ):
         """The VectorPoint id is composed of agent_id:scope:key."""
-        mock_store.collection_exists = AsyncMock(return_value=True)
         with patch("app.services.memory_manager.get_vector_store", return_value=mock_store):
             await manager._upsert_vector_store(sample_memory)
 
@@ -478,7 +474,7 @@ class TestMemoryManagerWithVectorStore:
         self, manager, mock_store, sample_memory
     ):
         """Exceptions in _upsert_vector_store are caught and do not propagate."""
-        mock_store.collection_exists = AsyncMock(side_effect=RuntimeError("db down"))
+        mock_store.create_collection = AsyncMock(side_effect=RuntimeError("db down"))
         with patch("app.services.memory_manager.get_vector_store", return_value=mock_store):
             # Should not raise
             await manager._upsert_vector_store(sample_memory)
