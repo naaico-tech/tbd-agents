@@ -22,10 +22,10 @@ from app.repositories.postgres_repo import PostgresRepository
 # ---------------------------------------------------------------------------
 
 
-def _tf(filters: dict) -> tuple[str, dict]:
+def _tf(filters: dict, model_cls=None) -> tuple[str, dict]:
     """Call _translate_filters and return (sql_fragment, params)."""
     params: dict = {}
-    sql = _translate_filters(filters, params)
+    sql = _translate_filters(model_cls, filters, params)
     return sql, params
 
 
@@ -44,9 +44,9 @@ class TestTranslateFilters:
         assert params == {}
 
     def test_simple_equality(self):
-        """A plain key=value pair should produce a data->>'key' = :p0 clause."""
+        """A plain key=value pair should produce a direct column equality clause."""
         sql, params = _tf({"name": "alice"})
-        assert "data->>'name'" in sql
+        assert "name" in sql
         assert "=" in sql
         assert len(params) == 1
         assert "alice" in params.values()
@@ -54,13 +54,13 @@ class TestTranslateFilters:
     def test_simple_equality_int(self):
         """Integer values should be passed through as-is (not coerced to str)."""
         sql, params = _tf({"score": 42})
-        assert "data->>'score'" in sql
+        assert "score" in sql
         assert 42 in params.values()
 
     def test_simple_equality_bool(self):
         """Bool values should be passed through (not coerced to str)."""
         sql, params = _tf({"active": True})
-        assert "data->>'active'" in sql
+        assert "active" in sql
         assert True in params.values()
 
     def test_none_value_is_null_check(self):
@@ -86,7 +86,7 @@ class TestTranslateFilters:
         """$in with values should produce an IN (...) clause."""
         sql, params = _tf({"status": {"$in": ["active", "inactive"]}})
         assert "IN (" in sql
-        assert "data->>'status'" in sql
+        assert "status" in sql
         assert "active" in params.values()
         assert "inactive" in params.values()
 
@@ -99,18 +99,20 @@ class TestTranslateFilters:
         """$ne should produce a != clause."""
         sql, params = _tf({"status": {"$ne": "deleted"}})
         assert "!=" in sql
-        assert "data->>'status'" in sql
+        assert "status" in sql
 
     def test_operator_lt_numeric(self):
-        """$lt with a number should cast to ::numeric."""
+        """$lt with a number should produce a < clause."""
         sql, params = _tf({"score": {"$lt": 10}})
-        assert "::numeric <" in sql or "< :" in sql
+        assert "score" in sql
+        assert "< :" in sql
         assert 10 in params.values()
 
     def test_operator_gt_numeric(self):
-        """$gt with a number should cast to ::numeric."""
+        """$gt with a number should produce a > clause."""
         sql, params = _tf({"score": {"$gt": 0}})
-        assert "::numeric >" in sql or "> :" in sql
+        assert "score" in sql
+        assert "> :" in sql
         assert 0 in params.values()
 
     def test_operator_lte_numeric(self):
@@ -126,72 +128,75 @@ class TestTranslateFilters:
         assert 1 in params.values()
 
     def test_operator_lt_datetime(self):
-        """$lt with a datetime should cast to ::timestamptz."""
+        """$lt with a datetime should produce a < clause."""
         dt = datetime(2024, 1, 1, tzinfo=UTC)
         sql, params = _tf({"created_at": {"$lt": dt}})
-        assert "::timestamptz <" in sql
-        assert str(dt) in params.values()
+        assert "created_at" in sql
+        assert "< :" in sql
+        assert dt in params.values()
 
     def test_operator_gt_datetime(self):
-        """$gt with a datetime should cast to ::timestamptz."""
+        """$gt with a datetime should produce a > clause."""
         dt = datetime(2024, 1, 1, tzinfo=UTC)
         sql, params = _tf({"created_at": {"$gt": dt}})
-        assert "::timestamptz >" in sql
-        assert str(dt) in params.values()
+        assert "created_at" in sql
+        assert "> :" in sql
+        assert dt in params.values()
 
     def test_operator_lte_datetime(self):
-        """$lte with a datetime should cast to ::timestamptz."""
+        """$lte with a datetime should produce a <= clause."""
         dt = datetime(2024, 6, 15, tzinfo=UTC)
         sql, params = _tf({"updated_at": {"$lte": dt}})
-        assert "::timestamptz <=" in sql
+        assert "updated_at" in sql
+        assert "<=" in sql
 
     def test_operator_gte_datetime(self):
-        """$gte with a datetime should cast to ::timestamptz."""
+        """$gte with a datetime should produce a >= clause."""
         dt = datetime(2024, 6, 15, tzinfo=UTC)
         sql, params = _tf({"updated_at": {"$gte": dt}})
-        assert "::timestamptz >=" in sql
+        assert "updated_at" in sql
+        assert ">=" in sql
 
     def test_operator_exists_true(self):
-        """$exists: True should produce 'data ? key'."""
+        """$exists: True should produce an IS NOT NULL clause."""
         sql, params = _tf({"email": {"$exists": True}})
-        assert "data ? " in sql
+        assert "IS NOT NULL" in sql
         assert "email" in sql
-        assert "NOT" not in sql
 
     def test_operator_exists_false(self):
-        """$exists: False should produce 'NOT (data ? key)'."""
+        """$exists: False should produce an IS NULL clause."""
         sql, params = _tf({"email": {"$exists": False}})
-        assert "NOT" in sql
+        assert "IS NULL" in sql
         assert "email" in sql
 
     def test_multiple_conditions_joined_by_and(self):
         """Multiple top-level keys should be ANDed together."""
         sql, params = _tf({"name": "bob", "active": True})
         assert " AND " in sql
-        assert "data->>'name'" in sql
-        assert "data->>'active'" in sql
+        assert "name" in sql
+        assert "active" in sql
 
     def test_lt_gt_combined(self):
         """$lt and $gt on the same key should produce two separate conditions."""
         sql, params = _tf({"score": {"$lt": 10, "$gt": 0}})
-        # Both numeric comparisons should appear in the clause
+        # Both comparisons should appear in the clause
         assert "<" in sql
         assert ">" in sql
-        assert "data->>'score'" in sql
+        assert "score" in sql
 
     def test_param_idx_starts_from_existing_params(self):
         """If params already has entries, new params should not collide."""
         params: dict = {"p0": "existing"}
-        _translate_filters({"name": "alice"}, params)
+        _translate_filters(None, {"name": "alice"}, params)
         # p0 should still be "existing", new param should be p1
         assert params["p0"] == "existing"
         assert any(k != "p0" and v == "alice" for k, v in params.items())
 
-    def test_non_primitive_value_coerced_to_str(self):
-        """A non-primitive value (e.g. list/dict) should be coerced to str."""
+    def test_non_primitive_value_coerced_to_list(self):
+        """A list value with TEXT fallback type should be stored as a list."""
         sql, params = _tf({"tags": ["a", "b"]})
-        assert "data->>'tags'" in sql
-        assert "['a', 'b']" in params.values()
+        assert "tags" in sql
+        assert ["a", "b"] in params.values()
 
 
 # ---------------------------------------------------------------------------
@@ -319,11 +324,15 @@ class TestPgQuerySet:
     async def test_to_list_calls_session(self):
         """to_list should call the session and reconstruct model instances."""
         model = self._make_model_cls("agents")
-        fake_row = ("id-1", '{"name": "alice"}', datetime.now(UTC), datetime.now(UTC))
+        fake_row = MagicMock()
+        fake_row._mapping = {"id": "id-1", "name": "alice"}
         model._from_row.return_value = fake_row
 
+        mock_mappings = MagicMock()
+        mock_mappings.fetchall.return_value = [fake_row]
+
         mock_result = MagicMock()
-        mock_result.fetchall.return_value = [fake_row]
+        mock_result.mappings.return_value = mock_mappings
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=mock_result)

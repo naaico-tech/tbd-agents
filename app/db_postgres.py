@@ -1,12 +1,15 @@
-"""PostgreSQL async backend using SQLAlchemy 2.0 + JSONB document storage."""
+"""PostgreSQL async backend using SQLAlchemy 2.0 + structured typed columns."""
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from enum import Enum
+from typing import Any, Union, get_args, get_origin
 
-from sqlalchemy import text
+from pydantic import BaseModel
+from sqlalchemy import BOOLEAN, DOUBLE_PRECISION, INTEGER, TEXT, TIMESTAMP, bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -15,6 +18,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import settings
+
+# Convenience alias — TIMESTAMPTZ is TIMESTAMP(timezone=True) in SQLAlchemy
+TIMESTAMPTZ = TIMESTAMP(timezone=True)
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -38,19 +44,336 @@ COLLECTIONS = [
     "mcp_servers",
 ]
 
-# DDL for each table - JSONB document storage pattern
-_TABLE_DDL = """
-CREATE TABLE IF NOT EXISTS {table} (
-    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    data JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_{table}_gin ON {table} USING gin(data);
-"""
+# ---------------------------------------------------------------------------
+# Per-table structured DDL — no generic JSONB data blob
+# ---------------------------------------------------------------------------
+
+_TABLE_DDL: dict[str, str] = {
+    "agents": """
+        CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            system_prompt TEXT NOT NULL DEFAULT 'You are a helpful assistant.',
+            model TEXT,
+            mcp_server_ids TEXT[] NOT NULL DEFAULT '{}',
+            mcp_server_tags TEXT[] NOT NULL DEFAULT '{}',
+            tool_definitions JSONB NOT NULL DEFAULT '[]',
+            knowledge_source_ids TEXT[] NOT NULL DEFAULT '{}',
+            knowledge_tags TEXT[] NOT NULL DEFAULT '{}',
+            builtin_tools TEXT[] NOT NULL DEFAULT '{}',
+            custom_tool_ids TEXT[] NOT NULL DEFAULT '{}',
+            provider_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "chat_sessions": """
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            agent_id TEXT NOT NULL,
+            github_user TEXT NOT NULL,
+            title TEXT,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "chat_messages": """
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            usage JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "memories": """
+        CREATE TABLE IF NOT EXISTS memories (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            agent_id TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            embedding DOUBLE PRECISION[],
+            metadata JSONB NOT NULL DEFAULT '{}',
+            ttl TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "skills": """
+        CREATE TABLE IF NOT EXISTS skills (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            instructions TEXT NOT NULL DEFAULT '',
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "tokens": """
+        CREATE TABLE IF NOT EXISTS tokens (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL UNIQUE,
+            encrypted_value TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "providers": """
+        CREATE TABLE IF NOT EXISTS providers (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL UNIQUE,
+            provider_type TEXT NOT NULL,
+            api_key_token_name TEXT NOT NULL DEFAULT '',
+            base_url TEXT,
+            auth_type TEXT NOT NULL DEFAULT 'x-api-key',
+            azure_api_version TEXT NOT NULL DEFAULT '2024-12-01-preview',
+            azure_deployment TEXT,
+            description TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "knowledge_items": """
+        CREATE TABLE IF NOT EXISTS knowledge_items (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            source_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            content_type TEXT NOT NULL,
+            text_content TEXT,
+            file_id TEXT,
+            file_name TEXT,
+            file_size INTEGER,
+            mime_type TEXT,
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            metadata JSONB NOT NULL DEFAULT '{}',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "knowledge_sources": """
+        CREATE TABLE IF NOT EXISTS knowledge_sources (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            source_type TEXT NOT NULL,
+            connection_config JSONB NOT NULL DEFAULT '{}',
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'REGISTERED',
+            last_error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "custom_tools": """
+        CREATE TABLE IF NOT EXISTS custom_tools (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            source_code TEXT NOT NULL DEFAULT '',
+            parameters_schema JSONB NOT NULL DEFAULT '{}',
+            env_config JSONB NOT NULL DEFAULT '{}',
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            is_plugin BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "guardrails": """
+        CREATE TABLE IF NOT EXISTS guardrails (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            guardrail_type TEXT NOT NULL,
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            prompt_config JSONB,
+            request_config JSONB,
+            output_config JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "workflows": """
+        CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            title TEXT,
+            agent_id TEXT NOT NULL DEFAULT '',
+            github_user TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            max_turns INTEGER NOT NULL DEFAULT 5,
+            current_turn INTEGER NOT NULL DEFAULT 0,
+            session_id TEXT,
+            skill_ids TEXT[] NOT NULL DEFAULT '{}',
+            skill_tags TEXT[] NOT NULL DEFAULT '{}',
+            messages JSONB NOT NULL DEFAULT '[]',
+            logs JSONB NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            output_format TEXT NOT NULL DEFAULT 'JSON',
+            usage JSONB,
+            infinite_session BOOLEAN NOT NULL DEFAULT TRUE,
+            caveman BOOLEAN NOT NULL DEFAULT FALSE,
+            bypass_memory BOOLEAN NOT NULL DEFAULT FALSE,
+            auto_memory BOOLEAN NOT NULL DEFAULT FALSE,
+            tsv_tool_results BOOLEAN NOT NULL DEFAULT FALSE,
+            reasoning_effort TEXT,
+            guardrail_ids TEXT[] NOT NULL DEFAULT '{}',
+            guardrail_tags TEXT[] NOT NULL DEFAULT '{}',
+            repo_url TEXT,
+            repo_branch TEXT,
+            repo_token_name TEXT,
+            credential_overrides JSONB NOT NULL DEFAULT '{}',
+            webhook_url TEXT,
+            error_webhook_url TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "task_executions": """
+        CREATE TABLE IF NOT EXISTS task_executions (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            workflow_id TEXT NOT NULL,
+            prompt TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            celery_task_id TEXT,
+            worker TEXT,
+            model TEXT,
+            reasoning_effort TEXT,
+            tool_calls INTEGER NOT NULL DEFAULT 0,
+            response TEXT,
+            progress JSONB,
+            logs JSONB NOT NULL DEFAULT '[]',
+            messages JSONB NOT NULL DEFAULT '[]',
+            usage JSONB,
+            started_at TIMESTAMPTZ,
+            finished_at TIMESTAMPTZ,
+            scheduled_agent_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "scheduled_agents": """
+        CREATE TABLE IF NOT EXISTS scheduled_agents (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            workflow_id TEXT NOT NULL,
+            prompt TEXT NOT NULL DEFAULT '',
+            interval_value INTEGER NOT NULL DEFAULT 1,
+            interval_unit TEXT NOT NULL DEFAULT 'MINUTES',
+            start_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            end_at TIMESTAMPTZ,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            last_run_at TIMESTAMPTZ,
+            next_run_at TIMESTAMPTZ,
+            redbeat_key TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "mcp_servers": """
+        CREATE TABLE IF NOT EXISTS mcp_servers (
+            id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            name TEXT NOT NULL,
+            transport_type TEXT NOT NULL,
+            connection_config JSONB NOT NULL DEFAULT '{}',
+            allowed_tools TEXT[] NOT NULL DEFAULT '{}',
+            tags TEXT[] NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'REGISTERED',
+            last_error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+}
+
+_INDEX_DDL: dict[str, str] = {
+    "chat_sessions": (
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_agent_id ON chat_sessions (agent_id)"
+    ),
+    "chat_messages": (
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id)"
+    ),
+    "memories": (
+        "CREATE INDEX IF NOT EXISTS idx_memories_agent_id ON memories (agent_id)"
+    ),
+    "workflows": (
+        "CREATE INDEX IF NOT EXISTS idx_workflows_agent_id ON workflows (agent_id)"
+    ),
+    "task_executions": (
+        "CREATE INDEX IF NOT EXISTS idx_task_executions_workflow_id"
+        " ON task_executions (workflow_id)"
+    ),
+    "knowledge_items": (
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_items_source_id"
+        " ON knowledge_items (source_id)"
+    ),
+}
 
 # Global document registry populated by PostgresDocument.__init_subclass__
 _DOC_REGISTRY: dict[str, type] = {}
+
+
+# ---------------------------------------------------------------------------
+# Type mapping helpers
+# ---------------------------------------------------------------------------
+
+
+def _python_to_sa_type(annotation: Any) -> Any:
+    """Map a Python type annotation to a SQLAlchemy type object."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    # Unwrap Optional[X]  (Union[X, None])
+    if origin is Union and type(None) in args:
+        inner = [a for a in args if a is not type(None)][0]
+        return _python_to_sa_type(inner)
+
+    if annotation is str:
+        return TEXT()
+    if annotation is int:
+        return INTEGER()
+    if annotation is float:
+        return DOUBLE_PRECISION()
+    if annotation is bool:
+        return BOOLEAN()
+    if annotation is datetime:
+        return TIMESTAMPTZ
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return TEXT()
+
+    if origin is list and args:
+        inner = args[0]
+        if inner is str:
+            return ARRAY(TEXT())
+        if inner is int:
+            return ARRAY(INTEGER())
+        if inner is float:
+            return ARRAY(DOUBLE_PRECISION())
+        # list[dict], list[BaseModel], etc.
+        return JSONB()
+
+    if origin is dict:
+        return JSONB()
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return JSONB()
+
+    # fallback
+    return TEXT()
+
+
+def _serialize_value(value: Any, sa_type: Any) -> Any:
+    """Serialize a Python value for binding against *sa_type*."""
+    if value is None:
+        return None
+    if isinstance(sa_type, JSONB):
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, list):
+            return [
+                v.model_dump(mode="json") if isinstance(v, BaseModel) else v for v in value
+            ]
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, list):
+        return [v.value if isinstance(v, Enum) else v for v in value]
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Engine / session factory
+# ---------------------------------------------------------------------------
 
 
 async def get_engine() -> AsyncEngine:
@@ -76,20 +399,18 @@ async def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def init_postgres() -> None:
-    """Create all tables (and GIN indexes) if they don't exist."""
+    """Create all tables and indexes if they don't exist."""
     engine = await get_engine()
     async with engine.begin() as conn:
-        # Enable uuid-ossp extension for gen_random_uuid() fallback
         try:
-            await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+            await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
         except Exception:  # noqa: BLE001
             pass
-        for collection in COLLECTIONS:
-            ddl = _TABLE_DDL.format(table=collection)
-            for stmt in ddl.strip().split(";"):
-                stmt = stmt.strip()
-                if stmt:
-                    await conn.execute(text(stmt))
+        for collection, ddl in _TABLE_DDL.items():
+            await conn.execute(text(ddl))
+            idx_sql = _INDEX_DDL.get(collection, "")
+            if idx_sql:
+                await conn.execute(text(idx_sql))
 
 
 async def close_postgres() -> None:
@@ -102,28 +423,38 @@ async def close_postgres() -> None:
 
 
 # ---------------------------------------------------------------------------
-# JSONB filter translator
+# Filter translator — direct column references (no data->>'field' JSONB paths)
 # ---------------------------------------------------------------------------
 
 
-def _translate_filters(filters: dict[str, Any], params: dict) -> str:
-    """Translate a MongoDB-style filter dict to a PostgreSQL JSONB WHERE clause.
+def _translate_filters(
+    model_cls: type,
+    filters: dict[str, Any],
+    params: dict,
+) -> str:
+    """Translate a MongoDB-style filter dict to a structured-column WHERE clause.
 
     Supported operators: $in, $ne, $lt, $gt, $lte, $gte, $exists.
     Returns a SQL string with named bind parameters written into *params*.
+
+    Args:
+        model_cls: The PostgresDocument subclass (used to resolve SA column types).
+        filters:   MongoDB-style filter dict.
+        params:    Mutable dict that receives the bind-parameter values.
     """
     conditions: list[str] = []
     param_idx = len(params)
+    col_map: dict[str, Any] = (
+        model_cls._get_column_map()  # type: ignore[attr-defined]
+        if hasattr(model_cls, "_get_column_map")
+        else {}
+    )
 
     for key, value in filters.items():
-        if key in ("_id", "id"):
-            param_name = f"p{param_idx}"
-            params[param_name] = str(value)
-            conditions.append(f"id = :{param_name}")
-            param_idx += 1
+        col_key = "id" if key in ("_id", "id") else key
+        sa_type = col_map.get(col_key, TEXT())
 
-        elif isinstance(value, dict):
-            # MongoDB comparison / logical operators
+        if isinstance(value, dict):
             for op, op_val in value.items():
                 param_name = f"p{param_idx}"
                 param_idx += 1
@@ -132,68 +463,52 @@ def _translate_filters(filters: dict[str, Any], params: dict) -> str:
                     if not op_val:
                         conditions.append("FALSE")
                     else:
-                        placeholders = []
+                        phs: list[str] = []
                         for v in op_val:
                             pn = f"p{param_idx}"
-                            params[pn] = str(v)
-                            placeholders.append(f":{pn}")
                             param_idx += 1
-                        in_list = ", ".join(placeholders)
-                        conditions.append(f"data->>{key!r} IN ({in_list})")
+                            params[pn] = v.value if isinstance(v, Enum) else v
+                            phs.append(f":{pn}")
+                        conditions.append(f"{col_key} IN ({', '.join(phs)})")
 
                 elif op == "$ne":
-                    params[param_name] = json.dumps(op_val)
-                    conditions.append(f"data->>{key!r} != :{param_name}")
+                    params[param_name] = op_val.value if isinstance(op_val, Enum) else op_val
+                    conditions.append(f"{col_key} != :{param_name}")
 
                 elif op == "$lt":
-                    if isinstance(op_val, datetime):
-                        params[param_name] = str(op_val)
-                        conditions.append(f"(data->>{key!r})::timestamptz < :{param_name}")
-                    else:
-                        params[param_name] = op_val
-                        conditions.append(f"(data->>{key!r})::numeric < :{param_name}")
+                    params[param_name] = op_val
+                    conditions.append(f"{col_key} < :{param_name}")
 
                 elif op == "$gt":
-                    if isinstance(op_val, datetime):
-                        params[param_name] = str(op_val)
-                        conditions.append(f"(data->>{key!r})::timestamptz > :{param_name}")
-                    else:
-                        params[param_name] = op_val
-                        conditions.append(f"(data->>{key!r})::numeric > :{param_name}")
+                    params[param_name] = op_val
+                    conditions.append(f"{col_key} > :{param_name}")
 
                 elif op == "$lte":
-                    if isinstance(op_val, datetime):
-                        params[param_name] = str(op_val)
-                        conditions.append(f"(data->>{key!r})::timestamptz <= :{param_name}")
-                    else:
-                        params[param_name] = op_val
-                        conditions.append(f"(data->>{key!r})::numeric <= :{param_name}")
+                    params[param_name] = op_val
+                    conditions.append(f"{col_key} <= :{param_name}")
 
                 elif op == "$gte":
-                    if isinstance(op_val, datetime):
-                        params[param_name] = str(op_val)
-                        conditions.append(f"(data->>{key!r})::timestamptz >= :{param_name}")
-                    else:
-                        params[param_name] = op_val
-                        conditions.append(f"(data->>{key!r})::numeric >= :{param_name}")
+                    params[param_name] = op_val
+                    conditions.append(f"{col_key} >= :{param_name}")
 
                 elif op == "$exists":
                     if op_val:
-                        conditions.append(f"data ? {key!r}")
+                        conditions.append(f"{col_key} IS NOT NULL")
                     else:
-                        conditions.append(f"NOT (data ? {key!r})")
+                        conditions.append(f"{col_key} IS NULL")
+
+                # unused param_name slot — advance index to stay consistent
+                else:
+                    param_idx -= 1  # revert the pre-increment for unused slot
 
         elif value is None:
-            conditions.append(f"(data->>{key!r}) IS NULL")
+            conditions.append(f"{col_key} IS NULL")
 
         else:
             param_name = f"p{param_idx}"
-            # Coerce non-primitive types to string; pass primitives as-is for proper binding
-            params[param_name] = (
-                value if isinstance(value, (str, int, float, bool)) else str(value)
-            )
-            conditions.append(f"data->>{key!r} = :{param_name}")
             param_idx += 1
+            params[param_name] = _serialize_value(value, sa_type)
+            conditions.append(f"{col_key} = :{param_name}")
 
     return " AND ".join(conditions) if conditions else "TRUE"
 
@@ -201,6 +516,7 @@ def _translate_filters(filters: dict[str, Any], params: dict) -> str:
 # ---------------------------------------------------------------------------
 # PgQuerySet — chainable query builder
 # ---------------------------------------------------------------------------
+
 
 class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocument
     """Chainable query builder that mimics Beanie's FindMany interface."""
@@ -236,12 +552,12 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
     def _build_query(self) -> tuple[str, dict]:
         table = self._model_cls.get_collection_name()
         params: dict = {}
-        where = _translate_filters(self._filters, params)
+        where = _translate_filters(self._model_cls, self._filters, params)
 
-        sql = f"SELECT id, data, created_at, updated_at FROM {table} WHERE {where}"
+        sql = f"SELECT * FROM {table} WHERE {where}"
 
         if self._sort_fields:
-            order_parts = []
+            order_parts: list[str] = []
             for f in self._sort_fields:
                 if f.startswith(("-", "+")):
                     direction = "DESC" if f.startswith("-") else "ASC"
@@ -249,10 +565,7 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
                 else:
                     direction = "ASC"
                     field = f
-                if field in ("created_at", "updated_at"):
-                    order_parts.append(f"{field} {direction}")
-                else:
-                    order_parts.append(f"data->>{field!r} {direction}")
+                order_parts.append(f"{field} {direction}")
             sql += f" ORDER BY {', '.join(order_parts)}"
         else:
             sql += " ORDER BY created_at DESC"
@@ -269,13 +582,13 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
         factory = await get_session_factory()
         async with factory() as session:
             result = await session.execute(text(sql), params)
-            rows = result.fetchall()
+            rows = result.mappings().fetchall()
         return [self._model_cls._from_row(row) for row in rows]
 
     async def count(self) -> int:
         table = self._model_cls.get_collection_name()
         params: dict = {}
-        where = _translate_filters(self._filters, params)
+        where = _translate_filters(self._model_cls, self._filters, params)
         sql = f"SELECT COUNT(*) FROM {table} WHERE {where}"
         factory = await get_session_factory()
         async with factory() as session:
@@ -292,10 +605,11 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
 
 
 class PostgresDocument:
-    """Drop-in replacement for Beanie's Document using JSONB storage.
+    """Drop-in replacement for Beanie's Document using structured typed columns.
 
     Subclasses (which are also Pydantic models) define fields normally; the
-    class stores them in the ``data`` JSONB column of the corresponding table.
+    class maps each field to the appropriate SQL column type via
+    :func:`_python_to_sa_type`.
 
     Example::
 
@@ -320,22 +634,58 @@ class PostgresDocument:
     def get_collection_name(cls) -> str:
         return cls.Settings.name
 
+    # ------------------------------------------------------------------
+    # Column-map helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _get_column_map(cls) -> dict[str, Any]:
+        """Return ``{field_name: sa_type}`` for all model fields (excluding *id*)."""
+        result: dict[str, Any] = {}
+        if not hasattr(cls, "model_fields"):
+            return result
+        for name, field_info in cls.model_fields.items():
+            if name == "id":
+                continue
+            annotation = field_info.annotation
+            result[name] = _python_to_sa_type(annotation)
+        return result
+
+    def _to_columns(self) -> dict[str, Any]:
+        """Return ``{col_name: serialized_value}`` for all non-id fields."""
+        col_map = self.__class__._get_column_map()
+        result: dict[str, Any] = {}
+        for name, sa_type in col_map.items():
+            value = getattr(self, name, None)
+            result[name] = _serialize_value(value, sa_type)
+        return result
+
     @classmethod
     def _from_row(cls, row: Any) -> PostgresDocument:
-        """Reconstruct a model instance from a database row (id, data, ...)."""
-        data: dict = row[1] if isinstance(row[1], dict) else json.loads(row[1])
-        data["id"] = row[0]
+        """Reconstruct a model instance from a structured-column row.
+
+        Handles both the new mapping-style rows (``row._mapping``) and the
+        legacy ``(id, data, created_at, updated_at)`` tuple format.
+        """
+        if hasattr(row, "_mapping"):
+            data = dict(row._mapping)
+        elif hasattr(row, "_asdict"):
+            data = row._asdict()
+        else:
+            # Legacy fallback: (id, data_blob, created_at, updated_at)
+            raw: dict = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+            raw["id"] = row[0]
+            if len(row) > 2:
+                raw["created_at"] = row[2]
+            if len(row) > 3:
+                raw["updated_at"] = row[3]
+            data = raw
+
+        # JSONB fields come back as Python dicts/lists; Enum fields as strings.
+        # Pydantic handles coercion on model_validate.
         if hasattr(cls, "model_validate"):
             return cls.model_validate(data)
         return cls(**data)
-
-    def _to_data(self) -> dict:
-        """Serialize this document to the JSONB *data* dict (excludes row columns)."""
-        if hasattr(self, "model_dump"):
-            return self.model_dump(mode="json", exclude={"id", "created_at", "updated_at"})
-        import dataclasses  # noqa: PLC0415
-
-        return dataclasses.asdict(self)  # type: ignore[arg-type]
 
     # ------------------------------------------------------------------
     # Class-level query helpers (mirrors Beanie Document API)
@@ -373,7 +723,7 @@ class PostgresDocument:
     # ------------------------------------------------------------------
 
     async def save(self) -> PostgresDocument:
-        """Upsert this document into the database."""
+        """Upsert this document into the database using structured columns."""
         table = self.get_collection_name()
         now = datetime.now(UTC)
 
@@ -385,29 +735,56 @@ class PostgresDocument:
         else:
             doc_id = str(doc_id)
 
-        data = self._to_data()
-        if "created_at" not in data:
-            data["created_at"] = now.isoformat()
-        data["updated_at"] = now.isoformat()
+        col_map = self.__class__._get_column_map()
+        col_values: dict[str, Any] = {"id": doc_id}
 
-        sql = f"""
-        INSERT INTO {table} (id, data, created_at, updated_at)
-        VALUES (:id, :data::jsonb, :created_at, :updated_at)
-        ON CONFLICT (id) DO UPDATE SET
-            data = EXCLUDED.data,
-            updated_at = EXCLUDED.updated_at
-        """
+        for name, sa_type in col_map.items():
+            if name == "created_at":
+                existing = getattr(self, "created_at", None)
+                col_values["created_at"] = existing if existing else now
+            elif name == "updated_at":
+                col_values["updated_at"] = now
+                object.__setattr__(self, "updated_at", now)
+            else:
+                value = getattr(self, name, None)
+                col_values[name] = _serialize_value(value, sa_type)
+
+        # Ensure timestamps exist even when the model has no explicit fields for them
+        if "created_at" not in col_values:
+            col_values["created_at"] = now
+        if "updated_at" not in col_values:
+            col_values["updated_at"] = now
+
+        all_cols = list(col_values.keys())
+        col_list = ", ".join(all_cols)
+        param_list = ", ".join(f":{c}" for c in all_cols)
+        update_set = ", ".join(
+            f"{c} = EXCLUDED.{c}" for c in all_cols if c not in ("id", "created_at")
+        )
+
+        sql = text(
+            f"INSERT INTO {table} ({col_list}) VALUES ({param_list}) "
+            f"ON CONFLICT (id) DO UPDATE SET {update_set}"
+        )
+
+        # Annotate JSONB and ARRAY params so SQLAlchemy/asyncpg handles serialization
+        # correctly — avoids the :col::jsonb cast that breaks asyncpg positional params.
+        bp_list: list[Any] = []
+        col_sa_types: dict[str, Any] = {
+            "id": TEXT(),
+            "created_at": TIMESTAMPTZ,
+            "updated_at": TIMESTAMPTZ,
+            **col_map,
+        }
+        for col, sa_type in col_sa_types.items():
+            if col in col_values and isinstance(sa_type, (JSONB, ARRAY)):
+                bp_list.append(bindparam(col, type_=sa_type))
+        if bp_list:
+            sql = sql.bindparams(*bp_list)
+
         factory = await get_session_factory()
         async with factory() as session:
-            await session.execute(
-                text(sql),
-                {
-                    "id": doc_id,
-                    "data": json.dumps(data, default=str),
-                    "created_at": now,
-                    "updated_at": now,
-                },
-            )
+            await session.execute(sql, col_values)
             await session.commit()
         return self
 

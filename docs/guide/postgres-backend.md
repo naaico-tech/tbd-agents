@@ -92,45 +92,57 @@ docker compose exec app alembic current   # should show head revision
 
 ## Schema Design
 
-The PostgreSQL backend maps each logical MongoDB collection to a dedicated table.
-Each table follows the same pattern: a primary-key `id` column, a `data JSONB` column
-that holds the document payload, and `created_at` / `updated_at` timestamps.
+The PostgreSQL backend maps each logical MongoDB collection to a dedicated table with
+**proper typed columns** — each field is represented as its native SQL type (`TEXT`,
+`INTEGER`, `BOOLEAN`, `TIMESTAMPTZ`, `TEXT[]`, `JSONB`, etc.) rather than a generic
+`data JSONB` blob. This gives you full SQL query power, type safety, and the ability
+to add column-level indexes where needed.
 
 ```sql
--- Example: the agents table
+-- Example: the agents table (fully typed)
 CREATE TABLE agents (
-    id         TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    data       JSONB       NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    name                TEXT        NOT NULL,
+    description         TEXT        NOT NULL DEFAULT '',
+    system_prompt       TEXT        NOT NULL DEFAULT 'You are a helpful assistant.',
+    model               TEXT,
+    mcp_server_ids      TEXT[]      NOT NULL DEFAULT '{}',
+    mcp_server_tags     TEXT[]      NOT NULL DEFAULT '{}',
+    tool_definitions    JSONB       NOT NULL DEFAULT '[]',
+    knowledge_source_ids TEXT[]     NOT NULL DEFAULT '{}',
+    knowledge_tags      TEXT[]      NOT NULL DEFAULT '{}',
+    builtin_tools       TEXT[]      NOT NULL DEFAULT '{}',
+    custom_tool_ids     TEXT[]      NOT NULL DEFAULT '{}',
+    provider_id         TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- GIN index enables fast key/value lookups inside the JSONB payload
-CREATE INDEX idx_agents_gin ON agents USING gin(data);
 ```
+
+JSONB is retained only for genuinely schemaless or nested payloads (e.g.
+`tool_definitions`, `connection_config`, `messages`, `usage`). Array fields use the
+native PostgreSQL `TEXT[]` type. Where appropriate, tables carry targeted B-tree
+indexes (e.g. `idx_chat_sessions_agent_id`) instead of a catch-all GIN index.
 
 ### All 15 tables
 
-| Table | Maps to (MongoDB collection) |
+| Table | Key typed columns |
 |---|---|
-| `agents` | agents |
-| `chat_sessions` | chat\_sessions |
-| `chat_messages` | chat\_messages |
-| `memories` | memories |
-| `skills` | skills |
-| `tokens` | tokens |
-| `providers` | providers |
-| `knowledge_items` | knowledge\_items |
-| `knowledge_sources` | knowledge\_sources |
-| `custom_tools` | custom\_tools |
-| `guardrails` | guardrails |
-| `workflows` | workflows |
-| `task_executions` | task\_executions |
-| `scheduled_agents` | scheduled\_agents |
-| `mcp_servers` | mcp\_servers |
-
-Each table carries the same GIN index pattern (`idx_<table>_gin ON <table> USING gin(data)`)
-to accelerate arbitrary JSONB key lookups without needing to define individual columns.
+| `agents` | `name`, `model`, `mcp_server_ids TEXT[]`, `tool_definitions JSONB` |
+| `chat_sessions` | `agent_id`, `github_user`, `title`, `message_count INTEGER` |
+| `chat_messages` | `session_id`, `role`, `content`, `usage JSONB` |
+| `memories` | `agent_id`, `scope`, `key`, `value`, `embedding DOUBLE PRECISION[]`, `metadata JSONB` |
+| `skills` | `name`, `instructions`, `tags TEXT[]` |
+| `tokens` | `name UNIQUE`, `encrypted_value`, `created_by` |
+| `providers` | `name UNIQUE`, `provider_type`, `api_key_token_name`, `auth_type`, `base_url` |
+| `knowledge_items` | `source_id`, `content_type`, `text_content`, `file_name`, `file_size INTEGER` |
+| `knowledge_sources` | `name`, `source_type`, `connection_config JSONB`, `status` |
+| `custom_tools` | `name`, `source_code`, `parameters_schema JSONB`, `is_enabled BOOLEAN` |
+| `guardrails` | `name`, `guardrail_type`, `enabled BOOLEAN`, `prompt_config JSONB` |
+| `workflows` | `agent_id`, `status`, `max_turns INTEGER`, `messages JSONB`, `logs JSONB` |
+| `task_executions` | `workflow_id`, `status`, `celery_task_id`, `tool_calls INTEGER`, `usage JSONB` |
+| `scheduled_agents` | `workflow_id`, `interval_value INTEGER`, `interval_unit`, `enabled BOOLEAN` |
+| `mcp_servers` | `name`, `transport_type`, `connection_config JSONB`, `allowed_tools TEXT[]`, `status` |
 
 ---
 
@@ -235,40 +247,40 @@ ORDER BY n_live_tup DESC;
 
 ```sql
 -- Most recently created agents
-SELECT id, data->>'name' AS name, created_at
+SELECT id, name, model, created_at
 FROM agents
 ORDER BY created_at DESC
 LIMIT 10;
 ```
 
-### Query by JSONB field value
+### Query by column value
 
 ```sql
 -- All agents using a specific model
-SELECT id, data->>'name' AS name, data->>'model' AS model
+SELECT id, name, model
 FROM agents
-WHERE data->>'model' = 'claude-opus-4-5';
+WHERE model = 'claude-opus-4-5';
 ```
 
-### Aggregate across embedded fields
+### Aggregate across typed fields
 
 ```sql
 -- Memory count per agent
 SELECT
-    data->>'agent_id' AS agent_id,
-    COUNT(*)          AS memories
+    agent_id,
+    COUNT(*) AS memories
 FROM memories
-GROUP BY data->>'agent_id'
+GROUP BY agent_id
 ORDER BY memories DESC;
 ```
 
 ### Index usage health check
 
 ```sql
--- Confirm GIN indexes are being used
+-- Confirm B-tree indexes are being used
 SELECT indexrelname, idx_scan, idx_tup_read, idx_tup_fetch
 FROM pg_stat_user_indexes
-WHERE indexrelname LIKE '%gin%'
+WHERE indexrelname LIKE 'idx_%'
 ORDER BY idx_scan DESC;
 ```
 
@@ -312,9 +324,9 @@ docker compose exec pgvector \
 |---|---|---|
 | `connection refused` on startup | PostgreSQL not running or wrong profile active | Verify `COMPOSE_PROFILES=pgvector` in `.env`; run `docker compose ps` to confirm the `postgres` container is `Up` |
 | `relation "agents" does not exist` | Tables have not been created | Run `alembic upgrade head` inside the app container |
-| `column "data" is of type jsonb but expression is of type text` | asyncpg JSONB serializer not configured | Ensure `json_serializer` / `json_deserializer` are set in the SQLAlchemy engine config (see `app/db.py`) |
+| `column "X" does not exist` | asyncpg type mismatch or column name wrong | Confirm the column name matches the typed schema; ensure `json_serializer` / `json_deserializer` are set in the SQLAlchemy engine config (see `app/db.py`) |
 | App still reads/writes MongoDB | `DB_BACKEND` not set to `postgres` | Add `DB_BACKEND=postgres` to `.env` and restart the app |
-| Slow JSONB queries | GIN index missing or not being used | Run `CREATE INDEX CONCURRENTLY idx_<table>_gin ON <table> USING gin(data);` — no downtime required |
+| Slow queries on foreign-key-like columns | Missing B-tree index | Run `CREATE INDEX CONCURRENTLY idx_<table>_<col> ON <table> (<col>);` — no downtime required |
 | pgvector extension not found | PostgreSQL image without pgvector | Use the `pgvector/pgvector:pg17` image (configured automatically by the `pgvector` compose profile) |
 | Migration script fails with permission errors | PostgreSQL user lacks `CREATE` privilege | Grant superuser or `CREATE ON DATABASE` to the connection user |
 
