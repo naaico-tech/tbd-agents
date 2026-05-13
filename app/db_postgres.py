@@ -805,6 +805,13 @@ class PostgresDocument:
             await session.commit()
         return self
 
+    async def set(self, update_data: dict[str, Any]) -> PostgresDocument:
+        """Apply a partial update dict and persist. Compatible with Beanie's Document.set()."""
+        for key, value in update_data.items():
+            object.__setattr__(self, key, value)
+        await self.save()
+        return self
+
     async def delete(self) -> None:
         """Delete this document from the database."""
         table = self.get_collection_name()
