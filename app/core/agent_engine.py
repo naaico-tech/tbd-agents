@@ -22,12 +22,12 @@ import logging
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from io import StringIO
-from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 # Compatibility: UTC alias for Python 3.9-3.10 support
-UTC = timezone.utc
+UTC = UTC
 
 import httpx
 
@@ -1214,7 +1214,7 @@ async def _build_custom_tools_config(
         claude_tool_defs  — Claude Agent SDK custom format (for Claude path)
         tool_fn_map       — tool name → CustomTool (for execution routing)
     """
-    from beanie import PydanticObjectId as _CtObjId
+    from app.db import parse_doc_id as _CtObjId  # noqa: PLC0415
 
     openai_defs: list[dict] = []
     claude_defs: list[dict] = []
@@ -3126,8 +3126,8 @@ async def run_agent(
     # Load task execution if provided
     task_exec: TaskExecution | None = None
     if task_execution_id:
-        from beanie import PydanticObjectId
-        task_exec = await TaskExecution.get(PydanticObjectId(task_execution_id))
+        from app.db import parse_doc_id  # noqa: PLC0415
+        task_exec = await TaskExecution.get(parse_doc_id(task_execution_id))
         if task_exec:
             task_exec.status = TaskStatus.RUNNING
             task_exec.started_at = datetime.now(UTC)
@@ -3159,7 +3159,7 @@ async def run_agent(
 
     if agent.provider_id:
         try:
-            from beanie import PydanticObjectId as _ObjId
+            from app.db import parse_doc_id as _ObjId  # noqa: PLC0415
             provider = await Provider.get(_ObjId(agent.provider_id))
         except Exception as _exc:
             logger.warning(
@@ -3258,7 +3258,7 @@ async def run_agent(
 
     # Build system prompt with skills + output destination hints
     # Resolve knowledge sources — by explicit IDs and by tags (union, deduplicated)
-    from beanie import PydanticObjectId as _KsObjId
+    from app.db import parse_doc_id as _KsObjId  # noqa: PLC0415
 
     knowledge_sources_map: dict[str, KnowledgeSource] = {}
     for ks_id in agent.knowledge_source_ids:

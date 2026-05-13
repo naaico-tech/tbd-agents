@@ -1,6 +1,5 @@
 """Tests for the tool_registry module."""
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

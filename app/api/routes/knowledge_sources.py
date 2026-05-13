@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.knowledge_item import KnowledgeItem
 from app.models.knowledge_source import KnowledgeSource, KnowledgeSourceStatus, KnowledgeSourceType
 from app.schemas.export_import import (
@@ -82,7 +82,7 @@ async def export_knowledge_sources(_user=Depends(get_current_user)):
 
 @router.get("/{source_id}/export", response_model=KnowledgeSourceExportBundle)
 async def export_knowledge_source(source_id: str, _user=Depends(get_current_user)):
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     return KnowledgeSourceExportBundle(items=[_to_exported_ks(source)])
@@ -112,7 +112,7 @@ async def import_knowledge_sources(
 
 @router.get("/{source_id}", response_model=KnowledgeSourceResponse)
 async def get_knowledge_source(source_id: str, _user=Depends(get_current_user)):
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     return _to_response(source)
@@ -122,7 +122,7 @@ async def get_knowledge_source(source_id: str, _user=Depends(get_current_user)):
 async def update_knowledge_source(
     source_id: str, body: KnowledgeSourceUpdate, _user=Depends(get_current_user)
 ):
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     update_data = body.model_dump(exclude_none=True)
@@ -144,7 +144,7 @@ async def update_knowledge_source(
 
 @router.delete("/{source_id}", status_code=204)
 async def delete_knowledge_source(source_id: str, _user=Depends(get_current_user)):
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     # Cascade delete: remove all items belonging to this source
@@ -158,7 +158,7 @@ async def delete_knowledge_source(source_id: str, _user=Depends(get_current_user
 
 @router.post("/{source_id}/test", response_model=KnowledgeSourceTestResponse)
 async def test_knowledge_source(source_id: str, _user=Depends(get_current_user)):
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     result = await knowledge_manager.test_connection(source)

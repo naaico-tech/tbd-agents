@@ -1,9 +1,9 @@
 """API route to list available Copilot models with billing multipliers."""
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from app.api.deps import extract_optional_token, get_current_user
+from app.db import parse_doc_id
 from app.models.provider import Provider, ProviderType
 from app.services import token_manager
 from app.services.copilot_client import build_client
@@ -19,7 +19,7 @@ async def _resolve_models_token(
 
     if provider_id:
         try:
-            provider = await Provider.get(PydanticObjectId(provider_id))
+            provider = await Provider.get(parse_doc_id(provider_id))
         except Exception as exc:
             raise HTTPException(status_code=400, detail="Invalid provider_id") from exc
 

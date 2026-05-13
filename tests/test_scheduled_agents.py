@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 FAKE_ID = "6601a1b2c3d4e5f607890abc"
@@ -323,12 +322,12 @@ class TestScheduledTriggerTask:
     @pytest.mark.asyncio
     async def test_skips_when_already_running(self):
         sa = _make_sa(enabled=True, end_at=None)
-        
+
         # Mock an active task execution
         mock_active_te = MagicMock()
         mock_active_te.id = "active_te_id"
         mock_active_te.status = "running"
-        
+
         mock_run_task = MagicMock()
 
         with (
@@ -340,7 +339,7 @@ class TestScheduledTriggerTask:
             mock_sa_cls.get = AsyncMock(return_value=sa)
             # Find one should return the active task
             mock_te_cls.find_one = AsyncMock(return_value=mock_active_te)
-            
+
             from app.tasks.scheduled_trigger import _execute
             await _execute(FAKE_ID)
 

@@ -1,10 +1,10 @@
 """Tests for the guardrails enforcement engine."""
 
-import json
+
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
-from unittest.mock import MagicMock
 
 from app.core.guardrails import _check_output, _check_prompt, _check_request
 from app.models.guardrail import (

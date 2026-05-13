@@ -1,8 +1,9 @@
 """Tests for the token manager (encryption, decryption, config resolution)."""
 
+from unittest.mock import patch
+
 import pytest
 from cryptography.fernet import Fernet
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.token_manager import (
     _TOKEN_REF_RE,
@@ -12,7 +13,6 @@ from app.services.token_manager import (
     encrypt_value,
     mask_value,
 )
-
 
 # Generate a real Fernet key for testing
 _TEST_KEY = Fernet.generate_key().decode()

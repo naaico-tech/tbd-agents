@@ -1,10 +1,8 @@
 """Unit tests for app.services.custom_tool_runner."""
 
 import json
-import sys
 
 import pytest
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 

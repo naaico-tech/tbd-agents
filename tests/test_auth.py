@@ -1,9 +1,8 @@
 """Tests for the auth service (GitHub token validation)."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import pytest
 from fastapi import HTTPException
 
 from app.services.auth import validate_github_token

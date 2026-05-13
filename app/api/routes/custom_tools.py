@@ -12,14 +12,13 @@ POST   /api/custom-tools/validate          Validate source without saving
 POST   /api/custom-tools/upload            Upload a .py file
 """
 
+import re as _re
 from datetime import UTC, datetime
 
-import re as _re
-
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.custom_tool import CustomTool
 from app.schemas.custom_tool import (
     CustomToolCreate,
@@ -60,7 +59,7 @@ def _to_response(tool: CustomTool) -> CustomToolResponse:
 
 
 async def _get_tool_or_404(tool_id: str) -> CustomTool:
-    tool = await CustomTool.get(PydanticObjectId(tool_id))
+    tool = await CustomTool.get(parse_doc_id(tool_id))
     if not tool:
         raise HTTPException(status_code=404, detail="Custom tool not found")
     return tool

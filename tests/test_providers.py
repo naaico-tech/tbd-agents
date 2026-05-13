@@ -227,7 +227,7 @@ class TestRunWithCustomProvider:
     @pytest.mark.asyncio
     async def test_successful_response(self, mock_workflow, openai_provider):
         from app.core.agent_engine import _run_with_custom_provider
-        from app.models.workflow import OutputFormat, WorkflowStatus
+        from app.models.workflow import OutputFormat
 
         mock_workflow.output_format = OutputFormat.JSON
 

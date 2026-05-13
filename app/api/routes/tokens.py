@@ -1,7 +1,7 @@
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.token import Token
 from app.schemas.token import TokenCreate, TokenResponse, TokenUpdate
 from app.services import token_manager
@@ -43,7 +43,7 @@ async def list_tokens(user: dict = Depends(get_current_user)):
 
 @router.get("/{token_id}", response_model=TokenResponse)
 async def get_token(token_id: str, user: dict = Depends(get_current_user)):
-    token = await Token.get(PydanticObjectId(token_id))
+    token = await Token.get(parse_doc_id(token_id))
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     return _to_response(token)
@@ -55,7 +55,7 @@ async def update_token(
     body: TokenUpdate,
     user: dict = Depends(get_current_user),
 ):
-    token = await Token.get(PydanticObjectId(token_id))
+    token = await Token.get(parse_doc_id(token_id))
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     token = await token_manager.update_token(
@@ -66,7 +66,7 @@ async def update_token(
 
 @router.delete("/{token_id}", status_code=204)
 async def delete_token(token_id: str, user: dict = Depends(get_current_user)):
-    token = await Token.get(PydanticObjectId(token_id))
+    token = await Token.get(parse_doc_id(token_id))
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     await token_manager.delete_token(token)

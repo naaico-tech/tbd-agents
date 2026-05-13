@@ -1,7 +1,7 @@
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.task_execution import TaskExecution
 from app.models.workflow import Workflow
@@ -17,14 +17,14 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
 def _elapsed(te: TaskExecution) -> float | None:
-    from datetime import UTC, datetime, timezone
+    from datetime import UTC, datetime
 
     def _make_aware(dt):
         """Ensure a datetime is timezone-aware (UTC)."""
         if dt is None:
             return None
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=UTC)
         return dt
 
     started = _make_aware(te.started_at)
@@ -43,11 +43,11 @@ def _usage_response(te: TaskExecution) -> UsageStatsResponse | None:
 
 
 async def _to_summary(te: TaskExecution) -> TaskExecutionSummary:
-    wf = await Workflow.get(PydanticObjectId(te.workflow_id))
+    wf = await Workflow.get(parse_doc_id(te.workflow_id))
     workflow_title = wf.title if wf else None
     agent_name = None
     if wf:
-        agent = await Agent.get(PydanticObjectId(wf.agent_id))
+        agent = await Agent.get(parse_doc_id(wf.agent_id))
         agent_name = agent.name if agent else None
     return TaskExecutionSummary(
         id=str(te.id),
@@ -78,11 +78,11 @@ def _progress_response(te: TaskExecution) -> TaskProgressResponse | None:
 
 
 async def _to_response(te: TaskExecution) -> TaskExecutionResponse:
-    wf = await Workflow.get(PydanticObjectId(te.workflow_id))
+    wf = await Workflow.get(parse_doc_id(te.workflow_id))
     workflow_title = wf.title if wf else None
     agent_name = None
     if wf:
-        agent = await Agent.get(PydanticObjectId(wf.agent_id))
+        agent = await Agent.get(parse_doc_id(wf.agent_id))
         agent_name = agent.name if agent else None
     return TaskExecutionResponse(
         id=str(te.id),
@@ -121,11 +121,11 @@ async def list_tasks(user=Depends(get_current_user)):
 @router.get("/{task_id}", response_model=TaskExecutionResponse)
 async def get_task(task_id: str, user=Depends(get_current_user)):
     """Get a single task execution with full logs and messages."""
-    te = await TaskExecution.get(PydanticObjectId(task_id))
+    te = await TaskExecution.get(parse_doc_id(task_id))
     if not te:
         raise HTTPException(status_code=404, detail="Task execution not found")
     # Verify ownership
-    wf = await Workflow.get(PydanticObjectId(te.workflow_id))
+    wf = await Workflow.get(parse_doc_id(te.workflow_id))
     if not wf or wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your task")
     return await _to_response(te)
@@ -134,10 +134,10 @@ async def get_task(task_id: str, user=Depends(get_current_user)):
 @router.get("/{task_id}/progress", response_model=TaskProgressResponse)
 async def get_task_progress(task_id: str, user=Depends(get_current_user)):
     """Get the current TODO progress for a task execution."""
-    te = await TaskExecution.get(PydanticObjectId(task_id))
+    te = await TaskExecution.get(parse_doc_id(task_id))
     if not te:
         raise HTTPException(status_code=404, detail="Task execution not found")
-    wf = await Workflow.get(PydanticObjectId(te.workflow_id))
+    wf = await Workflow.get(parse_doc_id(te.workflow_id))
     if not wf or wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your task")
     if not te.progress:
@@ -152,7 +152,7 @@ async def get_task_progress(task_id: str, user=Depends(get_current_user)):
 @router.get("/workflow/{workflow_id}", response_model=list[TaskExecutionSummary])
 async def list_workflow_tasks(workflow_id: str, user=Depends(get_current_user)):
     """List all task executions for a specific workflow."""
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:

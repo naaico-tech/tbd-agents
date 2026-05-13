@@ -15,9 +15,9 @@ from app.core.agent_engine import (
     _build_provider_headers,
     _clear_old_tool_results,
     _compact_messages,
+    _compute_retry_delay,
     _estimate_request_tokens,
     _estimate_tools_tokens,
-    _compute_retry_delay,
     _format_tool_result_for_context,
     _http_post_with_retry,
     _resolve_provider_url,
@@ -25,7 +25,6 @@ from app.core.agent_engine import (
     _truncate_tool_result,
 )
 from app.models.provider import Provider, ProviderType
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

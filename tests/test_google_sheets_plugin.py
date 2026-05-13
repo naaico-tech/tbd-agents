@@ -6,8 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.plugins.google_sheets import GoogleSheetsPlugin, _READ_OPS, _WRITE_OPS
-
+from app.plugins.google_sheets import _READ_OPS, _WRITE_OPS, GoogleSheetsPlugin
 
 # ---------------------------------------------------------------------------
 # Fixtures

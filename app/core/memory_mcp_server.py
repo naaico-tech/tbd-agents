@@ -17,7 +17,6 @@ Environment variables (set by the parent process):
 import asyncio
 import json
 import os
-import sys
 
 import httpx
 from mcp.server import Server

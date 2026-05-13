@@ -1,6 +1,5 @@
 """Tests for the Claude Agent SDK client builder and agent_engine Claude path."""
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,10 +10,8 @@ from app.core.agent_engine import (
     _build_claude_agent_mcp_servers,
     _build_claude_agent_tools,
     _mcp_tool_to_claude_custom,
-    _resolve_refs,
 )
 from app.services.claude_client import build_claude_client
-
 
 # ── Client builder tests ─────────────────────────────────────────────────────
 

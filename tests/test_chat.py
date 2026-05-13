@@ -23,7 +23,6 @@ from app.schemas.chat import (
     ChatSessionResponse,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 FAKE_ID = "6601a1b2c3d4e5f607890abc"
@@ -606,8 +605,9 @@ class TestHandleChatByok:
     @pytest.mark.asyncio
     async def test_byok_openai_provider_uses_provider_url_and_key(self):
         """handle_chat with OpenAI BYOK provider calls provider URL with stored key."""
-        from app.models.provider import ProviderType
         from types import SimpleNamespace
+
+        from app.models.provider import ProviderType
 
         agent = SimpleNamespace(
             id=FAKE_ID,
@@ -678,8 +678,9 @@ class TestHandleChatByok:
     @pytest.mark.asyncio
     async def test_byok_github_copilot_provider_uses_copilot_endpoint(self):
         """handle_chat with github_copilot BYOK uses api.githubcopilot.com with stored token."""
-        from app.models.provider import ProviderType
         from types import SimpleNamespace
+
+        from app.models.provider import ProviderType
 
         agent = SimpleNamespace(
             id=FAKE_ID,
@@ -747,8 +748,9 @@ class TestHandleChatByok:
     @pytest.mark.asyncio
     async def test_byok_anthropic_provider_yields_error_event(self):
         """handle_chat with Anthropic BYOK yields error — not OpenAI-compatible."""
-        from app.models.provider import ProviderType
         from types import SimpleNamespace
+
+        from app.models.provider import ProviderType
 
         agent = SimpleNamespace(
             id=FAKE_ID,
@@ -864,8 +866,9 @@ class TestHandleChatByok:
     @pytest.mark.asyncio
     async def test_byok_token_resolution_returns_none_falls_back_to_github_token(self):
         """When token_manager returns None for the provider key, fall back to github_token."""
-        from app.models.provider import ProviderType
         from types import SimpleNamespace
+
+        from app.models.provider import ProviderType
 
         agent = SimpleNamespace(
             id=FAKE_ID,
@@ -931,8 +934,9 @@ class TestHandleChatByok:
     @pytest.mark.asyncio
     async def test_byok_http_error_logs_response_body_and_yields_error(self):
         """When LLM returns non-2xx, handler logs response body and yields error event."""
-        from app.models.provider import ProviderType
         from types import SimpleNamespace
+
+        from app.models.provider import ProviderType
 
         agent = SimpleNamespace(
             id=FAKE_ID,

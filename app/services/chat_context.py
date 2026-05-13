@@ -9,8 +9,7 @@ working on?".
 import logging
 from xml.sax.saxutils import escape
 
-from beanie import PydanticObjectId
-
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.mcp_server import McpServer
 from app.models.skill import Skill
@@ -75,7 +74,7 @@ async def build_chat_context(agent: Agent, github_user: str) -> str:
 
         for sid in dict.fromkeys(skill_ids):
             try:
-                skill = await Skill.get(PydanticObjectId(sid))
+                skill = await Skill.get(parse_doc_id(sid))
             except Exception:
                 continue
             if skill:

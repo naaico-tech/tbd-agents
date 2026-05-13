@@ -1,3 +1,5 @@
+from typing import Any
+
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -66,3 +68,15 @@ async def close_db() -> None:
         from app.db_postgres import close_postgres  # noqa: PLC0415
 
         await close_postgres()
+
+
+def parse_doc_id(id_str: str) -> Any:
+    """Return a document ID in the type expected by the active backend.
+
+    * PostgreSQL backend → plain string (UUID format).
+    * MongoDB backend → ``PydanticObjectId`` for Beanie compatibility.
+    """
+    if settings.db_backend == "postgres":
+        return id_str
+    from beanie import PydanticObjectId  # noqa: PLC0415
+    return PydanticObjectId(id_str)

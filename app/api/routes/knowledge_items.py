@@ -1,11 +1,11 @@
 import json
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.knowledge_item import KnowledgeContentType, KnowledgeItem
 from app.models.knowledge_source import KnowledgeSource, KnowledgeSourceType
 from app.schemas.knowledge import (
@@ -41,7 +41,7 @@ def _to_response(item: KnowledgeItem) -> KnowledgeItemResponse:
 @router.post("", response_model=KnowledgeItemResponse, status_code=201)
 async def create_knowledge_item(body: KnowledgeItemCreate, _user=Depends(get_current_user)):
     """Create a text-based knowledge item."""
-    source = await KnowledgeSource.get(PydanticObjectId(body.source_id))
+    source = await KnowledgeSource.get(parse_doc_id(body.source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     if source.source_type != KnowledgeSourceType.MONGO_DB:
@@ -69,7 +69,7 @@ async def upload_knowledge_file(
     _user=Depends(get_current_user),
 ):
     """Upload a file or image as a knowledge item."""
-    source = await KnowledgeSource.get(PydanticObjectId(source_id))
+    source = await KnowledgeSource.get(parse_doc_id(source_id))
     if not source:
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     if source.source_type != KnowledgeSourceType.MONGO_DB:
@@ -132,7 +132,7 @@ async def list_knowledge_items(
 
 @router.get("/{item_id}", response_model=KnowledgeItemResponse)
 async def get_knowledge_item(item_id: str, _user=Depends(get_current_user)):
-    item = await KnowledgeItem.get(PydanticObjectId(item_id))
+    item = await KnowledgeItem.get(parse_doc_id(item_id))
     if not item:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     return _to_response(item)
@@ -141,7 +141,7 @@ async def get_knowledge_item(item_id: str, _user=Depends(get_current_user)):
 @router.get("/{item_id}/content")
 async def download_knowledge_file(item_id: str, _user=Depends(get_current_user)):
     """Download the file content of a knowledge item."""
-    item = await KnowledgeItem.get(PydanticObjectId(item_id))
+    item = await KnowledgeItem.get(parse_doc_id(item_id))
     if not item:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     if not item.file_id:
@@ -162,7 +162,7 @@ async def download_knowledge_file(item_id: str, _user=Depends(get_current_user))
 async def update_knowledge_item(
     item_id: str, body: KnowledgeItemUpdate, _user=Depends(get_current_user)
 ):
-    item = await KnowledgeItem.get(PydanticObjectId(item_id))
+    item = await KnowledgeItem.get(parse_doc_id(item_id))
     if not item:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     update_data = body.model_dump(exclude_none=True)
@@ -174,7 +174,7 @@ async def update_knowledge_item(
 
 @router.delete("/{item_id}", status_code=204)
 async def delete_knowledge_item(item_id: str, _user=Depends(get_current_user)):
-    item = await KnowledgeItem.get(PydanticObjectId(item_id))
+    item = await KnowledgeItem.get(parse_doc_id(item_id))
     if not item:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     await knowledge_manager.delete_item(item)

@@ -1,6 +1,5 @@
 import json as _json
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -8,6 +7,7 @@ from app.api.deps import extract_optional_token, get_current_user
 from app.config import settings
 from app.core import event_bus
 from app.core.guardrails import enforce_guardrails
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.models.task_execution import TaskExecution
@@ -92,7 +92,7 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
 
 @router.post("", response_model=WorkflowResponse, status_code=201)
 async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
-    agent = await Agent.get(PydanticObjectId(body.agent_id))
+    agent = await Agent.get(parse_doc_id(body.agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -136,7 +136,7 @@ async def send_prompt(
     user=Depends(get_current_user),
     authorization: str | None = Header(None),
 ):
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -199,7 +199,7 @@ async def send_prompt(
 @router.post("/{workflow_id}/halt", status_code=202)
 async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
     """Signal a running workflow to halt. The worker will abort the SDK session."""
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -228,7 +228,7 @@ async def stream_workflow(
     server replays any events the client missed before switching to live
     streaming.
     """
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
@@ -306,7 +306,7 @@ async def export_workflows(user=Depends(get_current_user)):
 
 @router.get("/{workflow_id}/export", response_model=WorkflowExportBundle)
 async def export_workflow(workflow_id: str, user=Depends(get_current_user)):
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -319,7 +319,7 @@ async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_
     result = ImportResult()
     for item in body.items:
         try:
-            agent = await Agent.get(PydanticObjectId(item.agent_id))
+            agent = await Agent.get(parse_doc_id(item.agent_id))
             if not agent:
                 result.errors.append(
                     f"{item.title or 'untitled'}: agent_id {item.agent_id!r} not found"
@@ -356,7 +356,7 @@ async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(workflow_id: str, user=Depends(get_current_user)):
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -368,7 +368,7 @@ async def get_workflow(workflow_id: str, user=Depends(get_current_user)):
 async def update_workflow(
     workflow_id: str, body: WorkflowUpdate, user=Depends(get_current_user)
 ):
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -376,7 +376,7 @@ async def update_workflow(
 
     updates = body.model_dump(exclude_unset=True)
     if "agent_id" in updates:
-        agent = await Agent.get(PydanticObjectId(updates["agent_id"]))
+        agent = await Agent.get(parse_doc_id(updates["agent_id"]))
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         updates["agent_id"] = str(agent.id)
@@ -398,7 +398,7 @@ async def update_workflow(
 
 @router.delete("/{workflow_id}", status_code=204)
 async def delete_workflow(workflow_id: str, user=Depends(get_current_user)):
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -418,12 +418,12 @@ async def install_skill(
     workflow_id: str, skill_id: str, user=Depends(get_current_user)
 ):
     """Install a skill into a workflow."""
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    skill = await Skill.get(PydanticObjectId(skill_id))
+    skill = await Skill.get(parse_doc_id(skill_id))
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     if skill_id in wf.skill_ids:
@@ -438,7 +438,7 @@ async def remove_skill(
     workflow_id: str, skill_id: str, user=Depends(get_current_user)
 ):
     """Remove a skill from a workflow."""
-    wf = await Workflow.get(PydanticObjectId(workflow_id))
+    wf = await Workflow.get(parse_doc_id(workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:

@@ -19,9 +19,9 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import httpx
-from beanie import PydanticObjectId
 
 from app.config import settings
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
@@ -161,7 +161,7 @@ async def handle_chat(
 
     if agent.provider_id:
         try:
-            prov = await Provider.get(PydanticObjectId(agent.provider_id))
+            prov = await Provider.get(parse_doc_id(agent.provider_id))
             if prov:
                 resolved_key = await token_manager.get_token_value(
                     prov.api_key_token_name

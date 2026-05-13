@@ -6,7 +6,6 @@ import pytest
 
 from app.core.plugin_base import PluginBase
 
-
 # ---------------------------------------------------------------------------
 # Helpers — inline concrete plugins
 # ---------------------------------------------------------------------------

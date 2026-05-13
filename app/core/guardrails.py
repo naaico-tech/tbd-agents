@@ -31,10 +31,10 @@ async def _load_guardrails(workflow: Workflow) -> list[Guardrail]:
     found: dict[str, Guardrail] = {}
 
     if workflow.guardrail_ids:
-        from beanie import PydanticObjectId
+        from app.db import parse_doc_id  # noqa: PLC0415
 
         for gid in workflow.guardrail_ids:
-            g = await Guardrail.get(PydanticObjectId(gid))
+            g = await Guardrail.get(parse_doc_id(gid))
             if g and g.enabled:
                 found[str(g.id)] = g
 

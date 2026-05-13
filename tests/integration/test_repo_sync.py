@@ -6,16 +6,13 @@ auth tokens are resolved, and repo paths are returned.
 Closes #41
 """
 
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.core.agent_engine import _sync_repo
-from app.models.workflow import Workflow, WorkflowStatus
 
 from .conftest import create_agent, create_token, create_workflow
-
 
 # ---------------------------------------------------------------------------
 # Helpers

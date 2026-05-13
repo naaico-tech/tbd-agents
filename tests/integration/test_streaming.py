@@ -6,9 +6,8 @@ published through the event bus as Server-Sent Events.
 Closes #37
 """
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest

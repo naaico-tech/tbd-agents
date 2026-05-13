@@ -13,12 +13,13 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+from beanie.operators import In
+
 from app.celery_app import celery
 from app.db import init_db
 from app.models.scheduled_agent import ScheduledAgent
 from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import Workflow
-from beanie.operators import In
 from app.services import scheduler
 from app.tasks.agent_task import run_agent_task
 
