@@ -332,6 +332,10 @@ def _python_to_sa_type(annotation: Any) -> Any:
     if isinstance(annotation, type) and issubclass(annotation, Enum):
         return TEXT()
 
+    # Bare list / dict without type parameters
+    if annotation is list or annotation is dict:
+        return JSONB()
+
     if origin is list and args:
         inner = args[0]
         if inner is str:
@@ -582,7 +586,8 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
         factory = await get_session_factory()
         async with factory() as session:
             result = await session.execute(text(sql), params)
-            rows = result.mappings().fetchall()
+            # Convert RowMapping objects to plain dicts so _from_row works uniformly
+            rows = [dict(row) for row in result.mappings().fetchall()]
         return [self._model_cls._from_row(row) for row in rows]
 
     async def count(self) -> int:
@@ -664,10 +669,13 @@ class PostgresDocument:
     def _from_row(cls, row: Any) -> PostgresDocument:
         """Reconstruct a model instance from a structured-column row.
 
-        Handles both the new mapping-style rows (``row._mapping``) and the
-        legacy ``(id, data, created_at, updated_at)`` tuple format.
+        Accepts plain dicts (preferred — from to_list()), Row objects with
+        ``._mapping``, namedtuple-like rows with ``._asdict()``, or the legacy
+        ``(id, data_blob, created_at, updated_at)`` tuple format.
         """
-        if hasattr(row, "_mapping"):
+        if isinstance(row, dict):
+            data = row
+        elif hasattr(row, "_mapping"):
             data = dict(row._mapping)
         elif hasattr(row, "_asdict"):
             data = row._asdict()
