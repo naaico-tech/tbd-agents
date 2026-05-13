@@ -621,10 +621,10 @@ class TestBeanieRepository:
     async def test_insert_delegates_to_model_insert(self):
         model, _ = self._make_model()
         obj = MagicMock()
-        model.insert = AsyncMock(return_value=obj)
+        obj.insert = AsyncMock(return_value=obj)
         repo = BeanieRepository(model)
         result = await repo.insert(obj)
-        model.insert.assert_awaited_once_with(obj)
+        obj.insert.assert_awaited_once()
         assert result is obj
 
     async def test_delete_returns_true_when_found(self):
@@ -745,10 +745,10 @@ class TestPostgresRepository:
     async def test_insert_delegates_to_model_insert(self):
         model, _ = self._make_model()
         obj = MagicMock()
-        model.insert = AsyncMock(return_value=obj)
+        obj.insert = AsyncMock(return_value=obj)
         repo = PostgresRepository(model)
         result = await repo.insert(obj)
-        model.insert.assert_awaited_once_with(obj)
+        obj.insert.assert_awaited_once()
         assert result is obj
 
     async def test_delete_returns_true_when_found(self):

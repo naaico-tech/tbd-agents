@@ -363,10 +363,10 @@ class PostgresDocument:
     async def get(cls, doc_id: Any) -> PostgresDocument | None:
         return await cls.find_one({"id": str(doc_id)})
 
-    @classmethod
-    async def insert(cls, document: PostgresDocument) -> PostgresDocument:
-        await document.save()
-        return document
+    async def insert(self) -> PostgresDocument:
+        """Insert this document as a new row (alias for save())."""
+        await self.save()
+        return self
 
     # ------------------------------------------------------------------
     # Instance-level persistence helpers

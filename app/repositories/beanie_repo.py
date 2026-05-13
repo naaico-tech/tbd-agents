@@ -41,7 +41,8 @@ class BeanieRepository(Generic[T]):
 
     async def insert(self, obj: T) -> T:
         """Insert *obj* as a new document and return it."""
-        return await self._model.insert(obj)  # type: ignore[attr-defined]
+        await obj.insert()  # type: ignore[attr-defined]
+        return obj
 
     async def delete(self, id: str) -> bool:
         """Delete the document with *id*.  Returns ``True`` if found and deleted."""
