@@ -31,6 +31,7 @@ class ChatMessage(_DocumentBase):  # type: ignore[valid-type]
     content: str
     usage: dict | None = None  # token counts for assistant messages
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     class Settings:
         name = "chat_messages"

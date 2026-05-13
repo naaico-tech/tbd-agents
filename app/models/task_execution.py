@@ -65,6 +65,7 @@ class TaskExecution(_DocumentBase):  # type: ignore[valid-type]
     finished_at: datetime | None = None
     scheduled_agent_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     class Settings:
         name = "task_executions"

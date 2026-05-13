@@ -58,7 +58,8 @@ def upgrade() -> None:
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             usage JSONB,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
     op.execute(
@@ -247,7 +248,8 @@ def upgrade() -> None:
             started_at TIMESTAMPTZ,
             finished_at TIMESTAMPTZ,
             scheduled_agent_id TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
     op.execute(
