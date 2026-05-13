@@ -149,7 +149,7 @@ async def delete_knowledge_source(source_id: str, _user=Depends(get_current_user
         raise HTTPException(status_code=404, detail="Knowledge source not found")
     # Cascade delete: remove all items belonging to this source
     items = await KnowledgeItem.find(
-        KnowledgeItem.source_id == str(source.id),
+        {"source_id": str(source.id)},
     ).to_list()
     for item in items:
         await knowledge_manager.delete_item(item)

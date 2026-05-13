@@ -135,10 +135,10 @@ async def build_chat_context(agent: Agent, github_user: str) -> str:
     # ── 4. Recent task history ───────────────────────────────────────────────
     try:
         # Find workflows belonging to this agent + user
-        workflows = await Workflow.find(
-            Workflow.agent_id == str(agent.id),
-            Workflow.github_user == github_user,
-        ).to_list()
+        workflows = await Workflow.find({
+            "agent_id": str(agent.id),
+            "github_user": github_user,
+        }).to_list()
         wf_ids = {str(wf.id) for wf in workflows}
 
         if wf_ids:

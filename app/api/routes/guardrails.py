@@ -63,7 +63,7 @@ async def list_guardrails(
 ):
     """List all guardrails, optionally filtered by a single tag."""
     if tag:
-        guardrails = await Guardrail.find(Guardrail.tags == tag).to_list()
+        guardrails = await Guardrail.find({"tags": tag}).to_list()
     else:
         guardrails = await Guardrail.find_all().to_list()
     return [_to_response(g) for g in guardrails]

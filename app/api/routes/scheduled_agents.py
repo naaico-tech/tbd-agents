@@ -89,7 +89,7 @@ async def create_scheduled_agent(
 @router.get("", response_model=list[ScheduledAgentResponse])
 async def list_scheduled_agents(user=Depends(get_current_user)):
     """List all scheduled agents that belong to the authenticated user."""
-    user_workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    user_workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     wf_ids = {str(wf.id) for wf in user_workflows}
     all_sas = await ScheduledAgent.find_all().sort("-created_at").to_list()
     return [_to_response(sa) for sa in all_sas if sa.workflow_id in wf_ids]

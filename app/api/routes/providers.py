@@ -29,7 +29,7 @@ def _to_response(provider: Provider) -> ProviderResponse:
 @router.post("", response_model=ProviderResponse, status_code=201)
 async def create_provider(body: ProviderCreate, _user=Depends(get_current_user)):
     """Create a new provider configuration."""
-    existing = await Provider.find_one(Provider.name == body.name)
+    existing = await Provider.find_one({"name": body.name})
     if existing:
         raise HTTPException(status_code=409, detail=f"Provider '{body.name}' already exists")
     provider = Provider(**body.model_dump())

@@ -512,7 +512,11 @@ def _translate_filters(
             param_name = f"p{param_idx}"
             param_idx += 1
             params[param_name] = _serialize_value(value, sa_type)
-            conditions.append(f"{col_key} = :{param_name}")
+            # For ARRAY columns, a scalar filter means "value is in the array"
+            if isinstance(sa_type, ARRAY):
+                conditions.append(f":{param_name} = ANY({col_key})")
+            else:
+                conditions.append(f"{col_key} = :{param_name}")
 
     return " AND ".join(conditions) if conditions else "TRUE"
 

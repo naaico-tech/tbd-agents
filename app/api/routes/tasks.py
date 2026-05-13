@@ -111,7 +111,7 @@ async def _to_response(te: TaskExecution) -> TaskExecutionResponse:
 @router.get("", response_model=list[TaskExecutionSummary])
 async def list_tasks(user=Depends(get_current_user)):
     """List all task executions for the current user's workflows."""
-    user_workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    user_workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     wf_ids = {str(wf.id) for wf in user_workflows}
     all_tasks = await TaskExecution.find_all().sort("-created_at").to_list()
     user_tasks = [t for t in all_tasks if t.workflow_id in wf_ids]
@@ -158,6 +158,6 @@ async def list_workflow_tasks(workflow_id: str, user=Depends(get_current_user)):
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
     tasks = await TaskExecution.find(
-        TaskExecution.workflow_id == workflow_id
+        {"workflow_id": workflow_id}
     ).sort("-created_at").to_list()
     return [await _to_summary(t) for t in tasks]

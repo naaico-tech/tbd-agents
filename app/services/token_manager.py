@@ -62,7 +62,7 @@ async def create_token(
     name: str, value: str, description: str, created_by: str
 ) -> Token:
     """Create a new encrypted token. Raises ValueError if name already exists."""
-    existing = await Token.find_one(Token.name == name)
+    existing = await Token.find_one({"name": name})
     if existing:
         raise ValueError(f"Token with name '{name}' already exists")
     token = Token(
@@ -77,7 +77,7 @@ async def create_token(
 
 async def get_token_value(name: str) -> str | None:
     """Fetch a token by name and return the decrypted plaintext, or None."""
-    token = await Token.find_one(Token.name == name)
+    token = await Token.find_one({"name": name})
     if not token:
         return None
     return decrypt_value(token.encrypted_value)

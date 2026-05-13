@@ -306,12 +306,12 @@ async def start_chat_session(
     chat_title = f"Chat: {agent.name}"
 
     # Look for existing active chat workflow for this user + agent
-    existing = await Workflow.find_one(
-        Workflow.github_user == github_user,
-        Workflow.agent_id == str(agent.id),
-        Workflow.status == WorkflowStatus.ACTIVE,
-        Workflow.infinite_session == True,  # noqa: E712 – beanie query, not Python bool
-    )
+    existing = await Workflow.find_one({
+        "github_user": github_user,
+        "agent_id": str(agent.id),
+        "status": WorkflowStatus.ACTIVE,
+        "infinite_session": True,
+    })
 
     if existing:
         return ChatStartResponse(

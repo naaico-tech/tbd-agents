@@ -26,7 +26,7 @@ async def export_all(user=Depends(get_current_user)):
     """Export all skills, agents, user-owned workflows, and knowledge sources."""
     skills = await Skill.find_all().to_list()
     agents = await Agent.find_all().to_list()
-    workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     knowledge_sources = await KnowledgeSource.find_all().to_list()
 
     return FullExportBundle(

@@ -47,10 +47,10 @@ def _usage_response(wf: Workflow) -> UsageStatsResponse | None:
 async def _to_response(wf: Workflow) -> WorkflowResponse:
     # Count tasks and get last task info
     tasks = await TaskExecution.find(
-        TaskExecution.workflow_id == str(wf.id)
+        {"workflow_id": str(wf.id)}
     ).sort("-created_at").limit(1).to_list()
     task_count_val = await TaskExecution.find(
-        TaskExecution.workflow_id == str(wf.id)
+        {"workflow_id": str(wf.id)}
     ).count()
     last_task = tasks[0] if tasks else None
     return WorkflowResponse(
@@ -208,8 +208,7 @@ async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, not active")
     # Check if there is actually a running task for this workflow
     running_task = await TaskExecution.find_one(
-        TaskExecution.workflow_id == str(wf.id),
-        TaskExecution.status == "running",
+        {"workflow_id": str(wf.id), "status": "running"},
     )
     if not running_task:
         raise HTTPException(status_code=400, detail="No running task to halt")
@@ -301,7 +300,7 @@ def _to_exported_wf(wf: Workflow) -> ExportedWorkflow:
 
 @router.get("/export", response_model=WorkflowExportBundle)
 async def export_workflows(user=Depends(get_current_user)):
-    workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     return WorkflowExportBundle(items=[_to_exported_wf(wf) for wf in workflows])
 
 
@@ -410,7 +409,7 @@ async def delete_workflow(workflow_id: str, user=Depends(get_current_user)):
 
 @router.get("", response_model=list[WorkflowResponse])
 async def list_workflows(user=Depends(get_current_user)):
-    workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     return [await _to_response(wf) for wf in workflows]
 
 
