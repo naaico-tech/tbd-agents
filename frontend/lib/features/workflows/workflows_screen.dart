@@ -2399,6 +2399,15 @@ class _WfErrorBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// _WorkflowOption — lightweight model for workflow filter dropdown
+// ---------------------------------------------------------------------------
+class _WorkflowOption {
+  const _WorkflowOption({required this.id, required this.title});
+  final String id;
+  final String title;
+}
+
+// ---------------------------------------------------------------------------
 // _Task — data model (mirrors TaskExecutionSummary)
 // ---------------------------------------------------------------------------
 
@@ -2479,6 +2488,18 @@ Future<List<_Task>> _fetchTasks(http.Client client) async {
   return decoded.whereType<Map<String, dynamic>>().map(_Task.fromJson).toList();
 }
 
+Future<List<_Task>> _fetchWorkflowTasks(
+    http.Client client, String workflowId) async {
+  final response =
+      await client.get(AppLinks.apiUri('/tasks/workflow/$workflowId'));
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception('Failed to load tasks (${response.statusCode})');
+  }
+  final decoded = jsonDecode(response.body);
+  if (decoded is! List) throw Exception('Unexpected format');
+  return decoded.whereType<Map<String, dynamic>>().map(_Task.fromJson).toList();
+}
+
 // ---------------------------------------------------------------------------
 // TasksScreen — task execution log (live list)
 // ---------------------------------------------------------------------------
@@ -2494,12 +2515,16 @@ class _TasksScreenState extends State<TasksScreen> {
   late Future<List<_Task>> _tasksFuture;
   Timer? _pollTimer;
 
+  String? _filterWorkflowId;    // null = all workflows
+  List<_WorkflowOption> _workflows = [];
+
   http.Client get _client => _ownedClient ??= http.Client();
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _loadWorkflowOptions();
   }
 
   @override
@@ -2512,35 +2537,37 @@ class _TasksScreenState extends State<TasksScreen> {
   void _reload() {
     _pollTimer?.cancel();
     _pollTimer = null;
-    final future = _fetchTasks(_client);
-    setState(() {
-      _tasksFuture = future;
-    });
-    future.then((tasks) {
-      if (!mounted) return;
-      final hasActive = tasks.any(
-        (t) => t.status == 'running' || t.status == 'pending',
-      );
-      if (hasActive) {
-        _pollTimer = Timer.periodic(
-          const Duration(seconds: 5),
-          (_) {
-            if (!mounted) {
-              _pollTimer?.cancel();
-              return;
-            }
+    final future = _filterWorkflowId != null
+        ? _fetchWorkflowTasks(_client, _filterWorkflowId!)
+        : _fetchTasks(_client);
+    setState(() => _tasksFuture = future);
+    future.then(_schedulePolling).catchError((_) {});
+  }
+
+  void _schedulePolling(List<_Task> tasks) {
+    if (!mounted) return;
+    final hasActive = tasks.any(
+      (t) => t.status == 'running' || t.status == 'pending',
+    );
+    if (hasActive) {
+      _pollTimer = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) {
+          if (mounted) {
             _reloadSilent();
-          },
-        );
-      }
-    }).catchError((_) {});
+          } else {
+            _pollTimer?.cancel();
+          }
+        },
+      );
+    }
   }
 
   void _reloadSilent() {
-    final future = _fetchTasks(_client);
-    setState(() {
-      _tasksFuture = future;
-    });
+    final future = _filterWorkflowId != null
+        ? _fetchWorkflowTasks(_client, _filterWorkflowId!)
+        : _fetchTasks(_client);
+    setState(() => _tasksFuture = future);
     future.then((tasks) {
       if (!mounted) return;
       final hasActive = tasks.any(
@@ -2551,6 +2578,28 @@ class _TasksScreenState extends State<TasksScreen> {
         _pollTimer = null;
       }
     }).catchError((_) {});
+  }
+
+  Future<void> _loadWorkflowOptions() async {
+    try {
+      final resp = await _client.get(AppLinks.apiUri('/workflows'));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) return;
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! List) return;
+      if (!mounted) return;
+      setState(() {
+        _workflows = decoded
+            .whereType<Map<String, dynamic>>()
+            .map((j) => _WorkflowOption(
+                  id: j['id']?.toString() ?? '',
+                  title: (j['title']?.toString().trim().isNotEmpty ?? false)
+                      ? j['title'].toString().trim()
+                      : j['id']?.toString() ?? '',
+                ))
+            .where((w) => w.id.isNotEmpty)
+            .toList();
+      });
+    } catch (_) {}
   }
 
   @override
@@ -2579,7 +2628,22 @@ class _TasksScreenState extends State<TasksScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: sp24),
+              // monitoring header
+              if (tasks.isNotEmpty) ...[
+                const SizedBox(height: sp12),
+                _MonitoringHeader(tasks: tasks),
+              ],
+              const SizedBox(height: sp16),
+              // workflow filter
+              _WorkflowFilter(
+                workflows: _workflows,
+                selected: _filterWorkflowId,
+                onChanged: (id) => setState(() {
+                  _filterWorkflowId = id;
+                  _reload();
+                }),
+              ),
+              const SizedBox(height: sp16),
               if (snapshot.hasError)
                 _WfErrorBanner(
                   message: 'Failed to load tasks: ${snapshot.error}',
@@ -2617,14 +2681,23 @@ class _TasksScreenState extends State<TasksScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// _TaskCard — read-only card for a single task execution
+// _TaskCard — card for a single task execution with stop action
 // ---------------------------------------------------------------------------
 
-class _TaskCard extends StatelessWidget {
+class _TaskCard extends StatefulWidget {
   const _TaskCard({required this.task, required this.client});
 
   final _Task task;
   final http.Client client;
+
+  @override
+  State<_TaskCard> createState() => _TaskCardState();
+}
+
+class _TaskCardState extends State<_TaskCard> {
+  bool _stopping = false;
+
+  _Task get task => widget.task;
 
   Color get _statusColor {
     switch (task.status.toLowerCase()) {
@@ -2652,6 +2725,30 @@ class _TaskCard extends StatelessWidget {
   String _formatDate(DateTime dt) {
     final s = dt.toIso8601String();
     return s.length > 16 ? s.substring(0, 16).replaceAll('T', ' ') : s;
+  }
+
+  Future<void> _stopTask() async {
+    setState(() => _stopping = true);
+    try {
+      final resp = await widget.client.post(
+        AppLinks.apiUri('/tasks/${task.id}/stop'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        final body = jsonDecode(resp.body) as Map<String, dynamic>?;
+        throw Exception(body?['detail'] ?? 'Failed (${resp.statusCode})');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Stop failed: $e'),
+            backgroundColor: accentPrimary,
+          ),
+        );
+        setState(() => _stopping = false);
+      }
+    }
   }
 
   @override
@@ -2685,6 +2782,39 @@ class _TaskCard extends StatelessWidget {
                     color: _statusColor,
                     textColor: _statusTextColor,
                   ),
+                  if (task.status == 'running' || task.status == 'pending') ...[
+                    const SizedBox(width: sp8),
+                    _stopping
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: accentPrimary,
+                            ),
+                          )
+                        : InkWell(
+                            onTap: _stopTask,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                    color: accentPrimary, width: 1),
+                                color: accentPrimary.withValues(alpha: 0.1),
+                              ),
+                              child: const Text(
+                                'STOP',
+                                style: TextStyle(
+                                  fontFamily: fontBody,
+                                  fontSize: 9,
+                                  color: accentPrimary,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
+                          ),
+                  ],
                 ],
               ),
               const SizedBox(height: sp8),
@@ -2761,7 +2891,7 @@ class _TaskCard extends StatelessWidget {
                     context: context,
                     builder: (_) => _TaskDetailDialog(
                       taskId: task.id,
-                      client: client,
+                      client: widget.client,
                     ),
                   ),
                 ),
@@ -2770,6 +2900,193 @@ class _TaskCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _MonitoringHeader — summary bar showing active/total task counts
+// ---------------------------------------------------------------------------
+class _MonitoringHeader extends StatelessWidget {
+  const _MonitoringHeader({required this.tasks});
+  final List<_Task> tasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final running = tasks.where((t) => t.status == 'running').length;
+    final pending = tasks.where((t) => t.status == 'pending').length;
+    final completed = tasks.where((t) => t.status == 'completed').length;
+    final failed = tasks.where((t) => t.status == 'failed').length;
+    return RetroCard(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: sp16, vertical: sp12),
+        child: Row(
+          children: [
+            if (running > 0 || pending > 0) ...[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: accentTeal,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: sp8),
+            ],
+            const Text(
+              'LIVE',
+              style: TextStyle(
+                fontFamily: fontDisplay,
+                fontSize: 9,
+                color: accentTeal,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(width: sp16),
+            _StatBadge(label: 'RUNNING', count: running, color: accentTeal),
+            const SizedBox(width: sp12),
+            _StatBadge(label: 'PENDING', count: pending, color: accentAmber),
+            const SizedBox(width: sp12),
+            _StatBadge(
+                label: 'DONE',
+                count: completed,
+                color: const Color(0xFF4CAF50)),
+            const SizedBox(width: sp12),
+            _StatBadge(label: 'FAILED', count: failed, color: accentPrimary),
+            const Spacer(),
+            if (running > 0 || pending > 0)
+              const Text(
+                '↻ auto-refresh 5s',
+                style: TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: 10,
+                  color: textMuted,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatBadge extends StatelessWidget {
+  const _StatBadge(
+      {required this.label, required this.count, required this.color});
+  final String label;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '$count',
+          style: TextStyle(
+            fontFamily: fontDisplay,
+            fontSize: 13,
+            color: color,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: fontBody,
+            fontSize: 9,
+            color: textMuted,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _WorkflowFilter — dropdown to filter tasks by workflow
+// ---------------------------------------------------------------------------
+class _WorkflowFilter extends StatelessWidget {
+  const _WorkflowFilter({
+    required this.workflows,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<_WorkflowOption> workflows;
+  final String? selected;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Text(
+          'FILTER BY WORKFLOW',
+          style: TextStyle(
+            fontFamily: fontBody,
+            fontSize: fontSizeSmall,
+            color: textMuted,
+            letterSpacing: 0.8,
+          ),
+        ),
+        const SizedBox(width: sp12),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: borderColor, width: 1),
+              color: pageBg,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: sp12),
+            child: DropdownButton<String?>(
+              value: selected,
+              isExpanded: true,
+              underline: const SizedBox(),
+              dropdownColor: cardBg,
+              hint: const Text(
+                'All workflows',
+                style: TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: fontSizeSmall,
+                    color: textMuted),
+              ),
+              style: const TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: fontSizeSmall,
+                  color: textPrimary),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(
+                    'All workflows',
+                    style: TextStyle(
+                        fontFamily: fontBody,
+                        fontSize: fontSizeSmall,
+                        color: textMuted),
+                  ),
+                ),
+                for (final wf in workflows)
+                  DropdownMenuItem<String?>(
+                    value: wf.id,
+                    child: Text(
+                      wf.title.length > 40
+                          ? '${wf.title.substring(0, 40)}…'
+                          : wf.title,
+                      style: const TextStyle(
+                          fontFamily: fontBody,
+                          fontSize: fontSizeSmall,
+                          color: textPrimary),
+                    ),
+                  ),
+              ],
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
