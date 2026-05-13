@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     tool_result_context_max_chars: int = 4000
     tool_definition_description_max_chars: int = 240
     # Fernet encryption key for token store
-    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str | None = None
     # OpenTelemetry
     otel_endpoint: str = "http://otel-collector:4317"
@@ -61,8 +62,14 @@ class Settings(BaseSettings):
     # Plugin system
     plugins_dir: str = "app/plugins"
     plugins_config: str = "app/plugins.yaml"
-    # Max output tokens for Anthropic gateway (messages API) path; adjust for models with lower limits
+    # Max output tokens for Anthropic gateway (messages API) path;
+    # adjust for models with lower limits
     anthropic_gateway_max_tokens: int = 8192
+
+    # Database backend
+    db_backend: str = "mongo"  # "mongo" or "postgres"
+    postgres_uri: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/tbd_agents"
+    postgres_db_name: str = "tbd_agents"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 

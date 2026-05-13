@@ -30,7 +30,7 @@ from app.api.routes import (
 )
 from app.config import settings
 from app.core import plugin_loader
-from app.db import init_db
+from app.db import close_db, init_db
 from app.observability import celery_queue_length, init_telemetry
 from app.seeds.google_sheets_analyst import seed_google_sheets_analyst
 from app.services import memory_stm
@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
     await memory_stm.close()
+    await close_db()
 
 
 app = FastAPI(

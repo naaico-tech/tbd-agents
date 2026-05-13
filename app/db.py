@@ -19,13 +19,50 @@ from app.models.token import Token
 from app.models.workflow import Workflow
 
 
+def get_db_backend() -> str:
+    """Return the configured database backend (``'mongo'`` or ``'postgres'``)."""
+    return settings.db_backend
+
+
 async def init_db() -> None:
+    """Initialise the configured database backend.
+
+    * ``db_backend = "postgres"`` → create all JSONB tables via SQLAlchemy.
+    * ``db_backend = "mongo"`` (default) → run Beanie / Motor initialisation.
+    """
+    if settings.db_backend == "postgres":
+        from app.db_postgres import init_postgres  # noqa: PLC0415
+
+        await init_postgres()
+        return
+
+    # Default: MongoDB + Beanie
     client = AsyncIOMotorClient(settings.mongo_uri)
     await init_beanie(
         database=client[settings.mongo_db_name],
         document_models=[
-            Agent, ChatMessage, ChatSession, CustomTool, Guardrail, KnowledgeItem,
-            KnowledgeSource, McpServer, Memory, Provider, ScheduledAgent, Skill,
-            TaskExecution, Token, Workflow,
+            Agent,
+            ChatMessage,
+            ChatSession,
+            CustomTool,
+            Guardrail,
+            KnowledgeItem,
+            KnowledgeSource,
+            McpServer,
+            Memory,
+            Provider,
+            ScheduledAgent,
+            Skill,
+            TaskExecution,
+            Token,
+            Workflow,
         ],
     )
+
+
+async def close_db() -> None:
+    """Gracefully close the active database backend connection."""
+    if settings.db_backend == "postgres":
+        from app.db_postgres import close_postgres  # noqa: PLC0415
+
+        await close_postgres()

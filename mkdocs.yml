@@ -92,6 +92,8 @@ nav:
       - Agent Chat: guide/agent-chat.md
       - Observability: guide/observability.md
       - Import & Export: guide/import-export.md
+      - pgvector Setup: guide/pgvector.md
+      - PostgreSQL Backend: guide/postgres-backend.md
   - Architecture:
       - architecture/index.md
       - System Overview: architecture/system-overview.md

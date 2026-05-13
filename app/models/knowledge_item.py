@@ -1,8 +1,22 @@
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from beanie import Document
 from pydantic import Field
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import BaseModel as _PyBase
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, _PyBase):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
 
 
 class KnowledgeContentType(StrEnum):
@@ -11,7 +25,7 @@ class KnowledgeContentType(StrEnum):
     IMAGE = "image"
 
 
-class KnowledgeItem(Document):
+class KnowledgeItem(_DocumentBase):  # type: ignore[valid-type]
     source_id: str
     name: str
     content_type: KnowledgeContentType

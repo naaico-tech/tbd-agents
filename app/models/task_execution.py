@@ -1,10 +1,23 @@
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from beanie import Document
 from pydantic import BaseModel, Field
 
 from app.models.workflow import LogEntry, Message, UsageStats
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, BaseModel):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
 
 
 class TaskStatus(StrEnum):
@@ -34,7 +47,7 @@ class TaskProgress(BaseModel):
     percent_complete: float = 0.0  # 0.0 – 1.0
 
 
-class TaskExecution(Document):
+class TaskExecution(_DocumentBase):  # type: ignore[valid-type]
     workflow_id: str
     prompt: str
     status: TaskStatus = TaskStatus.PENDING

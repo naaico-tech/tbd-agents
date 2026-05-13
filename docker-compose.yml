@@ -12,8 +12,10 @@ services:
     env_file:
       - .env
     environment:
-      - MONGO_URI=mongodb://mongodb:27017
-      - MONGO_DB_NAME=copilot_agent_hub
+      - DB_BACKEND=${DB_BACKEND:-mongo}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-copilot_agent_hub}
+      - POSTGRES_URI=${POSTGRES_URI:-postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents}
       - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
@@ -40,6 +42,7 @@ services:
     depends_on:
       mongodb:
         condition: service_started
+        required: false
       redis:
         condition: service_started
       otel-collector:
@@ -54,8 +57,10 @@ services:
     env_file:
       - .env
     environment:
-      - MONGO_URI=mongodb://mongodb:27017
-      - MONGO_DB_NAME=copilot_agent_hub
+      - DB_BACKEND=${DB_BACKEND:-mongo}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-copilot_agent_hub}
+      - POSTGRES_URI=${POSTGRES_URI:-postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents}
       - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
@@ -79,6 +84,7 @@ services:
     depends_on:
       mongodb:
         condition: service_started
+        required: false
       redis:
         condition: service_started
       otel-collector:
@@ -93,8 +99,10 @@ services:
     env_file:
       - .env
     environment:
-      - MONGO_URI=mongodb://mongodb:27017
-      - MONGO_DB_NAME=copilot_agent_hub
+      - DB_BACKEND=${DB_BACKEND:-mongo}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-copilot_agent_hub}
+      - POSTGRES_URI=${POSTGRES_URI:-postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents}
       - REDIS_URL=redis://redis:6379/0
       - DEFAULT_MODEL=gpt-4.1
       - DEFAULT_MAX_TURNS=5
@@ -113,6 +121,7 @@ services:
     depends_on:
       mongodb:
         condition: service_started
+        required: false
       redis:
         condition: service_started
     restart: unless-stopped
@@ -125,6 +134,7 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Profile: qdrant — MongoDB document store (paired with Qdrant vector store)
   mongodb:
     image: mongo:7
     ports:
@@ -132,10 +142,14 @@ services:
     volumes:
       - mongo_data:/data/db
     restart: unless-stopped
+    profiles:
+      - qdrant
 
-  # ── Vector Store (choose one profile: qdrant | pgvector) ───────────────────
-  # Qdrant:   COMPOSE_PROFILES=qdrant   docker compose up
-  # PgVector: COMPOSE_PROFILES=pgvector docker compose up
+  # ── Backend Profiles ─────────────────────────────────────────────────────────
+  # Profile: qdrant   → MongoDB document store + Qdrant vector store
+  # Profile: pgvector → PostgreSQL document store + pgvector vector store
+  # Usage:   COMPOSE_PROFILES=qdrant   docker compose up
+  #          COMPOSE_PROFILES=pgvector docker compose up
 
   qdrant:
     image: qdrant/qdrant:latest

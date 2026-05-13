@@ -1,10 +1,24 @@
-"""Beanie document model for a Scheduled Agent trigger."""
+"""Beanie/PostgreSQL document model for a Scheduled Agent trigger."""
 
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from beanie import Document
 from pydantic import Field
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import BaseModel as _PyBase
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, _PyBase):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
 
 
 class ScheduleInterval(StrEnum):
@@ -13,7 +27,7 @@ class ScheduleInterval(StrEnum):
     DAYS = "days"
 
 
-class ScheduledAgent(Document):
+class ScheduledAgent(_DocumentBase):  # type: ignore[valid-type]
     """A recurring schedule that fires a workflow at a configurable cadence.
 
     Each tick dispatches a ``run_agent_task`` Celery task exactly as if a user
