@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import types as _builtin_types
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -316,10 +317,12 @@ def _python_to_sa_type(annotation: Any) -> Any:
     origin = get_origin(annotation)
     args = get_args(annotation)
 
-    # Unwrap Optional[X]  (Union[X, None])
-    if origin is Union and type(None) in args:
-        inner = [a for a in args if a is not type(None)][0]
-        return _python_to_sa_type(inner)
+    # Unwrap Optional[X] — handles both typing.Union[X, None] and Python 3.10+ X | None
+    _is_union = origin is Union or isinstance(annotation, _builtin_types.UnionType)
+    if _is_union and type(None) in args:
+        non_none = [a for a in args if a is not type(None)]
+        if non_none:
+            return _python_to_sa_type(non_none[0])
 
     if annotation is str:
         return TEXT()
