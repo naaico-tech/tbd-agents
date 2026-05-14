@@ -141,13 +141,15 @@ async def send_prompt(
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status != WorkflowStatus.ACTIVE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Workflow is {wf.status}, cannot send prompt",
-        )
+    # Block only states where a new run is genuinely impossible
+    if wf.status == WorkflowStatus.INACTIVE:
+        raise HTTPException(status_code=400, detail="Workflow is inactive")
+    if wf.status == WorkflowStatus.RUNNING:
+        raise HTTPException(status_code=400, detail="A task is already running for this workflow")
 
-    # Reset logs/messages for a new run
+    # Reset for a new run — also auto-recovers from terminal states
+    # (completed / failed / halted / max_turns_reached) so workflows are reusable
+    wf.status = WorkflowStatus.ACTIVE
     wf.logs = []
     wf.messages = []
     wf.current_turn = 0
