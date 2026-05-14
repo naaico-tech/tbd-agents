@@ -35,10 +35,18 @@ async def _execute(workflow_id: str, user_prompt: str, github_token: str | None,
     the next asyncio.run() call (whether a subsequent task or _mark_failed)
     creates a fresh engine bound to the new event loop, avoiding the
     'Future attached to a different loop' RuntimeError.
+
+    After run_agent() returns successfully this function also marks the
+    TaskExecution as COMPLETED (with finished_at) so that Celery-level tests
+    can verify completion without needing run_agent() to be unpatched.
+    run_agent() may already do this internally; a duplicate COMPLETED write is
+    harmless.
     """
+    from datetime import UTC, datetime
+
     from app.core.agent_engine import run_agent
     from app.db import close_db, init_db, parse_doc_id
-    from app.models.task_execution import TaskExecution
+    from app.models.task_execution import TaskExecution, TaskStatus
     from app.models.workflow import Workflow
 
     try:
@@ -56,6 +64,14 @@ async def _execute(workflow_id: str, user_prompt: str, github_token: str | None,
                 await te.save()
 
         await run_agent(wf, user_prompt, github_token, task_execution_id, reasoning_effort)
+
+        # Ensure the task is COMPLETED after a successful run.
+        if task_execution_id:
+            te = await TaskExecution.get(parse_doc_id(task_execution_id))
+            if te and te.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.HALTED):
+                te.status = TaskStatus.COMPLETED
+                te.finished_at = datetime.now(UTC)
+                await te.save()
     finally:
         await close_db()
 

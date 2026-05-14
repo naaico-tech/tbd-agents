@@ -614,6 +614,11 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
             rows = [dict(row) for row in result.mappings().fetchall()]
         return [self._model_cls._from_row(row) for row in rows]
 
+    async def first(self) -> T | None:
+        """Return the first matching document, or None if none exist."""
+        results = await self.limit(1).to_list()
+        return results[0] if results else None
+
     async def count(self) -> int:
         table = self._model_cls.get_collection_name()
         params: dict = {}
