@@ -20,6 +20,8 @@ from app.models.task_execution import TaskExecution
 from app.models.token import Token
 from app.models.workflow import Workflow
 
+_motor_client: AsyncIOMotorClient | None = None
+
 
 def get_db_backend() -> str:
     """Return the configured database backend (``'mongo'`` or ``'postgres'``)."""
@@ -39,9 +41,10 @@ async def init_db() -> None:
         return
 
     # Default: MongoDB + Beanie
-    client = AsyncIOMotorClient(settings.mongo_uri)
+    global _motor_client  # noqa: PLW0603
+    _motor_client = AsyncIOMotorClient(settings.mongo_uri)
     await init_beanie(
-        database=client[settings.mongo_db_name],
+        database=_motor_client[settings.mongo_db_name],
         document_models=[
             Agent,
             ChatMessage,
@@ -64,10 +67,16 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     """Gracefully close the active database backend connection."""
+    global _motor_client  # noqa: PLW0603
     if settings.db_backend == "postgres":
         from app.db_postgres import close_postgres  # noqa: PLC0415
 
         await close_postgres()
+        return
+
+    if _motor_client is not None:
+        _motor_client.close()
+        _motor_client = None
 
 
 def parse_doc_id(id_str: str) -> Any:

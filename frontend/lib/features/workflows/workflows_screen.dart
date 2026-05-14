@@ -2735,8 +2735,12 @@ class _TaskCardState extends State<_TaskCard> {
         headers: {'Content-Type': 'application/json'},
       );
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final body = jsonDecode(resp.body) as Map<String, dynamic>?;
-        throw Exception(body?['detail'] ?? 'Failed (${resp.statusCode})');
+        String detail = 'Failed (${resp.statusCode})';
+        try {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>?;
+          detail = body?['detail'] as String? ?? detail;
+        } catch (_) {}
+        throw Exception(detail);
       }
     } catch (e) {
       if (mounted) {

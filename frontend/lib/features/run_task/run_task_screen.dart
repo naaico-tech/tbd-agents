@@ -251,10 +251,18 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
   Future<void> _stopTask() async {
     if (_workflowId == null) return;
     try {
-      await _client.post(
+      final resp = await _client.post(
         AppLinks.apiUri('/workflows/$_workflowId/halt'),
         headers: {'Content-Type': 'application/json'},
       );
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        String detail = 'Stop failed (${resp.statusCode})';
+        try {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>?;
+          detail = body?['detail'] as String? ?? detail;
+        } catch (_) {}
+        throw Exception(detail);
+      }
       if (mounted) setState(() => _outputStatus = 'halted');
     } catch (e) {
       if (mounted) setState(() => _error = 'Stop failed: $e');
@@ -760,7 +768,7 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
 // ---------------------------------------------------------------------------
 class _StopButton extends StatefulWidget {
   const _StopButton({required this.onStop});
-  final VoidCallback onStop;
+  final Future<void> Function() onStop;
 
   @override
   State<_StopButton> createState() => _StopButtonState();
@@ -776,7 +784,11 @@ class _StopButtonState extends State<_StopButton> {
           ? null
           : () async {
               setState(() => _stopping = true);
-              widget.onStop();
+              try {
+                await widget.onStop();
+              } finally {
+                if (mounted) setState(() => _stopping = false);
+              }
             },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: sp8, vertical: 4),

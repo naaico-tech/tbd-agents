@@ -98,6 +98,7 @@ async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
             WorkflowStatus.HALTED,
             WorkflowStatus.MAX_TURNS_REACHED,
             WorkflowStatus.ACTIVE,
+            WorkflowStatus.INACTIVE,
         ):
             # Reset from RUNNING back to ACTIVE and publish the failure over SSE.
             # TaskExecution already records the failure detail — the workflow itself
