@@ -27,7 +27,7 @@
   <a href="https://github.com/naaico-tech/tbd-agents/pkgs/container/tbd-agents"><img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker"></a>
   <img src="https://img.shields.io/badge/Celery-distributed-37814A?style=flat-square&logo=celery&logoColor=white" alt="Celery">
   <img src="https://img.shields.io/badge/Redis-pub%2Fsub-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis">
-  <img src="https://img.shields.io/badge/MongoDB%20or%20PostgreSQL-storage-336791?style=flat-square&logo=postgresql&logoColor=white" alt="MongoDB or PostgreSQL">
+  <img src="https://img.shields.io/badge/MongoDB-beanie-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
   <img src="https://img.shields.io/badge/GitHub%20Copilot-SDK-181717?style=flat-square&logo=github&logoColor=white" alt="GitHub Copilot SDK">
   <img src="https://img.shields.io/badge/MCP-compatible-6236FF?style=flat-square" alt="MCP Compatible">
   <a href="https://github.com/naaico-tech/tbd-agents/releases"><img src="https://img.shields.io/github/v/release/naaico-tech/tbd-agents?style=flat-square&color=brightgreen&label=release" alt="Latest Release"></a>
@@ -59,7 +59,7 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 ⚡ **Real-time streaming**<br>SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client.
 
-🔧 **MCP and tools**<br>Connect MCP servers, built-in tools, bundled plugins, and user custom tools with token-based credential mapping.
+🔧 **MCP tool ecosystem**<br>Connect any MCP-compatible tool server (Datadog, Jira, Notion, Slack, and hundreds more) via stdio or SSE.
 
 📊 **Usage & cost tracking**<br>Per-workflow token counts, premium request quotas, and cost data from the Copilot SDK.
 
@@ -78,7 +78,7 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
 📚 **Knowledge bases**<br>Attach Qdrant or PostgreSQL pgvector vector stores, or upload files/text tagged for retrieval; swap backends with a single env var.
 
-📦 **Import/Export**<br>Export and import Skills, Agents, Workflows, and Knowledge Sources as JSON bundles via API; the Flutter UI exposes Agents, Skills, and Workflows.
+📦 **Import/Export**<br>Export and import Skills, Agents, Workflows, and Knowledge Bases as JSON bundles for backup or cross-environment migration.
 
 🧩 **Plugin system**<br>Extend TBD Agents with custom Python plugins registered via a YAML registry. Loaded at startup via `PluginBase`.
 
@@ -100,7 +100,7 @@ docker pull ghcr.io/naaico-tech/tbd-agents:latest
 docker pull ghcr.io/naaico-tech/tbd-agents:v0.1.0
 
 # Start all services using the pre-built image
-cp .env.example .env   # choose profile and fill secrets as needed
+cp .env.example .env   # fill in GITHUB_TOKEN etc.
 docker compose up
 ```
 
@@ -113,12 +113,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
-A server-level GitHub PAT with the `copilot` scope may be set as `GITHUB_TOKEN`; per-request/provider tokens can be used instead for many flows.
+Your GitHub PAT needs the `copilot` scope — [create one here](https://github.com/settings/tokens).
 
 | URL | Description |
 |---|---|
-| `http://localhost:8000/dashboard` | Flutter dashboard |
-| `http://localhost:8000/dashboard-legacy` | Legacy static dashboard |
+| `http://localhost:8000/dashboard` | Legacy UI |
+| `http://localhost:8000/dashboard-new-ui` | New Flutter UI |
 | `http://localhost:8000/docs` | Swagger / API docs |
 | `http://localhost:8000/api` | API base path |
 
@@ -126,7 +126,8 @@ See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) f
 
 ### Choosing a Vector Store
 
-TBD Agents supports two vector store backends. `.env.example` actively defaults to `COMPOSE_PROFILES=qdrant`; omitting `COMPOSE_PROFILES` starts no profiled document/vector service unless you point the app at external services.
+TBD Agents supports two vector store backends. Select one by setting
+`COMPOSE_PROFILES` in your `.env`:
 
 | Profile | Backend | When to use |
 |---------|---------|-------------|
@@ -158,17 +159,11 @@ backed up with a single `pg_dump`.
 COMPOSE_PROFILES=pgvector
 VECTOR_STORE_BACKEND=pgvector
 DB_BACKEND=postgres
-POSTGRES_URI=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
 ```
 
 See the [PostgreSQL Backend Guide](docs/guide/postgres-backend.md) for full details,
 including schema design, Alembic migrations, MongoDB→PostgreSQL data migration, and
 observability queries.
-
-
-## 🖥️ Dashboard
-
-The Flutter dashboard is served at `http://localhost:8000/dashboard` and covers: Dashboard, Agents, MCP Servers, Custom Tools, Skills, Knowledge, Guardrails, Tokens, Providers, Workflows, Scheduled Agents, Task Executions, Run Task, and Chat. The legacy static dashboard remains available at `/dashboard-legacy`; `/dashboard-new-ui` is only a compatibility alias. See the [Dashboard guide](docs/guide/dashboard.md).
 
 ---
 
@@ -177,7 +172,7 @@ The Flutter dashboard is served at `http://localhost:8000/dashboard` and covers:
 | Document | Description |
 |---|---|
 | [Local Setup](docs/getting-started/local-setup.md) | Prerequisites, Docker and bare-metal setup, environment variables |
-| [Architecture](docs/architecture/index.md) | System design, distributed worker flow, Redis event bus, data model |
+| [Architecture](docs/architecture.md) | System design, distributed worker flow, Redis event bus, data model |
 | [Features](docs/features.md) | Deep dive into agents, MCP, skills, streaming, infinite sessions, and more |
 | [Contributing](CONTRIBUTING.md) | How to contribute: setup, coding standards, PR guidelines |
 
@@ -216,8 +211,8 @@ graph TB
     end
 
     subgraph Storage
-        Data[(MongoDB or PostgreSQL)]
-        Vector[(Qdrant or pgvector)]
+        Mongo[(MongoDB)]
+        Qdrant[(Qdrant\nvector DB)]
     end
 
     Dashboard & CLI & Apps -->|HTTP + Auth| FastAPI

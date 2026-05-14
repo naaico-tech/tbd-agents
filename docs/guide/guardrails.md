@@ -1,39 +1,66 @@
 # Guardrails
 
-Guardrails enforce policy around prompts, structured requests, and model outputs.
+Guardrails enforce safety policies before agent execution begins. They validate prompts and requests to ensure agents operate within defined boundaries.
 
-## Types and Fields
+---
 
-| Type | Required config | Common fields |
-|---|---|---|
-| `prompt` | `prompt_config` | `forbidden_patterns`, `required_patterns`, `max_length`, `min_length` |
-| `request` | `request_config` | `json_schema` |
-| `output` | `output_config` | `forbidden_patterns`, `required_patterns`, `max_length`, `pii_detection`, `must_be_valid_json` |
+## How Guardrails Work
 
-All guardrails also have `name`, `description`, `tags`, and an `enabled` toggle. Workflows can select guardrails explicitly or by tag.
+```mermaid
+graph LR
+    Prompt[User Prompt] --> GR{Guardrails Check}
+    GR -->|Pass| Worker[Celery Worker]
+    GR -->|Fail| Reject[Request Rejected]
+    Worker --> SDK[Copilot SDK Session]
+```
 
-## Prompt Guardrail Example
+Guardrails are evaluated before a prompt reaches the agent. If any guardrail fails, the request is rejected with an explanation.
+
+---
+
+## Creating a Guardrail
 
 ```bash
 curl -X POST http://localhost:8000/api/guardrails \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "no-secrets",
-    "description": "Reject prompts containing obvious secrets",
-    "guardrail_type": "prompt",
-    "tags": ["security"],
-    "enabled": true,
-    "prompt_config": {
-      "forbidden_patterns": ["AKIA[0-9A-Z]{16}"],
-      "max_length": 4000
+    "name": "no-pii",
+    "description": "Blocks prompts containing personally identifiable information",
+    "type": "prompt",
+    "config": {
+      "patterns": ["\\b\\d{3}-\\d{2}-\\d{4}\\b", "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"]
     }
   }'
 ```
 
-## Request and Output Guardrails
+---
 
-- Request guardrails validate a structured `request` object sent to the workflow prompt endpoint with JSON Schema.
-- Output guardrails validate final responses. They can block forbidden patterns, require patterns, enforce max length, detect likely PII, and require valid JSON.
+## Guardrail Fields
 
-Disabled guardrails remain stored but are ignored during execution.
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique name for the guardrail |
+| `description` | string | Human-readable description |
+| `type` | string | Guardrail type (e.g. `prompt`, `request`) |
+| `config` | object | Type-specific configuration |
+
+---
+
+## Managing Guardrails
+
+```bash
+# List all guardrails
+curl http://localhost:8000/api/guardrails \
+  -H "Authorization: Bearer $GITHUB_TOKEN"
+
+# Update a guardrail
+curl -X PUT http://localhost:8000/api/guardrails/<ID> \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"description": "Updated description"}'
+
+# Delete a guardrail
+curl -X DELETE http://localhost:8000/api/guardrails/<ID> \
+  -H "Authorization: Bearer $GITHUB_TOKEN"
+```

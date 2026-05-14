@@ -10,8 +10,8 @@ hide:
 <strong>Your agents. Your rules. Your infrastructure.</strong>
 </p>
 
-<p style="text-align: center; max-width: 760px; margin: 0 auto; opacity: 0.75;">
-Build, control, schedule, and chat with custom AI agents over the web. TBD Agents provides a FastAPI API, Flutter dashboard, distributed workers, MCP/custom tools, guardrails, memory, knowledge retrieval, and MongoDB or PostgreSQL storage.
+<p style="text-align: center; max-width: 720px; margin: 0 auto; opacity: 0.75;">
+Build, control, and trigger custom AI agents over the web — no black boxes, no vendor lock-in. A clean API backed by the GitHub Copilot SDK that you run on your own infrastructure.
 </p>
 
 <div class="grid cards" markdown>
@@ -20,25 +20,25 @@ Build, control, schedule, and chat with custom AI agents over the web. TBD Agent
 
     ---
 
-    Run the Docker Compose stack and open the dashboard.
+    Get running in under 5 minutes with Docker Compose.
 
     [:octicons-arrow-right-24: Quick Start](getting-started/quickstart.md)
-
--   :material-view-dashboard:{ .lg .middle } **Dashboard**
-
-    ---
-
-    Manage Agents, MCP Servers, Custom Tools, Skills, Knowledge, Guardrails, Tokens, Providers, Workflows, Scheduled Agents, Task Executions, Run Task, and Chat.
-
-    [:octicons-arrow-right-24: Dashboard Guide](guide/dashboard.md)
 
 -   :books:{ .lg .middle } **Guide**
 
     ---
 
-    Learn about agents, workflows, tasks, memory, knowledge, tools, and import/export.
+    Learn about agents, MCP tools, skills, workflows, and streaming.
 
     [:octicons-arrow-right-24: Guide](guide/index.md)
+
+-   :building_construction:{ .lg .middle } **Architecture**
+
+    ---
+
+    System design, data model, request flow, and scaling strategy.
+
+    [:octicons-arrow-right-24: Architecture](architecture/index.md)
 
 -   :material-api:{ .lg .middle } **API Reference**
 
@@ -58,27 +58,27 @@ Build, control, schedule, and chat with custom AI agents over the web. TBD Agent
 
 -   :house:{ .lg .middle } **Fully Self-Hosted**
 
-    Runs on your infrastructure via Docker Compose. Store data in MongoDB + Qdrant or PostgreSQL + pgvector.
+    Runs on your infrastructure via Docker Compose. No SaaS dependency beyond GitHub Copilot billing.
 
--   :zap:{ .lg .middle } **Real-Time Execution**
+-   :zap:{ .lg .middle } **Real-Time Streaming**
 
-    Agents run on Celery workers and stream logs, messages, usage, and status over SSE.
+    SSE endpoint streams logs, messages, token-by-token responses, and usage metrics live to any client.
 
--   :wrench:{ .lg .middle } **MCP + Custom Tools**
+-   :material-cog-sync:{ .lg .middle } **Distributed Workers**
 
-    Connect MCP servers, built-in tools, bundled plugins, and user Python tools with token mapping.
+    Celery + Redis architecture scales agent execution horizontally. Add workers to handle load.
+
+-   :wrench:{ .lg .middle } **MCP Tool Ecosystem**
+
+    Connect Datadog, Jira, Notion, Slack, and hundreds more via the Model Context Protocol.
+
+-   :infinity:{ .lg .middle } **Infinite Sessions**
+
+    Automatic context compaction keeps long-running agents alive without hitting context limits.
 
 -   :material-shield-check:{ .lg .middle } **Guardrails**
 
-    Prompt, request, and output guardrails enforce regex, schema, length, PII, and JSON policies.
-
--   :infinity:{ .lg .middle } **Memory + Knowledge**
-
-    STM/LTM memory and tag/semantic knowledge retrieval are injected into agent context.
-
--   :material-calendar-clock:{ .lg .middle } **Scheduled Agents**
-
-    Schedule recurring workflow prompts and review task executions from the dashboard or API.
+    Prompt and request guardrails enforce safety policies before agent execution begins.
 
 </div>
 
@@ -88,19 +88,20 @@ Build, control, schedule, and chat with custom AI agents over the web. TBD Agent
 
 ```mermaid
 graph LR
-    Client([Dashboard / API Client]) -->|HTTP| API[FastAPI API]
+    Client([Client / Dashboard]) -->|HTTP| API[FastAPI API]
     API -->|Enqueue| Redis[(Redis)]
     Redis -->|Task| Worker[Celery Workers]
-    Worker -->|SDK Session| SDK[Copilot / Provider SDK]
-    SDK --> Models[Model APIs]
-    SDK --> MCP[MCP + Tools]
+    Worker -->|SDK Session| SDK[Copilot SDK]
+    SDK --> Models[Copilot Models API]
+    SDK --> MCP[MCP Servers]
     Worker -->|Publish Events| Redis
-    Redis -->|SSE| API
-    API -->|Stream| Client
-    API -->|Read/Write| Store[(MongoDB or PostgreSQL)]
-    Worker -->|Read/Write| Store
-    Worker -->|Vector Search| Vector[(Qdrant or pgvector)]
+    Redis -->|Subscribe| API
+    API -->|SSE Stream| Client
+    Worker -->|Persist| Mongo[(MongoDB)]
+    API -->|Read/Write| Mongo
 ```
+
+---
 
 <div style="text-align: center;" markdown>
 
@@ -108,3 +109,7 @@ graph LR
 [:material-rocket-launch: Quick Start](getting-started/quickstart.md){ .md-button }
 
 </div>
+
+<p style="text-align: center; opacity: 0.5; margin-top: 2em;">
+Built by <a href="https://www.naaico.com"><strong>NAAICO</strong></a> — Navigate · Automate · Accelerate · Innovate · Create · Optimise
+</p>

@@ -81,7 +81,7 @@ docker compose exec app alembic current   # should show head revision
 | `DB_BACKEND` | `mongo` | Document store backend: `mongo` or `postgres` |
 | `POSTGRES_URI` | `postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents` | Async-compatible PostgreSQL connection string (uses `asyncpg` driver) |
 | `POSTGRES_DB_NAME` | `tbd_agents` | PostgreSQL database name |
-| `COMPOSE_PROFILES` | `qdrant` in `.env.example` | Docker Compose profile: `qdrant` or `pgvector` |
+| `COMPOSE_PROFILES` | _(none)_ | Docker Compose profile: `qdrant` or `pgvector` |
 | `VECTOR_STORE_BACKEND` | `qdrant` | Vector store backend: `qdrant` or `pgvector` — must match `COMPOSE_PROFILES` |
 
 > **Important:** `DB_BACKEND=postgres` and `COMPOSE_PROFILES=pgvector` must always be set
@@ -192,10 +192,10 @@ to `pgvector`, use the provided migration script.
 
 ```bash
 # Connection info is read from environment variables
-# (MONGO_URI, MONGO_DB_NAME, POSTGRES_URI). App MongoDB default is copilot_agent_hub.
+# (MONGO_URI, MONGO_DB_NAME, POSTGRES_URI) with sensible defaults.
 MONGO_URI=mongodb://localhost:27017 \
-MONGO_DB_NAME=copilot_agent_hub \
-POSTGRES_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents \
+MONGO_DB_NAME=tbd_agents \
+POSTGRES_URI=postgresql://postgres:postgres@localhost:5432/tbd_agents \
 python scripts/migrate_mongo_to_postgres.py \
   [--dry-run]             # preview without writing any data
   [--collection NAME]     # migrate one specific collection (default: all 15)

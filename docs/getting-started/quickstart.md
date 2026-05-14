@@ -14,7 +14,7 @@ TBD Agents supports two database backends. Choose the one that fits your stack:
 ## Prerequisites
 
 - **Docker & Docker Compose** installed
-- **GitHub PAT** with the `copilot` scope for server-level auth, or per-request/provider tokens where supported
+- **GitHub PAT** with the `copilot` scope — [create one here](https://github.com/settings/tokens)
 - **GitHub Copilot subscription** (Individual, Business, or Enterprise)
 
 ---
@@ -26,7 +26,11 @@ git clone https://github.com/naaico-tech/tbd-agents.git && cd tbd-agents
 cp .env.example .env
 ```
 
-Open `.env`, confirm the profile you want, and set secrets as needed. `GITHUB_TOKEN` is the optional server-level Copilot token; per-request/provider tokens may be used in many flows. Generate `TOKEN_ENCRYPTION_KEY` before storing tokens in the app.
+Open `.env` and set at minimum:
+
+```env
+GITHUB_TOKEN=ghp_your_token_here
+```
 
 ---
 
@@ -34,7 +38,7 @@ Open `.env`, confirm the profile you want, and set secrets as needed. `GITHUB_TO
 
 === "MongoDB (default)"
 
-    `.env.example` defaults to `COMPOSE_PROFILES=qdrant`, `DB_BACKEND=mongo`, and `VECTOR_STORE_BACKEND=qdrant`, which starts MongoDB and Qdrant.
+    No extra configuration needed — MongoDB is the default backend.
 
     ```bash
     docker compose up --build
@@ -51,7 +55,7 @@ Open `.env`, confirm the profile you want, and set secrets as needed. `GITHUB_TO
     | `qdrant` | 6333 | Vector store |
 
     !!! tip "Choose your vector store"
-        Qdrant starts because `.env.example` sets `COMPOSE_PROFILES=qdrant`. If you omit `COMPOSE_PROFILES`, Compose will not start profiled document/vector services; only do that when using externally managed MongoDB/PostgreSQL/vector services.
+        Qdrant starts by default. To start without any vector store (no semantic memory), simply omit `COMPOSE_PROFILES` from `.env`.
 
 === "PostgreSQL"
 
@@ -89,8 +93,8 @@ Open `.env`, confirm the profile you want, and set secrets as needed. `GITHUB_TO
     ```
 
 !!! tip "Access points"
-    - **Flutter UI** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
-    - **Legacy UI** — [http://localhost:8000/dashboard-legacy](http://localhost:8000/dashboard-legacy)
+    - **Flutter UI** — [http://localhost:8000/dashboard-new-ui](http://localhost:8000/dashboard-new-ui)
+    - **Legacy UI** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
     - **Swagger UI** — [http://localhost:8000/docs](http://localhost:8000/docs)
     - **API base** — [http://localhost:8000/api](http://localhost:8000/api)
 

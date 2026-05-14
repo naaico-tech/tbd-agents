@@ -8,28 +8,63 @@
 | `PUT` | `/api/guardrails/{id}` | Update guardrail |
 | `DELETE` | `/api/guardrails/{id}` | Delete guardrail |
 
-## Create Prompt Guardrail
+---
+
+## Create Guardrail
+
+```
+POST /api/guardrails
+```
 
 ```json
 {
-  "name": "no-secrets",
-  "description": "Reject prompts containing obvious secrets",
-  "guardrail_type": "prompt",
-  "tags": ["security"],
-  "enabled": true,
-  "prompt_config": {
-    "forbidden_patterns": ["AKIA[0-9A-Z]{16}"],
-    "required_patterns": [],
-    "max_length": 4000,
-    "min_length": null
+  "name": "no-pii",
+  "description": "Blocks prompts containing PII",
+  "type": "prompt",
+  "config": {
+    "patterns": ["\\b\\d{3}-\\d{2}-\\d{4}\\b"]
   }
 }
 ```
 
-Use `guardrail_type` and the matching config field:
+**Response:** `201 Created`
 
-- `prompt` → `prompt_config`
-- `request` → `request_config` with `json_schema`
-- `output` → `output_config` with pattern/length options, `pii_detection`, and `must_be_valid_json`
+---
 
-Do not use legacy `type` or `config` field names.
+## List Guardrails
+
+```
+GET /api/guardrails
+```
+
+**Response:** `200 OK` — Array of guardrail objects.
+
+---
+
+## Get Guardrail
+
+```
+GET /api/guardrails/{id}
+```
+
+**Response:** `200 OK`
+
+---
+
+## Update Guardrail
+
+```
+PUT /api/guardrails/{id}
+```
+
+**Response:** `200 OK`
+
+---
+
+## Delete Guardrail
+
+```
+DELETE /api/guardrails/{id}
+```
+
+**Response:** `204 No Content`

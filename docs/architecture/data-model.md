@@ -1,41 +1,163 @@
 # Data Model
 
-Persistent state is stored in MongoDB with Beanie by default, or in PostgreSQL tables with typed columns and JSONB fields when `DB_BACKEND=postgres`.
+All persistent state is stored in MongoDB using Beanie ODM (async MongoDB object-document mapper built on Motor).
 
-## Core Entities
+---
 
-| Entity | Important fields |
-|---|---|
-| Agent | `name`, `description`, `system_prompt`, `model`, `mcp_server_ids`, `mcp_server_tags`, `tool_definitions`, `knowledge_source_ids`, `knowledge_tags`, `builtin_tools`, `custom_tool_ids`, `provider_id` |
-| MCP Server | `name`, `transport_type`, `connection_config`, `allowed_tools`, `tags`, `status`, `last_error` |
-| Skill | `name`, `description`, `instructions`, `tags` |
-| Workflow | `title`, `agent_id`, `github_user`, `model`, `max_turns`, `current_turn`, `skill_ids`, `skill_tags`, `status`, `output_format`, `infinite_session`, `caveman`, `bypass_memory`, `auto_memory`, `tsv_tool_results`, `reasoning_effort`, `guardrail_ids`, `guardrail_tags`, `repo_url`, `repo_branch`, `repo_token_name`, `credential_overrides`, `webhook_url`, `error_webhook_url`, `usage`, `messages`, `logs` |
-| TaskExecution | `workflow_id`, `prompt`, `status`, `celery_task_id`, `worker`, `model`, `reasoning_effort`, `tool_calls`, `response`, `progress`, `logs`, `messages`, `usage`, timestamps |
-| ScheduledAgent | `name`, `workflow_id`, `prompt`, `interval_value`, `interval_unit`, `start_at`, `end_at`, `enabled`, `last_run_at`, `next_run_at` |
-| KnowledgeSource | `name`, `description`, `source_type`, `connection_config`, `tags`, `status`, `last_error` |
-| KnowledgeItem | `source_id`, `name`, `content_type`, `text_content`, `file_id`, `file_name`, `file_size`, `mime_type`, `tags`, `metadata` |
-| Guardrail | `name`, `description`, `guardrail_type`, `tags`, `enabled`, `prompt_config`, `request_config`, `output_config` |
-| Token | `name`, `encrypted_value`, `description`, `created_by` |
-| Provider | Provider type, API key token name, auth config, base URL/model settings |
-| Memory | `agent_id`, `scope`, `key`, `value`, `embedding`, `metadata`, `ttl` |
-| CustomTool | `name`, `description`, `source_code`, `parameters_schema`, `env_config`, `tags`, `is_enabled`, `is_plugin` |
-| ChatSession / ChatMessage | Agent-scoped chat sessions and persisted messages for API clients |
-
-## Relationships
+## Entity Relationship Diagram
 
 ```mermaid
 erDiagram
-    Agent ||--o{ Workflow : runs
-    Workflow ||--o{ TaskExecution : creates
-    Workflow ||--o{ ScheduledAgent : scheduled_by
-    Agent }o--o{ McpServer : uses
-    Agent }o--o{ CustomTool : mounts
-    Workflow }o--o{ Skill : injects
-    Workflow }o--o{ Guardrail : enforces
-    KnowledgeSource ||--o{ KnowledgeItem : contains
-    Agent ||--o{ Memory : remembers
-    Agent ||--o{ ChatSession : chats
-    ChatSession ||--o{ ChatMessage : contains
+    Agent {
+        string id PK
+        string name
+        string description
+        string system_prompt
+        string model
+        list mcp_server_ids
+        list mcp_server_tags
+    }
+
+    McpServer {
+        string id PK
+        string name
+        string transport_type
+        dict connection_config
+        list tags
+        string status
+    }
+
+    Skill {
+        string id PK
+        string name
+        string description
+        string instructions
+        list tags
+    }
+
+    Workflow {
+        string id PK
+        string agent_id FK
+        string model
+        int max_turns
+        int current_turn
+        string status
+        string output_format
+        bool infinite_session
+        bool caveman
+        dict usage
+        list skill_ids
+        list messages
+        list logs
+    }
+
+    KnowledgeSource {
+        string id PK
+        string name
+        string type
+        dict connection_config
+        list tags
+    }
+
+    KnowledgeItem {
+        string id PK
+        string source_id FK
+        string content
+        string content_type
+        list tags
+    }
+
+    Guardrail {
+        string id PK
+        string name
+        string description
+        string type
+        dict config
+    }
+
+    Provider {
+        string id PK
+        string name
+        dict config
+    }
+
+    Token {
+        string id PK
+        string name
+        string encrypted_value
+    }
+
+    TaskExecution {
+        string id PK
+        string workflow_id FK
+        string status
+        string error
+        datetime created_at
+        datetime completed_at
+    }
+
+    Agent ||--o{ Workflow : "used by"
+    Agent }o--o{ McpServer : "mcp_server_ids"
+    Workflow }o--o{ Skill : "skill_ids"
+    Workflow ||--o{ TaskExecution : "executions"
+    KnowledgeSource ||--o{ KnowledgeItem : "contains"
 ```
 
-PostgreSQL schema changes are managed by Alembic; MongoDB remains schema-flexible and uses defaults on read/write.
+---
+
+## Core Entities
+
+### Agent
+
+The reusable definition of an AI agent — personality, model, and tool access.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique agent name |
+| `description` | string | Optional description |
+| `system_prompt` | string | Defines agent behaviour |
+| `model` | string | Copilot model (e.g. `gpt-4.1`) |
+| `mcp_server_ids` | string[] | Explicit MCP server references |
+| `mcp_server_tags` | string[] | Tag-based MCP resolution |
+
+### Workflow
+
+An execution context that ties an agent to a conversation session.
+
+| Field | Type | Description |
+|---|---|---|
+| `agent_id` | string | Reference to the agent |
+| `model` | string | Optional model override |
+| `max_turns` | int | Tool-call round limit |
+| `current_turn` | int | Current turn counter |
+| `status` | enum | `active` / `running` / `completed` / `failed` / `max_turns` |
+| `output_format` | string | `json` or `markdown` |
+| `infinite_session` | bool | Enable context compaction |
+| `caveman` | bool | Enable terse output + compressed injected context |
+| `usage` | object | `{premium_req, in_tok, out_tok, cache_read, cache_write, cost}` |
+| `skill_ids` | string[] | Installed skills |
+| `messages` | array | `{role, content, tool_calls}` |
+| `logs` | array | `{timestamp, event, detail}` |
+
+### McpServer
+
+A registered MCP tool server.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Server name |
+| `transport_type` | enum | `stdio` or `sse` |
+| `connection_config` | object | Transport-specific config |
+| `tags` | string[] | Free-form labels |
+| `status` | enum | `registered` / `connected` / `error` |
+
+### Skill
+
+A reusable instruction module.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Skill name |
+| `description` | string | Human-readable description |
+| `instructions` | string | Injected into system prompt at runtime |
+| `tags` | string[] | Free-form labels |

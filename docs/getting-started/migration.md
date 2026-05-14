@@ -34,7 +34,7 @@ uv sync          # or: pip install -e ".[dev]"
 
 ## Database Migrations
 
-TBD Agents uses MongoDB with Beanie by default and PostgreSQL with Alembic when `DB_BACKEND=postgres`. Beanie documents are schema-flexible; PostgreSQL schema changes require Alembic migrations.
+TBD Agents uses **MongoDB** with **Beanie ODM**. Beanie documents are schema-flexible — new fields with defaults are added automatically when existing documents are read. However, some changes require explicit migration.
 
 ### When migration is NOT needed
 
@@ -60,7 +60,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 async def migrate():
     client = AsyncIOMotorClient("mongodb://localhost:27017")
-    db = client["copilot_agent_hub"]  # app default MONGO_DB_NAME
+    db = client["tbd_agents"]
 
     # Rename 'old_field' to 'new_field' in the agents collection
     result = await db.agents.update_many(
@@ -73,35 +73,14 @@ async def migrate():
 asyncio.run(migrate())
 ```
 
-
-
-### PostgreSQL / Alembic migrations
-
-When using `DB_BACKEND=postgres`, run Alembic after first startup and after upgrades that add PostgreSQL schema changes:
-
-```bash
-docker compose exec app alembic upgrade head
-# or locally, with PostgreSQL reachable:
-DB_BACKEND=postgres alembic upgrade head
-```
-
-MongoDB-to-PostgreSQL migration scripts default some examples to `tbd_agents`, while the application MongoDB default is `copilot_agent_hub`. If you are migrating the default app database, set it explicitly:
-
-```bash
-MONGO_URI=mongodb://localhost:27017 \
-MONGO_DB_NAME=copilot_agent_hub \
-POSTGRES_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents \
-python scripts/migrate_mongo_to_postgres.py
-```
-
 ### MongoDB backup / restore
 
 ```bash
 # Backup
-docker compose exec mongodb mongodump --db copilot_agent_hub --out /dump
+docker compose exec mongo mongodump --db tbd_agents --out /dump
 
 # Restore
-docker compose exec mongodb mongorestore --db copilot_agent_hub /dump/copilot_agent_hub
+docker compose exec mongo mongorestore --db tbd_agents /dump/tbd_agents
 ```
 
 ---

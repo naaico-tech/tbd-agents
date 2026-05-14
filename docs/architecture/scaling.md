@@ -26,14 +26,14 @@ graph TB
 
     subgraph Infrastructure
         Redis[(Redis Cluster)]
-        Store[(MongoDB replica set or PostgreSQL HA)]
+        Mongo[(MongoDB Replica Set)]
     end
 
     LB --> API1 & API2 & API3
     API1 & API2 & API3 --> Redis
-    API1 & API2 & API3 --> Store
+    API1 & API2 & API3 --> Mongo
     Redis --> W1 & W2 & W3
-    W1 & W2 & W3 --> Store
+    W1 & W2 & W3 --> Mongo
     W1 & W2 & W3 --> Redis
 ```
 
@@ -41,11 +41,11 @@ graph TB
 
 ## Horizontal Worker Scaling
 
-Workers are stateless — they load persistent state from MongoDB or PostgreSQL and communicate via Redis. Add more containers to handle more concurrent agent runs.
+Workers are stateless — they load everything from MongoDB and communicate via Redis. Add more containers to handle more concurrent agent runs.
 
 ```bash
 # Docker Compose — run 5 worker containers
-docker compose up --build --scale worker=5
+docker-compose up --build --scale worker=5
 
 # Each worker runs --concurrency=4
 # Total = 20 concurrent agent executions
@@ -58,7 +58,7 @@ docker compose up --build --scale worker=5
 The FastAPI `app` service is also stateless. Run multiple instances behind a load balancer:
 
 ```bash
-docker compose up --build --scale app=3
+docker-compose up --build --scale app=3
 ```
 
 SSE connections are per-client, and each API instance independently subscribes to Redis pub/sub for the relevant workflow channel.
@@ -70,8 +70,7 @@ SSE connections are per-client, and each API instance independently subscribes t
 | Component | Strategy |
 |---|---|
 | **Redis** | Redis Sentinel or Redis Cluster for high availability |
-| **Document store** | MongoDB replica sets/Atlas or PostgreSQL HA/managed Postgres |
-| **Vector store** | Qdrant cluster/cloud or PostgreSQL pgvector on the PostgreSQL backend |
+| **MongoDB** | Replica sets or MongoDB Atlas |
 | **Workers** | Increase `--concurrency` per container or add containers |
 | **API** | Multiple instances behind a reverse proxy |
 

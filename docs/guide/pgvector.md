@@ -25,21 +25,19 @@ If you need sub-millisecond search over hundreds of millions of vectors, or you 
 
 ## Quick Start with Docker
 
-For the all-PostgreSQL Docker stack, select the `pgvector` profile and make the app use PostgreSQL for both documents and vectors:
+The recommended way to select a vector store backend is via the `COMPOSE_PROFILES`
+variable in your `.env` file:
 
 ```env
 # .env — choose one
-COMPOSE_PROFILES=pgvector
-DB_BACKEND=postgres
-VECTOR_STORE_BACKEND=pgvector
-POSTGRES_URI=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
+COMPOSE_PROFILES=pgvector    # start pgvector
+# COMPOSE_PROFILES=qdrant   # (default) start Qdrant instead
 ```
 
-Then start the stack and apply Alembic migrations on first run:
+Then start the stack normally:
 
 ```bash
 docker compose up
-docker compose exec app alembic upgrade head
 ```
 
 Or, to start only the pgvector container without the full stack:
@@ -84,8 +82,7 @@ Expected output:
 
 ```bash
 VECTOR_STORE_BACKEND=pgvector
-# inside Docker app/worker containers use host pgvector
-PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
+PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents
 PGVECTOR_TABLE_PREFIX=vs
 ```
 
@@ -133,7 +130,7 @@ curl -X POST http://localhost:8000/api/knowledge-sources \
     "name": "Product Docs",
     "source_type": "pgvector",
     "connection_config": {
-      "dsn": "postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents",
+      "dsn": "postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents",
       "collection": "product_docs"
     },
     "tags": ["product", "docs"]

@@ -40,7 +40,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
  ╚════════════════════════════════════════════╝
 ```
 
-1. 🍴 **Fork** the repository and create a branch from `master`:
+1. 🍴 **Fork** the repository and create a branch from `main`:
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -66,7 +66,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
    flutter pub get
    flutter analyze
    flutter test
-   flutter build web --release --base-href /dashboard/
+   flutter build web --release --base-href /dashboard-new-ui/
    ```
 
 5. 🧹 **Run the linter:**
@@ -93,7 +93,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
     └─────────────┴──────────────────────────────────────────────────┘
    ```
 
-7. 🚀 **Push** and open a Pull Request against `master`.
+7. 🚀 **Push** and open a Pull Request against `main`.
 
 ---
 
@@ -161,10 +161,10 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
 
 - 🐳 **Docker Compose** is the fastest way to run the full stack locally:
   ```bash
-  docker compose up --build
+  docker-compose up --build
   ```
 - 📦 **MongoDB, Redis, and observability** services are included in the compose file.
-- 🧪 **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard`; use `/dashboard-legacy` to verify the legacy UI (`/dashboard-new-ui` remains as a compatibility alias).
+- 🧪 **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard-new-ui`; use `/dashboard` to verify the legacy UI (`/dashboard-legacy` remains as a compatibility alias).
 - 📖 See [docs/getting-started/local-setup.md](docs/getting-started/local-setup.md) for bare-metal setup.
 
 ---
@@ -176,8 +176,3 @@ By contributing, you agree that your contributions will be licensed under the [A
 ---
 
 <p align="center">⬛⬜⬛ <a href="https://www.naaico.com"><strong>NAAICO</strong></a> ⬛⬜⬛</p>
-
-
-## Repository Workflows
-
-The default branch is `master`. Current GitHub Actions workflows are `.github/workflows/docs.yml` (MkDocs Pages), `.github/workflows/integration-tests.yml` (frontend, Docker, MongoDB, and PostgreSQL checks), and `.github/workflows/release.yml` (GHCR image publish on release). CODEOWNERS already routes all files to `@naaico-tech/maintainers`.

@@ -66,8 +66,3 @@ DELETE /api/skills/{id}
 ```
 
 **Response:** `204 No Content`
-
-
-## Import/Export
-
-Use `GET /api/skills/export`, `GET /api/skills/{skill_id}/export`, and `POST /api/skills/import`. See [Import & Export](import-export.md).

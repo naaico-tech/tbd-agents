@@ -1,17 +1,42 @@
 # Tasks API
 
-Task executions are created by workflow prompts and run asynchronously.
-
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/tasks` | List all task executions |
-| `GET` | `/api/tasks/{task_id}` | Get task details including logs/messages/usage |
-| `GET` | `/api/tasks/{task_id}/progress` | Get structured progress/todos |
-| `GET` | `/api/tasks/workflow/{workflow_id}` | List task executions for one workflow |
-| `POST` | `/api/tasks/{task_id}/stop` | Stop an active task |
+| `GET` | `/api/tasks` | List task executions (optional `?workflow_id=`) |
+| `GET` | `/api/tasks/{id}` | Get task execution |
 
-`GET /api/tasks?workflow_id=...` is not supported; use `GET /api/tasks/workflow/{workflow_id}`.
+---
 
-## Task Object Highlights
+## List Tasks
 
-Responses include `workflow_id`, `workflow_title`, `agent_name`, `prompt`, `status`, `model`, `reasoning_effort`, `tool_calls`, `response`, `progress`, `logs`, `messages`, `usage`, timestamps, and elapsed seconds.
+```
+GET /api/tasks
+GET /api/tasks?workflow_id=<WF_ID>
+```
+
+Returns task execution history. Optionally filter by workflow.
+
+**Response:** `200 OK` — Array of task execution objects.
+
+---
+
+## Get Task
+
+```
+GET /api/tasks/{id}
+```
+
+Returns a single task execution with status, timestamps, and error details (if any).
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "...",
+  "workflow_id": "...",
+  "status": "completed",
+  "created_at": "2026-04-10T12:00:00Z",
+  "completed_at": "2026-04-10T12:01:30Z",
+  "error": null
+}
+```
