@@ -1316,6 +1316,32 @@ async def _execute_custom_tool(
         from app.services import token_manager
         resolved_env = await token_manager.resolve_config(effective_env_config)
 
+        # Fail fast: if any {{token:NAME}} placeholder is still present after
+        # resolution, the named token is missing from the store.  Return a
+        # clear, actionable error rather than letting the tool execute with an
+        # empty / literal placeholder value and produce a cryptic failure.
+        unresolved = token_manager.find_unresolved_tokens(resolved_env)
+        if unresolved:
+            missing_names = sorted(unresolved)
+            if len(missing_names) == 1:
+                (name,) = missing_names
+                msg = (
+                    f"Error: Required credential '{name}' is not configured. "
+                    f"Please add a token named '{name}' to the token store."
+                )
+            else:
+                names_str = ", ".join(f"'{n}'" for n in missing_names)
+                msg = (
+                    f"Error: Required credentials {names_str} are not configured. "
+                    f"Please add tokens named {names_str} to the token store."
+                )
+            logger.warning(
+                "Custom tool '%s': aborting execution — unresolved token(s): %s",
+                tool_name,
+                missing_names,
+            )
+            return json.dumps({"error": msg})
+
     merged_env = dict(resolved_env or {})
     if runtime_env:
         merged_env.update(runtime_env)

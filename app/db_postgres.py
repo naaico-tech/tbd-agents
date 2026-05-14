@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import types as _builtin_types
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Union, get_args, get_origin
@@ -531,6 +532,13 @@ def _translate_filters(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _DeleteResult:
+    """Minimal delete-result object that mirrors Beanie's DeleteResult interface."""
+
+    deleted_count: int
+
+
 class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocument
     """Chainable query builder that mimics Beanie's FindMany interface."""
 
@@ -608,6 +616,25 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
         async with factory() as session:
             result = await session.execute(text(sql), params)
             return result.scalar() or 0
+
+    async def delete(self) -> _DeleteResult:
+        """Delete all rows matching the current filters and return a result object.
+
+        Mirrors Beanie's ``FindMany.delete()`` — returns a :class:`_DeleteResult`
+        with a ``deleted_count`` attribute so callers can do::
+
+            result = await Model.find({...}).delete()
+            count  = result.deleted_count
+        """
+        table = self._model_cls.get_collection_name()
+        params: dict = {}
+        where = _translate_filters(self._model_cls, self._filters, params)
+        sql = f"DELETE FROM {table} WHERE {where}"
+        factory = await get_session_factory()
+        async with factory() as session:
+            result = await session.execute(text(sql), params)
+            await session.commit()
+        return _DeleteResult(deleted_count=result.rowcount)
 
     def __await__(self):
         return self.to_list().__await__()

@@ -141,6 +141,26 @@ async def resolve_config(config: dict) -> dict:
     return _substitute(copy.deepcopy(config), resolved)
 
 
+def find_unresolved_tokens(config: dict) -> set[str]:
+    """Return the set of token names that remain unresolved in *config*.
+
+    Call this after :func:`resolve_config` to detect env vars whose
+    ``{{token:NAME}}`` references could not be substituted because the named
+    token does not exist in the store.  An empty set means all references
+    were successfully resolved.
+
+    Args:
+        config: A dict (possibly nested) returned by :func:`resolve_config`.
+
+    Returns:
+        A :class:`set` of token name strings still referenced as
+        ``{{token:NAME}}`` in any value of *config*.
+    """
+    refs: set[str] = set()
+    _collect_refs(config, refs)
+    return refs
+
+
 def _collect_refs(obj, refs: set[str]) -> None:
     """Recursively collect all ``{{token:NAME}}`` references in *obj*."""
     if isinstance(obj, dict):

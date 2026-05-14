@@ -244,6 +244,118 @@ async def test_execute_custom_tool_not_found():
     assert "not found" in parsed["error"]
 
 
+# ── _execute_custom_tool: unresolved token handling ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_custom_tool_unresolved_single_token_returns_error():
+    """When a single {{token:...}} placeholder remains after resolution, the tool
+    should NOT be executed and should return a clear, actionable error."""
+    mock_tool = MagicMock()
+    mock_tool.name = "google_sheets_read"
+    mock_tool.source_code = "def google_sheets_read(): pass"
+    mock_tool.env_config = {"GOOGLE_SHEETS_CREDENTIALS_JSON": "{{token:google-sheets-credentials}}"}
+    fn_map = {"google_sheets_read": mock_tool}
+
+    # resolve_config leaves the placeholder unresolved (token not in store)
+    unresolved_env = {"GOOGLE_SHEETS_CREDENTIALS_JSON": "{{token:google-sheets-credentials}}"}
+
+    with (
+        patch(
+            "app.services.token_manager.resolve_config",
+            new_callable=AsyncMock,
+            return_value=unresolved_env,
+        ),
+        patch(
+            "app.core.agent_engine.custom_tool_runner.run_tool",
+            new_callable=AsyncMock,
+        ) as mock_run,
+    ):
+        from app.core.agent_engine import _execute_custom_tool
+        result = await _execute_custom_tool("google_sheets_read", {}, fn_map)
+
+    # run_tool must NOT have been called
+    mock_run.assert_not_awaited()
+
+    parsed = json.loads(result)
+    assert "error" in parsed
+    assert "google-sheets-credentials" in parsed["error"]
+    assert "not configured" in parsed["error"]
+    assert "token store" in parsed["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_custom_tool_unresolved_multiple_tokens_returns_error():
+    """When multiple {{token:...}} placeholders remain, all missing names are
+    reported in the error message."""
+    mock_tool = MagicMock()
+    mock_tool.name = "multi_cred_tool"
+    mock_tool.source_code = "def multi_cred_tool(): pass"
+    mock_tool.env_config = {
+        "CRED_A": "{{token:cred-a}}",
+        "CRED_B": "{{token:cred-b}}",
+    }
+    fn_map = {"multi_cred_tool": mock_tool}
+
+    unresolved_env = {
+        "CRED_A": "{{token:cred-a}}",
+        "CRED_B": "{{token:cred-b}}",
+    }
+
+    with (
+        patch(
+            "app.services.token_manager.resolve_config",
+            new_callable=AsyncMock,
+            return_value=unresolved_env,
+        ),
+        patch(
+            "app.core.agent_engine.custom_tool_runner.run_tool",
+            new_callable=AsyncMock,
+        ) as mock_run,
+    ):
+        from app.core.agent_engine import _execute_custom_tool
+        result = await _execute_custom_tool("multi_cred_tool", {}, fn_map)
+
+    mock_run.assert_not_awaited()
+
+    parsed = json.loads(result)
+    assert "error" in parsed
+    assert "cred-a" in parsed["error"]
+    assert "cred-b" in parsed["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_custom_tool_all_tokens_resolved_proceeds():
+    """When all token references are resolved, run_tool should be called normally."""
+    mock_tool = MagicMock()
+    mock_tool.name = "sheets_tool"
+    mock_tool.source_code = "def sheets_tool(): pass"
+    mock_tool.env_config = {"CREDS": "{{token:my-token}}"}
+    fn_map = {"sheets_tool": mock_tool}
+
+    # All placeholders successfully resolved
+    resolved_env = {"CREDS": "actual-secret-value"}
+
+    with (
+        patch(
+            "app.services.token_manager.resolve_config",
+            new_callable=AsyncMock,
+            return_value=resolved_env,
+        ),
+        patch(
+            "app.core.agent_engine.custom_tool_runner.run_tool",
+            new_callable=AsyncMock,
+            return_value=json.dumps({"result": "ok"}),
+        ) as mock_run,
+    ):
+        from app.core.agent_engine import _execute_custom_tool
+        result = await _execute_custom_tool("sheets_tool", {}, fn_map)
+
+    mock_run.assert_awaited_once()
+    parsed = json.loads(result)
+    assert parsed == {"result": "ok"}
+
+
 # ── API round-trip: agent with custom_tool_ids ────────────────────────────────
 
 
