@@ -4,82 +4,52 @@
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/knowledge-sources` | Register knowledge source |
-| `GET` | `/api/knowledge-sources` | List sources (optional `?tags=` filter) |
+| `POST` | `/api/knowledge-sources` | Register source |
+| `GET` | `/api/knowledge-sources` | List sources (`?tags=` supported) |
+| `GET` | `/api/knowledge-sources/export` | Export all sources |
+| `GET` | `/api/knowledge-sources/{id}/export` | Export one source |
+| `POST` | `/api/knowledge-sources/import` | Import source bundle |
 | `GET` | `/api/knowledge-sources/{id}` | Get source |
 | `PUT` | `/api/knowledge-sources/{id}` | Update source |
-| `DELETE` | `/api/knowledge-sources/{id}` | Delete source (cascade-deletes items) |
+| `DELETE` | `/api/knowledge-sources/{id}` | Delete source and items |
 | `POST` | `/api/knowledge-sources/{id}/test` | Test connection |
 
-### Register Source
-
-```
-POST /api/knowledge-sources
-```
+Valid `source_type` values are `vector_db`, `mongo_db`, and `pgvector`.
 
 ```json
 {
   "name": "product-docs",
-  "type": "vector_db",
+  "description": "Qdrant document vectors",
+  "source_type": "vector_db",
   "connection_config": {"url": "http://qdrant:6333", "collection": "docs"},
   "tags": ["documentation"]
 }
 ```
 
-Source types: `vector_db`, `mongo_db`.
-
----
-
 ## Knowledge Items
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/knowledge-items` | Create text knowledge item |
+| `POST` | `/api/knowledge-items` | Create text item |
 | `POST` | `/api/knowledge-items/upload` | Upload file/image (multipart) |
 | `GET` | `/api/knowledge-items` | List items (`?source_id=`, `?tags=`, `?content_type=`) |
 | `GET` | `/api/knowledge-items/{id}` | Get item metadata |
 | `GET` | `/api/knowledge-items/{id}/content` | Download file content |
-| `PUT` | `/api/knowledge-items/{id}` | Update item tags/metadata |
+| `PUT` | `/api/knowledge-items/{id}` | Update item |
 | `DELETE` | `/api/knowledge-items/{id}` | Delete item |
-| `POST` | `/api/knowledge-items/query` | Query items by tags |
+| `POST` | `/api/knowledge-items/query` | Query by tags |
 
-### Create Text Item
-
-```
-POST /api/knowledge-items
-```
+Create text item body:
 
 ```json
 {
   "source_id": "<SOURCE_ID>",
-  "content": "Our SLA guarantees 99.9% uptime.",
-  "tags": ["sla", "production"]
+  "name": "SLA summary",
+  "content_type": "text",
+  "text_content": "Our SLA guarantees 99.9% uptime.",
+  "tags": ["sla", "production"],
+  "metadata": {}
 }
 ```
 
-### Upload File
-
-```
-POST /api/knowledge-items/upload
-Content-Type: multipart/form-data
-```
-
-```bash
-curl -X POST http://localhost:8000/api/knowledge-items/upload \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  -F "file=@runbook.pdf" \
-  -F "source_id=<SOURCE_ID>" \
-  -F "tags=runbook,ops"
-```
-
-### Query Items
-
-```
-POST /api/knowledge-items/query
-```
-
-```json
-{
-  "tags": ["sla"]
-}
-```
+`name` is required. Text content belongs in `text_content`, not `content`.

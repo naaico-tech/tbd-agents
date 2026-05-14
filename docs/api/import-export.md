@@ -203,10 +203,10 @@ All import/export endpoints require an `Authorization: Bearer <GITHUB_TOKEN>` he
 {
   "name": "runbooks",
   "description": "Internal runbook vector store",
-  "source_type": "mongodb_vector",
+  "source_type": "vector_db",
   "connection_config": {
-    "collection": "runbooks",
-    "index_name": "vector_index"
+    "url": "http://qdrant:6333",
+    "collection": "runbooks"
   },
   "tags": ["ops"]
 }
@@ -216,7 +216,7 @@ All import/export endpoints require an `Authorization: Bearer <GITHUB_TOKEN>` he
 |---|---|---|---|
 | `name` | `string` | ✅ | — |
 | `description` | `string` | | `""` |
-| `source_type` | `string` | ✅ | — |
+| `source_type` | `string` | ✅ | `vector_db`, `mongo_db`, or `pgvector` |
 | `connection_config` | `object` | | `{}` |
 | `tags` | `string[]` | | `[]` |
 

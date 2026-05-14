@@ -3,130 +3,23 @@
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/workflows` | Create workflow |
-| `GET` | `/api/workflows` | List your workflows |
-| `GET` | `/api/workflows/{id}` | Get workflow state + logs + messages |
-| `PUT` | `/api/workflows/{id}` | Update workflow |
-| `DELETE` | `/api/workflows/{id}` | Delete workflow |
-| `POST` | `/api/workflows/{id}/prompt` | Send prompt (async execution) |
-| `POST` | `/api/workflows/{id}/halt` | Halt running workflow |
-| `GET` | `/api/workflows/{id}/stream` | SSE stream of real-time events |
-| `POST` | `/api/workflows/{id}/skills/{skill_id}` | Install skill |
-| `DELETE` | `/api/workflows/{id}/skills/{skill_id}` | Remove skill |
+| `GET` | `/api/workflows` | List workflows |
+| `GET` | `/api/workflows/export` | Export all workflows |
+| `GET` | `/api/workflows/{workflow_id}/export` | Export one workflow |
+| `POST` | `/api/workflows/import` | Import workflow bundle |
+| `GET` | `/api/workflows/{workflow_id}` | Get workflow |
+| `PUT` | `/api/workflows/{workflow_id}` | Update workflow |
+| `DELETE` | `/api/workflows/{workflow_id}` | Delete workflow |
+| `POST` | `/api/workflows/{workflow_id}/prompt` | Start asynchronous task |
+| `POST` | `/api/workflows/{workflow_id}/halt` | Halt running workflow |
+| `GET` | `/api/workflows/{workflow_id}/stream` | SSE event stream |
+| `POST` | `/api/workflows/{workflow_id}/skills/{skill_id}` | Attach skill |
+| `DELETE` | `/api/workflows/{workflow_id}/skills/{skill_id}` | Detach skill |
 
----
+## Fields
 
-## Create Workflow
+`title`, `agent_id`, `model`, `max_turns`, `skill_ids`, `skill_tags`, `output_format`, `infinite_session`, `caveman`, `bypass_memory`, `auto_memory`, `tsv_tool_results`, `reasoning_effort`, `guardrail_ids`, `guardrail_tags`, `repo_url`, `repo_branch`, `repo_token_name`, `credential_overrides`, `webhook_url`, and `error_webhook_url`.
 
-```
-POST /api/workflows
-```
+Prompt body accepts either `prompt` or structured `request`, plus optional `reasoning_effort` override.
 
-```json
-{
-  "agent_id": "<AGENT_ID>",
-  "model": "gpt-4.1",
-  "max_turns": 10,
-  "output_format": "markdown",
-  "infinite_session": true,
-  "caveman": true
-}
-```
-
-**Response:** `201 Created`
-
----
-
-## Send Prompt
-
-```
-POST /api/workflows/{id}/prompt
-```
-
-```json
-{
-  "prompt": "Investigate the latest production alerts."
-}
-```
-
-Returns `201` immediately. The agent runs asynchronously on a Celery worker. Connect to the SSE stream to follow progress.
-
----
-
-## SSE Stream
-
-```
-GET /api/workflows/{id}/stream
-```
-
-Server-Sent Events endpoint. Streams real-time events:
-
-| Event | Payload | Description |
-|---|---|---|
-| `log` | `{event, detail}` | Agent lifecycle events |
-| `message` | `{role, content}` | Complete assistant/tool message |
-| `message_delta` | `{delta}` | Streaming token fragment |
-| `usage` | `{total_in, total_out, cost...}` | Cumulative usage stats |
-| `status` | `{status, current_turn}` | Workflow state changes |
-
----
-
-## Halt Workflow
-
-```
-POST /api/workflows/{id}/halt
-```
-
-Stops a running workflow.
-
-**Response:** `200 OK`
-
----
-
-## Install / Remove Skill
-
-```
-POST   /api/workflows/{id}/skills/{skill_id}   # Install
-DELETE /api/workflows/{id}/skills/{skill_id}   # Remove
-```
-
----
-
-## List Workflows
-
-```
-GET /api/workflows
-```
-
-**Response:** `200 OK` — Array of workflow objects.
-
----
-
-## Get Workflow
-
-```
-GET /api/workflows/{id}
-```
-
-Returns the full workflow state including messages, logs, and usage.
-
-**Response:** `200 OK`
-
----
-
-## Update Workflow
-
-```
-PUT /api/workflows/{id}
-```
-
-**Response:** `200 OK`
-
----
-
-## Delete Workflow
-
-```
-DELETE /api/workflows/{id}
-```
-
-**Response:** `204 No Content`
+Resource-specific import/export is available at the endpoints above; see [Import & Export](import-export.md).

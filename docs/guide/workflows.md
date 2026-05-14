@@ -1,101 +1,62 @@
 # Workflows
 
-A workflow ties an agent to a specific execution context — it's where prompts are sent, responses are generated, and state is tracked.
+A workflow ties an agent to an execution template. Tasks, schedules, and prompts run through workflows.
 
----
+## Workflow Fields
 
-## What is a Workflow?
-
-A workflow combines:
-
-| Property | Description |
+| Field | Description |
 |---|---|
-| **Agent** | Which agent to use |
-| **Model override** | Optionally use a different model than the agent's default |
-| **Max turns** | Limit on tool-call rounds (prevents runaway loops) |
-| **Output format** | `json` or `markdown` |
-| **Infinite session** | Enable/disable automatic context compaction |
-| **Caveman** | Enable terse responses + compressed injected context |
-| **Skills** | Installed instruction modules |
+| Title | Optional display name |
+| Agent | Required agent ID |
+| Model override | Optional model for this workflow |
+| Max turns | Maximum tool-call rounds |
+| Skills / skill tags | Explicit skill IDs and tag-based skill selection |
+| Guardrails / guardrail tags | Explicit guardrail IDs and tag-based guardrail selection |
+| Output format | `json` or `markdown` |
+| Reasoning effort | `low`, `medium`, or `high`; can be overridden when running a task |
+| Status | `active` or `inactive` |
+| Infinite session | Enables long-running context compaction |
+| Bypass memory | Skips memory injection for task runs |
+| Auto memory | Extracts memories after task completion |
+| TSV tool results | Formats tool results for compact tabular consumption |
+| Caveman | Produces terser final responses and compresses injected context |
+| Credential overrides | Map plugin/custom-tool env vars to token names for this workflow |
+| Repo URL / branch / token | Optional repository checkout settings for repo-aware tasks |
+| Webhook URL | Called after task completion |
+| Error webhook URL | Called after task failure |
 
-Workflows persist their full state: messages, logs, usage stats, and status.
-
----
-
-## Creating a Workflow
+## Create a Workflow
 
 ```bash
 curl -X POST http://localhost:8000/api/workflows \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "title": "Incident Response",
     "agent_id": "<AGENT_ID>",
     "max_turns": 10,
     "output_format": "markdown",
-    "infinite_session": true,
-    "caveman": true
+    "reasoning_effort": "medium",
+    "skill_tags": ["incident"],
+    "guardrail_tags": ["safe-output"],
+    "infinite_session": true
   }'
 ```
 
----
-
-## Sending a Prompt
+## Run a Prompt
 
 ```bash
-curl -X POST http://localhost:8000/api/workflows/<WF_ID>/prompt \
+curl -X POST http://localhost:8000/api/workflows/<WORKFLOW_ID>/prompt \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Investigate the latest production alerts."}'
+  -d '{"prompt": "Investigate the latest production alerts.", "reasoning_effort": "high"}'
 ```
 
-The API returns `201` immediately — execution happens asynchronously on a Celery worker. Use the [SSE stream](streaming.md) to follow progress.
+The API returns quickly with a `task_id`; execution continues on a Celery worker. Follow live progress with the workflow stream or review it later in [Task Executions](tasks.md).
 
----
-
-## Workflow Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> active: Created
-    active --> running: Prompt sent
-    running --> completed: Agent finished
-    running --> failed: Error occurred
-    running --> max_turns: Turn limit reached
-    completed --> running: New prompt sent
-    failed --> running: New prompt sent
-    max_turns --> running: New prompt sent
-```
-
----
-
-## Halting a Workflow
-
-Stop a running workflow:
+## Halt a Running Workflow
 
 ```bash
-curl -X POST http://localhost:8000/api/workflows/<WF_ID>/halt \
+curl -X POST http://localhost:8000/api/workflows/<WORKFLOW_ID>/halt \
   -H "Authorization: Bearer $GITHUB_TOKEN"
 ```
-
----
-
-## Infinite Sessions
-
-Long-running agents can exhaust a model's context window. TBD Agents uses the Copilot SDK's **infinite session** feature to handle this automatically:
-
-- At **80%** context fill → background compaction starts (SDK summarises older context)
-- At **95%** → buffer exhaustion mode kicks in for aggressive compaction
-- The agent continues working without interruption
-
-This is enabled by default and can be toggled per workflow.
-
-## Caveman Workflows
-
-Enable `caveman` on a workflow to apply a native caveman mode inspired by
-JuliusBrussee/caveman:
-
-- final responses become terser to reduce output tokens
-- injected memory/knowledge context is compressed before prompt assembly
-- code, commands, paths, URLs, and identifiers are preserved verbatim
-
-The workflow still keeps its normal output contract (`json` or `markdown`).

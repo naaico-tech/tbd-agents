@@ -1,102 +1,55 @@
----
-icon: material/book-open-variant
----
+# User Guide
 
-# Guide
-
-A deep dive into what TBD Agents offers and how each capability works.
-
-!!! tip "Prerequisites"
-    Make sure you have a running instance first — see [Quick Start](../getting-started/quickstart.md).
+Use these guides to configure and operate TBD Agents.
 
 <div class="grid cards" markdown>
 
+-   :material-view-dashboard:{ .lg .middle } **Dashboard**
+
+    [:octicons-arrow-right-24: Dashboard](dashboard.md)
+
 -   :robot:{ .lg .middle } **Agents**
-
-    ---
-
-    Build custom AI agents with system prompts, models, and tool access.
 
     [:octicons-arrow-right-24: Agents](agents.md)
 
--   :wrench:{ .lg .middle } **MCP Tools**
-
-    ---
-
-    Connect external tools via the Model Context Protocol.
-
-    [:octicons-arrow-right-24: MCP Tools](mcp-tools.md)
-
--   :jigsaw:{ .lg .middle } **Skills**
-
-    ---
-
-    Reusable instruction modules that shape agent behaviour.
-
-    [:octicons-arrow-right-24: Skills](skills.md)
-
--   :material-cog-sync:{ .lg .middle } **Workflows**
-
-    ---
-
-    Execution contexts that tie agents to prompts and sessions.
+-   :material-account-tree:{ .lg .middle } **Workflows**
 
     [:octicons-arrow-right-24: Workflows](workflows.md)
 
--   :zap:{ .lg .middle } **Streaming**
+-   :material-play-circle:{ .lg .middle } **Run Task & Executions**
 
-    ---
+    [:octicons-arrow-right-24: Tasks](tasks.md)
 
-    Real-time SSE streaming of logs, messages, and usage.
+-   :material-chat:{ .lg .middle } **Agent Chat**
 
-    [:octicons-arrow-right-24: Streaming](streaming.md)
+    [:octicons-arrow-right-24: Agent Chat](agent-chat.md)
 
--   :material-database:{ .lg .middle } **Knowledge Bases**
+-   :material-brain:{ .lg .middle } **Agent Memory**
 
-    ---
+    [:octicons-arrow-right-24: Memory](memory.md)
 
-    Connect vector DBs and MongoDB for retrieval-augmented generation.
+-   :material-book-open-variant:{ .lg .middle } **Knowledge Bases**
 
-    [:octicons-arrow-right-24: Knowledge Bases](knowledge.md)
+    [:octicons-arrow-right-24: Knowledge](knowledge.md)
 
 -   :material-shield-check:{ .lg .middle } **Guardrails**
 
-    ---
-
-    Enforce safety policies before agent execution begins.
-
     [:octicons-arrow-right-24: Guardrails](guardrails.md)
 
--   :material-key-variant:{ .lg .middle } **BYOK Providers**
+-   :material-key:{ .lg .middle } **Tokens & BYOK Providers**
 
-    ---
+    [:octicons-arrow-right-24: Providers](byok-providers.md)
 
-    Bring your own API keys for OpenAI, Azure, Anthropic, or custom endpoints.
+-   :material-tools:{ .lg .middle } **MCP and Custom Tools**
 
-    [:octicons-arrow-right-24: BYOK Providers](byok-providers.md)
+    [:octicons-arrow-right-24: MCP Tools](mcp-tools.md) · [:octicons-arrow-right-24: Custom Tools](custom-tools.md)
 
--   :material-code-braces:{ .lg .middle } **Custom Tools**
+-   :material-calendar-clock:{ .lg .middle } **Scheduled Agents**
 
-    ---
-
-    Write Python tool functions and lock them to specific agents.
-
-    [:octicons-arrow-right-24: Custom Tools](custom-tools.md)
+    [:octicons-arrow-right-24: API](../api/scheduled-agents.md)
 
 -   :material-database-export:{ .lg .middle } **Import & Export**
 
-    ---
-
-    Back up, migrate, and share agent configurations as JSON bundles.
-
     [:octicons-arrow-right-24: Import & Export](import-export.md)
-
--   :material-database-cog:{ .lg .middle } **PostgreSQL Backend**
-
-    ---
-
-    Run a fully-PostgreSQL stack (JSONB + pgvector) with no MongoDB dependency.
-
-    [:octicons-arrow-right-24: PostgreSQL Backend](postgres-backend.md)
 
 </div>
