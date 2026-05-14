@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import types as _builtin_types
 import uuid
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from sqlalchemy import BOOLEAN, DOUBLE_PRECISION, INTEGER, TEXT, TIMESTAMP, bindparam, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -26,6 +28,9 @@ TIMESTAMPTZ = TIMESTAMP(timezone=True)
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+# Safe SQL identifier pattern — prevents ORDER BY injection
+_SAFE_IDENT = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 # All 15 MongoDB collection names that need PostgreSQL tables
 COLLECTIONS = [
@@ -414,8 +419,9 @@ async def init_postgres() -> None:
     async with engine.begin() as conn:
         try:
             await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
-        except Exception:  # noqa: BLE001
-            pass
+        except ProgrammingError as e:
+            if "already exists" not in str(e).lower():
+                raise
         for collection, ddl in _TABLE_DDL.items():
             await conn.execute(text(ddl))
             idx_sql = _INDEX_DDL.get(collection, "")
@@ -586,7 +592,8 @@ class PgQuerySet[T]:  # noqa: UP046 — T bound at call-site via PostgresDocumen
                 else:
                     direction = "ASC"
                     field = f
-                order_parts.append(f"{field} {direction}")
+                if _SAFE_IDENT.match(field):
+                    order_parts.append(f"{field} {direction}")
             sql += f" ORDER BY {', '.join(order_parts)}"
         else:
             sql += " ORDER BY created_at DESC"
@@ -796,7 +803,9 @@ class PostgresDocument:
         # Ensure timestamps exist even when the model has no explicit fields for them
         if "created_at" not in col_values:
             col_values["created_at"] = now
-        if "updated_at" not in col_values:
+        cls = self.__class__
+        has_updated_at = "updated_at" in getattr(cls, "model_fields", {})
+        if has_updated_at and "updated_at" not in col_values:
             col_values["updated_at"] = now
 
         all_cols = list(col_values.keys())
@@ -842,9 +851,10 @@ class PostgresDocument:
     async def delete(self) -> None:
         """Delete this document from the database."""
         table = self.get_collection_name()
-        doc_id = str(getattr(self, "id", ""))
-        if not doc_id:
+        raw_id = getattr(self, "id", None)
+        if not raw_id:
             raise ValueError("Cannot delete a document without an id")
+        doc_id = str(raw_id)
         factory = await get_session_factory()
         async with factory() as session:
             await session.execute(

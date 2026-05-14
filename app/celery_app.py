@@ -46,6 +46,29 @@ celery.autodiscover_tasks(["app.tasks"])
 
 
 @worker_process_init.connect(weak=False)
+def _prewarm_embeddings(**_kwargs):
+    """Pre-load the fastembed model in each worker process immediately after forking.
+
+    Without this the model loads lazily on the first task that needs semantic
+    memory retrieval, causing per-task HuggingFace cache-validation HTTP
+    requests and a blocking model-load delay.  Loading here means all of that
+    happens once at worker startup instead.
+    """
+    if not settings.embeddings_enabled:
+        return
+    try:
+        from app.services.embeddings import embeddings_service
+
+        model = embeddings_service._load_model(settings.embeddings_model)
+        embeddings_service._model = model
+        logger.info(
+            "Embeddings model '%s' pre-warmed in worker process", settings.embeddings_model
+        )
+    except Exception as exc:
+        logger.warning("Embeddings model pre-warm failed (will load lazily): %s", exc)
+
+
+@worker_process_init.connect(weak=False)
 def _init_worker_telemetry(**_kwargs):
     """Initialise OTEL tracing, Celery instrumentation, and Prometheus HTTP server."""
     from app.observability import init_telemetry

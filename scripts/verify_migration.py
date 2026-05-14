@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import random
 import sys
+from datetime import datetime
 
 import asyncpg
 import motor.motor_asyncio
@@ -21,7 +21,11 @@ from bson import ObjectId
 
 logger = logging.getLogger(__name__)
 
-COLLECTIONS = [
+# ---------------------------------------------------------------------------
+# Collection allowlist — must match _TABLE_DDL in app/db_postgres.py
+# ---------------------------------------------------------------------------
+
+COLLECTIONS: list[str] = [
     "agents",
     "chat_sessions",
     "chat_messages",
@@ -39,6 +43,31 @@ COLLECTIONS = [
     "mcp_servers",
 ]
 
+# Used to prevent SQL injection: collection_name is validated against this set
+# before it is ever interpolated into any SQL string.
+VALID_COLLECTIONS: frozenset[str] = frozenset(COLLECTIONS)
+
+# Per-collection columns used for spot-check comparisons.
+# We select a small number of stable text columns so the check is robust to
+# irrelevant default-value differences (e.g. empty arrays, timestamps).
+SPOT_CHECK_COLS: dict[str, list[str]] = {
+    "agents": ["name"],
+    "chat_sessions": ["agent_id", "github_user"],
+    "chat_messages": ["session_id", "role"],
+    "memories": ["agent_id", "key"],
+    "skills": ["name"],
+    "tokens": ["name"],
+    "providers": ["name", "provider_type"],
+    "knowledge_items": ["name", "source_id"],
+    "knowledge_sources": ["name", "source_type"],
+    "custom_tools": ["name"],
+    "guardrails": ["name", "guardrail_type"],
+    "workflows": ["agent_id", "status"],
+    "task_executions": ["workflow_id", "status"],
+    "scheduled_agents": ["name", "workflow_id"],
+    "mcp_servers": ["name", "transport_type"],
+}
+
 DEFAULT_MONGO_URI = "mongodb://localhost:27017"
 DEFAULT_MONGO_DB = "tbd_agents"
 DEFAULT_POSTGRES_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents"
@@ -52,19 +81,13 @@ def _normalize_postgres_uri(uri: str) -> str:
     )
 
 
-def _serialize(obj: object) -> object:
-    """Recursively convert BSON/datetime types to JSON-serializable forms."""
-    from datetime import datetime
-
-    if isinstance(obj, ObjectId):
-        return str(obj)
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if isinstance(obj, dict):
-        return {k: _serialize(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_serialize(item) for item in obj]
-    return obj
+def _mongo_text(value: object) -> str | None:
+    """Normalise a MongoDB field value to a plain string for comparison."""
+    if value is None:
+        return None
+    if isinstance(value, (datetime, ObjectId)):
+        return str(value)
+    return str(value)
 
 
 async def _get_random_mongo_ids(
@@ -88,11 +111,17 @@ async def verify_collection(
     pg_conn: asyncpg.Connection,
     collection_name: str,
 ) -> tuple[bool, list[str]]:
-    """
-    Verify one collection.
+    """Verify one collection.
 
     Returns (all_ok, list_of_failure_messages).
     """
+    # --- SQL injection guard ---
+    if collection_name not in VALID_COLLECTIONS:
+        raise ValueError(
+            f"Unknown collection: {collection_name!r}. "
+            f"Valid collections: {sorted(VALID_COLLECTIONS)}"
+        )
+
     failures: list[str] = []
     mongo_coll = mongo_db[collection_name]
 
@@ -113,7 +142,8 @@ async def verify_collection(
             f"{collection_name}: count mismatch — Mongo {mongo_count} vs PG {pg_count}"
         )
 
-    # --- Spot-check ---
+    # --- Spot-check: compare key typed columns for a random sample ---
+    spot_cols = SPOT_CHECK_COLS.get(collection_name, [])
     sample_ids = await _get_random_mongo_ids(mongo_coll, SPOT_CHECK_SAMPLE)
 
     for doc_id in sample_ids:
@@ -124,12 +154,16 @@ async def verify_collection(
             mongo_doc = await mongo_coll.find_one({"_id": doc_id})
 
         if mongo_doc is None:
-            failures.append(f"{collection_name}/{doc_id}: not found in MongoDB during spot-check")
+            failures.append(
+                f"{collection_name}/{doc_id}: not found in MongoDB during spot-check"
+            )
             continue
 
-        # Check existence in Postgres
+        # Check existence and fetch spot-check columns from Postgres.
+        # collection_name is validated against VALID_COLLECTIONS above.
+        select_cols = ", ".join(["id"] + spot_cols) if spot_cols else "id"
         pg_row = await pg_conn.fetchrow(
-            f"SELECT id, data FROM {collection_name} WHERE id = $1",  # noqa: S608
+            f"SELECT {select_cols} FROM {collection_name} WHERE id = $1",  # noqa: S608
             doc_id,
         )
         if pg_row is None:
@@ -137,21 +171,22 @@ async def verify_collection(
             print(f"  ✗ spot-check {doc_id} — missing in PostgreSQL")
             continue
 
-        # Verify data payload (strip Mongo _id and known timestamp fields before comparing)
-        mongo_data = dict(mongo_doc)
-        mongo_data.pop("_id", None)
-        mongo_data.pop("created_at", None)
-        mongo_data.pop("updated_at", None)
-        mongo_serialized = _serialize(mongo_data)
+        # Compare each spot-check column as a normalised string.
+        col_failures: list[str] = []
+        for col in spot_cols:
+            pg_val = str(pg_row[col]) if pg_row[col] is not None else None
+            mongo_val = _mongo_text(mongo_doc.get(col))
+            if pg_val != mongo_val:
+                col_failures.append(
+                    f"field {col!r}: Mongo={mongo_val!r} PG={pg_val!r}"
+                )
 
-        raw = pg_row["data"]
-        pg_data = json.loads(raw) if isinstance(raw, str) else dict(raw)
-
-        if mongo_serialized != pg_data:
+        if col_failures:
+            detail = "; ".join(col_failures)
             failures.append(
-                f"{collection_name}/{doc_id}: data mismatch between MongoDB and PostgreSQL"
+                f"{collection_name}/{doc_id}: spot-check mismatch — {detail}"
             )
-            print(f"  ✗ spot-check {doc_id} — data mismatch")
+            print(f"  ✗ spot-check {doc_id} — {detail}")
         else:
             print(f"  ✓ spot-check {doc_id} — OK")
 
@@ -165,7 +200,17 @@ async def main(args: argparse.Namespace) -> int:
 
     pg_dsn = _normalize_postgres_uri(postgres_uri)
 
-    target_collections = [args.collection] if args.collection else COLLECTIONS
+    if args.collection:
+        if args.collection not in VALID_COLLECTIONS:
+            logger.error(
+                "Unknown collection %r. Valid collections: %s",
+                args.collection,
+                sorted(VALID_COLLECTIONS),
+            )
+            return 1
+        target_collections = [args.collection]
+    else:
+        target_collections = COLLECTIONS
 
     print(f"Source : {mongo_uri} / {mongo_db_name}")
     print(f"Target : {pg_dsn}")

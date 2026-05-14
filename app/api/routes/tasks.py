@@ -161,3 +161,23 @@ async def list_workflow_tasks(workflow_id: str, user=Depends(get_current_user)):
         {"workflow_id": workflow_id}
     ).sort("-created_at").to_list()
     return [await _to_summary(t) for t in tasks]
+
+
+@router.post("/{task_id}/stop", status_code=202)
+async def stop_task(task_id: str, user=Depends(get_current_user)):
+    """Signal a running task to halt by sending a halt event to its workflow."""
+    from app.core import event_bus
+
+    te = await TaskExecution.get(parse_doc_id(task_id))
+    if not te:
+        raise HTTPException(status_code=404, detail="Task not found")
+    wf = await Workflow.get(parse_doc_id(te.workflow_id))
+    if not wf or wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your task")
+    if te.status not in ("running", "pending"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is not stoppable (status={te.status})",
+        )
+    await event_bus.set_halt(te.workflow_id)
+    return {"status": "halt_requested", "workflow_id": te.workflow_id}

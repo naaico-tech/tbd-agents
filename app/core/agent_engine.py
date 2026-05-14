@@ -26,9 +26,6 @@ from datetime import UTC, datetime
 from io import StringIO
 from urllib.parse import urlparse
 
-# Compatibility: UTC alias for Python 3.9-3.10 support
-UTC = UTC
-
 import httpx
 
 from app.config import settings

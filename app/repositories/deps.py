@@ -12,7 +12,8 @@ Usage example in a route::
         return await repo.find_all()
 
 The factory functions inspect ``DB_BACKEND`` at *request time* (via
-``get_db_backend()``) so the backend can be switched without restarting.
+``get_db_backend()``).  The backend is fixed at startup from the environment
+and cannot be changed without restarting the process.
 """
 from __future__ import annotations
 

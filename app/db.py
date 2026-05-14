@@ -29,7 +29,7 @@ def get_db_backend() -> str:
 async def init_db() -> None:
     """Initialise the configured database backend.
 
-    * ``db_backend = "postgres"`` → create all JSONB tables via SQLAlchemy.
+    * ``db_backend = "postgres"`` → create all structured (typed) tables via SQLAlchemy.
     * ``db_backend = "mongo"`` (default) → run Beanie / Motor initialisation.
     """
     if settings.db_backend == "postgres":

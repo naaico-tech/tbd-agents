@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # Database backend
     db_backend: str = "mongo"  # "mongo" or "postgres"
-    postgres_uri: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/tbd_agents"
+    postgres_uri: str = "postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents"
     postgres_db_name: str = "tbd_agents"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}

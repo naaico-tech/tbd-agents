@@ -9,7 +9,7 @@ operate the PostgreSQL backend.
 ## Overview
 
 By default TBD Agents uses **MongoDB** as its document store (the `qdrant` profile).
-The `pgvector` profile replaces MongoDB with **PostgreSQL 17**, using JSONB columns
+The `pgvector` profile replaces MongoDB with **PostgreSQL 16**, using JSONB columns
 to store the same document structures — and it reuses that **same** PostgreSQL instance
 for vector storage via the [pgvector](https://github.com/pgvector/pgvector) extension.
 
@@ -30,9 +30,9 @@ for vector storage via the [pgvector](https://github.com/pgvector/pgvector) exte
 
 | Feature | `qdrant` profile | `pgvector` profile |
 |---|---|---|
-| **Document store** | MongoDB 7 | PostgreSQL 17 (JSONB) |
+| **Document store** | MongoDB 7 | PostgreSQL 16 (JSONB) |
 | **Vector store** | Qdrant | pgvector extension |
-| **Services needed** | 2 (`mongodb` + `qdrant`) | 1 (`postgres` with pgvector) |
+| **Services needed** | 2 (`mongodb` + `qdrant`) | 1 (`pgvector` with pgvector) |
 | **Data backup** | `mongodump` + Qdrant snapshot | `pg_dump` only |
 | **Migrations** | Beanie (schema-less) | Alembic |
 | **Recommended for** | Existing MongoDB users | New deployments, Kubernetes, simplicity |
@@ -47,7 +47,7 @@ for vector storage via the [pgvector](https://github.com/pgvector/pgvector) exte
 COMPOSE_PROFILES=pgvector
 VECTOR_STORE_BACKEND=pgvector
 DB_BACKEND=postgres
-POSTGRES_URI=postgresql+asyncpg://postgres:postgres@postgres:5432/tbd_agents
+POSTGRES_URI=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
 ```
 
 ### 2. Start services
@@ -56,7 +56,7 @@ POSTGRES_URI=postgresql+asyncpg://postgres:postgres@postgres:5432/tbd_agents
 docker compose up -d
 ```
 
-This starts a single `postgres` container with the pgvector extension pre-installed.
+This starts a single `pgvector` container with the pgvector extension pre-installed.
 No MongoDB, no Qdrant.
 
 ### 3. Apply database migrations
@@ -68,7 +68,7 @@ docker compose exec app alembic upgrade head
 ### 4. Verify
 
 ```bash
-docker compose ps          # postgres should be Up
+docker compose ps          # pgvector should be Up
 docker compose exec app alembic current   # should show head revision
 ```
 
@@ -79,7 +79,7 @@ docker compose exec app alembic current   # should show head revision
 | Variable | Default | Description |
 |---|---|---|
 | `DB_BACKEND` | `mongo` | Document store backend: `mongo` or `postgres` |
-| `POSTGRES_URI` | `postgresql+asyncpg://postgres:postgres@postgres:5432/tbd_agents` | Async-compatible PostgreSQL connection string (uses `asyncpg` driver) |
+| `POSTGRES_URI` | `postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents` | Async-compatible PostgreSQL connection string (uses `asyncpg` driver) |
 | `POSTGRES_DB_NAME` | `tbd_agents` | PostgreSQL database name |
 | `COMPOSE_PROFILES` | _(none)_ | Docker Compose profile: `qdrant` or `pgvector` |
 | `VECTOR_STORE_BACKEND` | `qdrant` | Vector store backend: `qdrant` or `pgvector` — must match `COMPOSE_PROFILES` |
@@ -168,7 +168,9 @@ alembic history --verbose
 alembic downgrade -1
 
 # Generate a new migration after changing a model
-alembic revision --autogenerate -m "describe_your_change"
+# Note: autogenerate is not configured (target_metadata = None in alembic/env.py).
+# Write the migration manually after creating the file.
+alembic revision -m "describe_your_change"
 ```
 
 > **Tip:** Migrations are idempotent — running `upgrade head` on an already-migrated
@@ -189,25 +191,32 @@ to `pgvector`, use the provided migration script.
 ### Run the migration
 
 ```bash
+# Connection info is read from environment variables
+# (MONGO_URI, MONGO_DB_NAME, POSTGRES_URI) with sensible defaults.
+MONGO_URI=mongodb://localhost:27017 \
+MONGO_DB_NAME=tbd_agents \
+POSTGRES_URI=postgresql://postgres:postgres@localhost:5432/tbd_agents \
 python scripts/migrate_mongo_to_postgres.py \
-  --mongo-uri    mongodb://localhost:27017 \
-  --mongo-db     copilot_agent_hub \
-  --postgres-uri postgresql://postgres:postgres@localhost:5432/tbd_agents \
-  [--dry-run]                              # preview without writing any data
-  [--collections agents,skills,memories]  # migrate specific collections only
+  [--dry-run]             # preview without writing any data
+  [--collection NAME]     # migrate one specific collection (default: all 15)
+  [--batch-size N]        # documents per INSERT batch (default: 500)
+  [--verbose]             # print per-batch progress
 ```
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Print what would be migrated without touching PostgreSQL |
-| `--collections` | Comma-separated list of collections to migrate (default: all 15) |
+| `--collection NAME` | Migrate only the named collection (default: all 15) |
+| `--batch-size N` | Number of documents per INSERT batch (default: 500) |
+| `--verbose` | Print progress after each batch |
 
 ### Verify the migration
 
 ```bash
+# Set env vars first (script reads them automatically):
+#   MONGO_URI, MONGO_DB_NAME, POSTGRES_URI
 python scripts/verify_migration.py \
-  --mongo-uri    mongodb://localhost:27017 \
-  --postgres-uri postgresql://postgres:postgres@localhost:5432/tbd_agents
+  [--collection agents]    # verify a single named collection (default: all 15)
 ```
 
 The verification script compares document counts per collection and reports any
@@ -322,12 +331,12 @@ docker compose exec pgvector \
 
 | Symptom | Likely Cause | Fix |
 |---|---|---|
-| `connection refused` on startup | PostgreSQL not running or wrong profile active | Verify `COMPOSE_PROFILES=pgvector` in `.env`; run `docker compose ps` to confirm the `postgres` container is `Up` |
+| `connection refused` on startup | PostgreSQL not running or wrong profile active | Verify `COMPOSE_PROFILES=pgvector` in `.env`; run `docker compose ps` to confirm the `pgvector` container is `Up` |
 | `relation "agents" does not exist` | Tables have not been created | Run `alembic upgrade head` inside the app container |
 | `column "X" does not exist` | asyncpg type mismatch or column name wrong | Confirm the column name matches the typed schema; ensure `json_serializer` / `json_deserializer` are set in the SQLAlchemy engine config (see `app/db.py`) |
 | App still reads/writes MongoDB | `DB_BACKEND` not set to `postgres` | Add `DB_BACKEND=postgres` to `.env` and restart the app |
 | Slow queries on foreign-key-like columns | Missing B-tree index | Run `CREATE INDEX CONCURRENTLY idx_<table>_<col> ON <table> (<col>);` — no downtime required |
-| pgvector extension not found | PostgreSQL image without pgvector | Use the `pgvector/pgvector:pg17` image (configured automatically by the `pgvector` compose profile) |
+| pgvector extension not found | PostgreSQL image without pgvector | Use the `pgvector/pgvector:pg16` image (configured automatically by the `pgvector` compose profile) |
 | Migration script fails with permission errors | PostgreSQL user lacks `CREATE` privilege | Grant superuser or `CREATE ON DATABASE` to the connection user |
 
 ---

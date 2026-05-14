@@ -149,7 +149,7 @@ The deployment profile controls both the vector store **and** the document/data 
 | Profile | Document Store | Vector Store | Services |
 |---|---|---|---|
 | `qdrant` | MongoDB 7 | Qdrant | 2 services (`mongodb` + `qdrant`) |
-| `pgvector` | PostgreSQL 17 (JSONB) | pgvector extension | 1 service (`postgres`) |
+| `pgvector` | PostgreSQL 16 (JSONB) | pgvector extension | 1 service (`pgvector`) |
 
 Use the `pgvector` profile to run a fully-PostgreSQL stack — one database for everything,
 backed up with a single `pg_dump`.
