@@ -920,6 +920,10 @@ class TestMemorySTM:
             mock_redis.delete.assert_awaited_once_with("stm:a1")
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        __import__("os").environ.get("DB_BACKEND") == "postgres",
+        reason="warmup_all_agents uses MongoDB Motor aggregation; not applicable for PostgreSQL backend",
+    )
     async def test_warmup_all_agents(self):
         from app.services import memory_stm
 

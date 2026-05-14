@@ -22,7 +22,7 @@ def test_agent_model_has_custom_tool_ids():
     from unittest.mock import MagicMock, patch
 
     from app.models.agent import Agent
-    with patch.object(Agent, "get_motor_collection", return_value=MagicMock()):
+    with patch.object(Agent, "get_motor_collection", return_value=MagicMock(), create=True):
         agent = Agent(
             name="Test",
             description="",
@@ -36,7 +36,7 @@ def test_agent_model_custom_tool_ids_defaults_empty():
     from unittest.mock import MagicMock, patch
 
     from app.models.agent import Agent
-    with patch.object(Agent, "get_motor_collection", return_value=MagicMock()):
+    with patch.object(Agent, "get_motor_collection", return_value=MagicMock(), create=True):
         agent = Agent(name="NoTools", description="", system_prompt=".")
     assert agent.custom_tool_ids == []
 
@@ -92,7 +92,7 @@ def test_custom_tool_model_fields():
     from unittest.mock import MagicMock, patch
 
     from app.models.custom_tool import CustomTool
-    with patch.object(CustomTool, "get_motor_collection", return_value=MagicMock()):
+    with patch.object(CustomTool, "get_motor_collection", return_value=MagicMock(), create=True):
         tool = CustomTool(
             name="echo",
             description="An echo tool",
@@ -110,7 +110,7 @@ def test_custom_tool_defaults():
     from unittest.mock import MagicMock, patch
 
     from app.models.custom_tool import CustomTool
-    with patch.object(CustomTool, "get_motor_collection", return_value=MagicMock()):
+    with patch.object(CustomTool, "get_motor_collection", return_value=MagicMock(), create=True):
         tool = CustomTool(name="bare", source_code="def bare(): pass")
     assert tool.description == ""
     assert tool.parameters_schema == {}
