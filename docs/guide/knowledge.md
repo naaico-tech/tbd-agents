@@ -76,7 +76,7 @@ curl -X POST http://localhost:8000/api/knowledge-sources \
 
 To use a Qdrant source you need a running Qdrant instance. Start one with the
 bundled Compose profile by setting `COMPOSE_PROFILES=qdrant` in your `.env`,
-then running `docker compose up`. See [Choosing a Vector Store](../../README.md#choosing-a-vector-store)
+then running `docker compose up`. See [Choosing a Vector Store](pgvector.md#quick-start-with-docker)
 for the full profile-selection pattern.
 
 **connection_config fields for `vector_db`:**
