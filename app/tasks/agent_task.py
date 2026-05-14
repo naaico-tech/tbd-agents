@@ -81,8 +81,12 @@ async def _mark_failed(workflow_id: str, task_execution_id: str | None = None):
             WorkflowStatus.FAILED,
             WorkflowStatus.HALTED,
             WorkflowStatus.MAX_TURNS_REACHED,
+            WorkflowStatus.ACTIVE,
         ):
-            wf.status = WorkflowStatus.FAILED
+            # Reset from RUNNING back to ACTIVE and publish the failure over SSE.
+            # TaskExecution already records the failure detail — the workflow itself
+            # should remain reusable (not stuck in FAILED/RUNNING).
+            wf.status = WorkflowStatus.ACTIVE
             await wf.save()
             await event_bus.publish(
                 workflow_id, "status", {"status": "failed", "current_turn": wf.current_turn}

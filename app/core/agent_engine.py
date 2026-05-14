@@ -209,12 +209,23 @@ async def _log(
     )
 
 
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "halted", "max_turns_reached"})
+
+
 async def _publish_status(workflow: Workflow, status: str | None = None) -> None:
-    """Publish a status change to SSE subscribers."""
+    """Publish a status change to SSE subscribers.
+
+    For terminal statuses (completed/failed/halted/max_turns_reached) the
+    workflow.status is reset to ACTIVE so the workflow is immediately reusable.
+    Individual task outcomes are tracked in TaskExecution records.
+    """
+    effective = status or "running"
+    if effective in _TERMINAL_STATUSES:
+        workflow.status = WorkflowStatus.ACTIVE
     await event_bus.publish(
         str(workflow.id),
         "status",
-        {"status": status or "running", "current_turn": workflow.current_turn},
+        {"status": effective, "current_turn": workflow.current_turn},
     )
 
 
@@ -3228,6 +3239,7 @@ async def run_agent(
 
     # Log prompt and publish running status for SSE
     await _log(workflow, "prompt_received", user_prompt[:200], task_exec)
+    workflow.status = WorkflowStatus.RUNNING
     await _publish_status(workflow, "running")
 
     # Append user message
