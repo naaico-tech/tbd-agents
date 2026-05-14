@@ -10,7 +10,7 @@ An agent combines three things:
 
 - **System prompt** — defines the agent's personality, domain expertise, and behavioural constraints
 - **Model** — which Copilot-supported model to use (e.g. `gpt-4.1`, `o3-mini`, `claude-sonnet-4.5`)
-- **MCP servers** — which tool servers the agent has access to (by ID or tags)
+- **Tool and context access** — MCP servers, custom tools, built-in tools, providers, and knowledge sources selected by ID or tags
 
 Create as many agents as you need — a code reviewer, an incident responder, a documentation writer — each with their own configuration. Agents are reusable across workflows.
 
@@ -27,7 +27,10 @@ curl -X POST http://localhost:8000/api/agents \
     "system_prompt": "You are an SRE investigating production incidents. Use Datadog to gather metrics and logs, then create a Jira ticket with your findings.",
     "model": "gpt-4.1",
     "mcp_server_ids": ["<DATADOG_MCP_ID>", "<JIRA_MCP_ID>"],
-    "mcp_server_tags": ["observability", "ticketing"]
+    "mcp_server_tags": ["observability", "ticketing"],
+    "knowledge_source_ids": ["<RUNBOOK_SOURCE_ID>"],
+    "knowledge_tags": ["production"],
+    "builtin_tools": ["bash", "read", "grep", "web_fetch"]
   }'
 ```
 
@@ -46,6 +49,11 @@ curl -X POST http://localhost:8000/api/agents \
 | `custom_tool_ids` | string[] | IDs of Custom Python Tools to mount on this agent |
 | `builtin_tools` | string[] | Built-in tool names to enable (e.g. `bash`, `read`) |
 | `provider_id` | string | Optional BYOK provider ID |
+| `tool_definitions` | object[] | Additional provider-compatible tool definitions |
+| `knowledge_source_ids` | string[] | Explicit knowledge source IDs for retrieval |
+| `knowledge_tags` | string[] | Tag-based knowledge source/item matching |
+
+The Flutter Agent dialog exposes name, description, system prompt, model, provider, MCP servers, custom tools, knowledge sources, built-in tools, MCP tags, and knowledge tags. Built-in tools include `bash`, `read`, `write`, `edit`, `glob`, `grep`, `web_fetch`, and `web_search`.
 
 ---
 

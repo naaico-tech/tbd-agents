@@ -284,14 +284,21 @@ The **permission handler** enforces max turns by counting tool calls and returni
 └─────────────────────────────────────────────────────────────┘
 ```
 
-TBD Agent ships with a built-in single-page dashboard at `/dashboard` that provides:
+TBD Agent ships with a Flutter dashboard at `/dashboard` that provides:
 
-- 📊 **Overview** — agent, MCP server, skill, and workflow counts
-- 🤖 **Agent management** — create, edit, delete agents; assign MCP servers
-- 🔧 **MCP management** — register servers, test connections
+- 📊 **Overview** — agent, MCP server, skill, workflow, and task status
+- 🤖 **Agent management** — create, edit, delete agents; assign MCP servers, custom tools, built-in tools, providers, and knowledge
+- 🔧 **MCP management** — register, update, test, inspect, and restrict MCP servers/tools
+- 🧰 **Custom tools** — view bundled/user tools, inspect schemas, and map token-backed environment variables
 - 🧩 **Skill management** — create and manage instruction modules
-- ⚙️ **Workflow management** — create workflows with infinite session settings
-- ▶️ **Run Task** — select a workflow, type a prompt, and watch the agent work in real-time with streaming logs, token-by-token responses, and live usage metrics
+- 🧠 **Knowledge** — manage knowledge source/item forms and API-backed records
+- 🛡️ **Guardrails** — configure prompt, request, and output policies
+- 🔐 **Tokens and providers** — manage encrypted credentials and BYOK providers
+- ⚙️ **Workflow management** — configure skills, guardrails, memory, repo, reasoning, and webhook settings
+- ⏱️ **Scheduled agents** — run workflow prompts on a recurring cadence
+- ▶️ **Run Task** — select a workflow, type a prompt, optionally set reasoning effort, and start asynchronous execution
+- 📜 **Task executions** — inspect history, logs, usage, details, progress, and stop active runs
+- 💬 **Chat** — stream conversational messages with a selected agent
 
 ---
 

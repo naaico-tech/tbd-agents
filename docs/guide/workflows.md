@@ -17,6 +17,11 @@ A workflow combines:
 | **Infinite session** | Enable/disable automatic context compaction |
 | **Caveman** | Enable terse responses + compressed injected context |
 | **Skills** | Installed instruction modules |
+| **Guardrails** | Prompt/request/output policies by ID or tag |
+| **Reasoning effort** | Optional `low`, `medium`, or `high` model hint |
+| **Memory controls** | Bypass memory, auto memory extraction, and infinite-session behaviour |
+| **Repository context** | Optional repo URL, branch, and token name for checkout-enabled workflows |
+| **Webhooks** | Success and error callbacks |
 
 Workflows persist their full state: messages, logs, usage stats, and status.
 
@@ -32,10 +37,23 @@ curl -X POST http://localhost:8000/api/workflows \
     "agent_id": "<AGENT_ID>",
     "max_turns": 10,
     "output_format": "markdown",
+    "reasoning_effort": "medium",
+    "skill_tags": ["incident"],
+    "guardrail_tags": ["safe-output"],
     "infinite_session": true,
-    "caveman": true
+    "bypass_memory": false,
+    "auto_memory": true,
+    "tsv_tool_results": false,
+    "caveman": true,
+    "repo_url": "https://github.com/example/service",
+    "repo_branch": "main",
+    "repo_token_name": "github-token",
+    "webhook_url": "https://hooks.example.com/success",
+    "error_webhook_url": "https://hooks.example.com/error"
   }'
 ```
+
+The Flutter workflow form supports title, agent, model override, max turns, skills and skill tags, guardrails and guardrail tags, output format, reasoning effort, active/inactive status, infinite session, bypass/auto memory, TSV tool results, caveman mode, credential overrides, repository settings, and webhook URLs.
 
 ---
 

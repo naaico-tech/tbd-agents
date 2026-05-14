@@ -140,10 +140,10 @@ curl -X GET http://localhost:8000/api/knowledge-sources/<KS_ID>/export \
     {
       "name": "runbooks",
       "description": "Internal runbook vector store",
-      "source_type": "mongodb_vector",
+      "source_type": "vector_db",
       "connection_config": {
-        "collection": "runbooks",
-        "index_name": "vector_index"
+        "url": "http://qdrant:6333",
+        "collection": "runbooks"
       },
       "tags": ["ops"]
     }
@@ -306,6 +306,6 @@ The full bundle import (`POST /api/import`) returns a result per resource type:
 ## Flutter UI
 
 !!! tip "EXPORT / IMPORT buttons in the UI"
-    Every resource list screen (Skills, Agents, Workflows, Knowledge Sources) has
-    **EXPORT** and **IMPORT** buttons in the top-right corner. These call the same
-    endpoints and handle the file picker/download automatically — no curl required.
+    The current Flutter UI exposes **EXPORT** and **IMPORT** buttons for Skills,
+    Agents, and Workflows. Knowledge source import/export endpoints are available
+    through the API for automation, but are not exposed on every dashboard screen.

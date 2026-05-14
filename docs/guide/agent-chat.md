@@ -17,6 +17,11 @@ chat is a **pure conversational interface**:
 - ✅ Streams responses token-by-token via SSE
 - ❌ Does **not** execute tools or trigger workflows
 
+!!! note "Current Flutter UI"
+    The Chat page currently exposes an agent selector, streaming messages for the
+    active in-memory conversation, and a clear-conversation action. Session list,
+    history inspection, and deletion are available through the API endpoints below.
+
 ---
 
 ## What can I ask?

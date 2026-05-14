@@ -8,6 +8,8 @@
 | `PUT` | `/api/custom-tools/{id}` | Update a custom tool |
 | `DELETE` | `/api/custom-tools/{id}` | Delete a custom tool |
 | `POST` | `/api/custom-tools/{id}/run` | Ad-hoc test run |
+| `GET` | `/api/custom-tools/{id}/env-mapping` | Get token mapping for required environment variables |
+| `PUT` | `/api/custom-tools/{id}/env-mapping` | Map required environment variables to stored token names |
 | `POST` | `/api/custom-tools/validate` | Validate source (no save) |
 | `POST` | `/api/custom-tools/upload` | Upload a `.py` file |
 
@@ -141,6 +143,28 @@ POST /api/custom-tools/{id}/run
 | `200` | Execution completed (check `success` flag for tool-level errors) |
 | `404` | Tool not found |
 | `409 Conflict` | Tool is disabled |
+
+---
+
+## Environment Token Mapping
+
+Bundled plugins and user-defined tools can declare `env_config` requirements. Use the mapping endpoints to bind those environment variables to encrypted token names without storing secrets in tool source.
+
+```
+GET /api/custom-tools/{id}/env-mapping
+PUT /api/custom-tools/{id}/env-mapping
+```
+
+```json
+{
+  "env_mapping": {
+    "DATADOG_API_KEY": "datadog-api-key",
+    "DATADOG_APP_KEY": "datadog-app-key"
+  }
+}
+```
+
+Tool responses include `env_config` when a tool declares environment requirements and `is_plugin` when the tool is loaded from the plugin system.
 
 ---
 

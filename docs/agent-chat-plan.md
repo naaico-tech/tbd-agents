@@ -1,4 +1,7 @@
-# Agent Chat Feature — Plan
+# Agent Chat Feature — Implementation Notes
+
+!!! note
+    This page is a maintainer-oriented implementation note. For user-facing chat behavior and API usage, see [Agent Chat](guide/agent-chat.md).
 
 ## Overview
 

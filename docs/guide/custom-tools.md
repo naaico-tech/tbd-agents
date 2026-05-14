@@ -84,6 +84,13 @@ def weather(city: str, units: str = "metric") -> dict:
 
 Both routes validate the source code and infer the JSON Schema before saving.
 
+!!! note "Dashboard coverage"
+    The current Flutter Custom Tools page focuses on operations and credential
+    mapping: it lists bundled plugins and user-defined tools, shows enabled state,
+    schema/parameter counts, environment requirements, and lets you map stored
+    tokens to required environment variables. Creating, uploading, editing, and
+    deleting custom Python tools are API workflows.
+
 **Response:** `201 Created`
 
 ```json
@@ -221,6 +228,26 @@ curl -X DELETE http://localhost:8000/api/custom-tools/<TOOL_ID> \
 ```
 
 **Response:** `204 No Content`
+
+---
+
+## Mapping Token-backed Environment Variables
+
+Tools and bundled plugins can declare required environment variables through `env_config`. Use the API or the dashboard's **MAP TOKENS** action to map those variables to encrypted token names:
+
+```bash
+curl -X PUT http://localhost:8000/api/custom-tools/<TOOL_ID>/env-mapping \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "env_mapping": {
+      "DATADOG_API_KEY": "datadog-api-key",
+      "DATADOG_APP_KEY": "datadog-app-key"
+    }
+  }'
+```
+
+At runtime, the tool receives resolved environment variables without exposing token values in tool configuration or API responses.
 
 ---
 

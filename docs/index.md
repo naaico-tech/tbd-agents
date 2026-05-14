@@ -28,7 +28,7 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
     ---
 
-    Learn about agents, MCP tools, skills, workflows, and streaming.
+    Learn about the dashboard, agents, MCP tools, skills, workflows, tasks, memory, and streaming.
 
     [:octicons-arrow-right-24: Guide](guide/index.md)
 
@@ -80,6 +80,10 @@ Build, control, and trigger custom AI agents over the web — no black boxes, no
 
     Prompt and request guardrails enforce safety policies before agent execution begins.
 
+-   :material-database-cog:{ .lg .middle } **Flexible Storage**
+
+    Use MongoDB or PostgreSQL for documents, and Qdrant or pgvector for semantic retrieval.
+
 </div>
 
 ---
@@ -97,8 +101,9 @@ graph LR
     Worker -->|Publish Events| Redis
     Redis -->|Subscribe| API
     API -->|SSE Stream| Client
-    Worker -->|Persist| Mongo[(MongoDB)]
-    API -->|Read/Write| Mongo
+    Worker -->|Persist| Store[(MongoDB or PostgreSQL)]
+    API -->|Read/Write| Store
+    Worker -->|Semantic recall| Vector[(Qdrant or pgvector)]
 ```
 
 ---

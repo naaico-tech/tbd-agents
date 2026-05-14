@@ -70,16 +70,10 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Create a `.github/CODEOWNERS` file:
+This repository already includes `.github/CODEOWNERS` with `@naaico-tech/maintainers` as the default owner. Update that file if team names change:
 
 ```
-# Default owners for everything
-* @your-github-username
-
-# Specific paths (optional)
-# app/core/     @core-team
-# docs/         @docs-team
-# observability/ @platform-team
+* @naaico-tech/maintainers
 ```
 
 When a PR touches files matching a pattern, the specified owners are automatically requested for review.
@@ -129,7 +123,7 @@ Since the repo is public, anyone can:
 
 1. 🍴 **Fork** the repository to their account
 2. 🌿 Create a branch and make changes
-3. 📬 Open a **Pull Request** back to your `main` branch
+3. 📬 Open a **Pull Request** back to your `master` branch
 4. ⏳ Wait for your review and CI checks
 
 You (maintainers) control:
@@ -159,15 +153,21 @@ You (maintainers) control:
  └──────────────────────────────────────┴────────────────────────────────────────────────────┘
 ```
 
-Recommended CI workflow (`.github/workflows/ci.yml`):
+This repository currently uses these GitHub Actions workflows:
+
+- `.github/workflows/integration-tests.yml`
+- `.github/workflows/docs.yml`
+- `.github/workflows/release.yml`
+
+They target `master` for push/publish flows. If you add another CI workflow, keep branch names aligned:
 
 ```yaml
 name: CI
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   test:
@@ -273,8 +273,8 @@ Create a GitHub Release from the tag with a changelog summarizing what changed.
  ╠═══════════════════════════════════════════════════════════╣
  ║                                                           ║
  ║  [ ] Repository set to Public                             ║
- ║  [ ] Branch protection on main with required reviews      ║
- ║  [ ] CODEOWNERS file created                              ║
+ ║  [ ] Branch protection on master with required reviews    ║
+ ║  [ ] CODEOWNERS points at @naaico-tech/maintainers        ║
  ║  [ ] Collaborator roles assigned (Admin = owners only)    ║
  ║  [ ] GitHub Actions CI workflow added                     ║
  ║  [ ] Security features enabled (Dependabot, scanning)     ║

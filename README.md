@@ -117,8 +117,8 @@ Your GitHub PAT needs the `copilot` scope — [create one here](https://github.c
 
 | URL | Description |
 |---|---|
-| `http://localhost:8000/dashboard` | Legacy UI |
-| `http://localhost:8000/dashboard-new-ui` | New Flutter UI |
+| `http://localhost:8000/dashboard` | Flutter UI |
+| `http://localhost:8000/dashboard-legacy` | Legacy UI |
 | `http://localhost:8000/docs` | Swagger / API docs |
 | `http://localhost:8000/api` | API base path |
 

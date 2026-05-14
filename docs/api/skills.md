@@ -7,6 +7,9 @@
 | `GET` | `/api/skills/{id}` | Get skill |
 | `PUT` | `/api/skills/{id}` | Update skill |
 | `DELETE` | `/api/skills/{id}` | Delete skill |
+| `GET` | `/api/skills/export` | Export all skills |
+| `GET` | `/api/skills/{id}/export` | Export one skill |
+| `POST` | `/api/skills/import` | Import skills |
 
 ---
 

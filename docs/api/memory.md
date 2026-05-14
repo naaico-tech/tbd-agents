@@ -10,6 +10,7 @@
 | `PUT` | `/api/memories/{id}` | Update memory |
 | `DELETE` | `/api/memories/{id}` | Delete memory |
 | `POST` | `/api/memories/search` | Search memories by keyword |
+| `GET` | `/api/memories/stm/{agent_id}` | Inspect Redis short-term memory for an agent |
 
 ---
 
@@ -141,3 +142,13 @@ Searches across `key` and `value` fields using keyword matching. `scope` and `li
 ### Response (200)
 
 Returns an array of matching memory objects, sorted by most recently updated.
+
+---
+
+## Inspect Short-Term Memory
+
+```
+GET /api/memories/stm/{agent_id}
+```
+
+Returns the current Redis short-term memory entries cached for an agent. Long-term memory is still managed through the CRUD and search endpoints above.

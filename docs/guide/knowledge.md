@@ -66,7 +66,7 @@ curl -X POST http://localhost:8000/api/knowledge-sources \
   -H "Content-Type: application/json" \
   -d '{
     "name": "product-docs",
-    "type": "vector_db",
+    "source_type": "vector_db",
     "connection_config": {"url": "http://qdrant:6333", "collection": "docs"},
     "tags": ["documentation"]
   }'
@@ -102,7 +102,7 @@ curl -X POST http://localhost:8000/api/knowledge-sources \
   -H "Content-Type: application/json" \
   -d '{
     "name": "secure-vectors",
-    "type": "vector_db",
+    "source_type": "vector_db",
     "connection_config": {
       "url": "https://qdrant.example.com:6333",
       "collection": "embeddings",
@@ -122,7 +122,7 @@ curl -X POST http://localhost:8000/api/knowledge-sources \
   -H "Content-Type: application/json" \
   -d '{
     "name": "internal-docs",
-    "type": "mongo_db",
+    "source_type": "mongo_db",
     "tags": ["internal"]
   }'
 ```
@@ -156,7 +156,8 @@ curl -X POST http://localhost:8000/api/knowledge-items \
   -H "Content-Type: application/json" \
   -d '{
     "source_id": "<SOURCE_ID>",
-    "content": "Our SLA guarantees 99.9% uptime for production services.",
+    "name": "SLA summary",
+    "text_content": "Our SLA guarantees 99.9% uptime for production services.",
     "tags": ["sla", "production"]
   }'
 ```
@@ -214,9 +215,11 @@ Items whose `tags` overlap with the agent or workflow tags are fetched directly 
 </knowledge>
 ```
 
-### 2. Vector scroll (Qdrant sources)
+### 2. Semantic or scroll retrieval (Qdrant sources)
 
-For each `vector_db` source attached to the agent, the engine calls `query_vector_db()` which uses Qdrant's scroll API to retrieve up to 20 documents with their payloads. Each result's `text` payload field is wrapped in an XML `<item>` element:
+For each `vector_db` source attached to the agent, the engine calls Qdrant. When a query is available and `EMBEDDINGS_ENABLED=true`, Qdrant uses semantic `query_points` against the configured collection. If no query vector is available, embeddings are disabled, or semantic search fails, the engine falls back to scroll-style retrieval and reads document text from payload fields.
+
+Each result's text payload is wrapped in an XML `<item>` element:
 
 ```xml
 <knowledge>
@@ -226,8 +229,15 @@ For each `vector_db` source attached to the agent, the engine calls `query_vecto
 </knowledge>
 ```
 
-!!! note "Phase 1 Limitation"
-    The current implementation uses Qdrant **scroll** (not semantic search). Full embedding-based search with query vectors will be added in a future release.
+### 3. pgvector sources
+
+`pgvector` knowledge sources call the pgvector query path. Per-source pgvector retrieval expects LangChain-style tables named `langchain_pg_embedding_{collection}` in the database referenced by the source `connection_config`.
+
+### Current Flutter UI
+
+The Flutter Knowledge page exposes user-facing source kinds such as `text`, `url`, `file`, `git`, and `database` with fields for name, description, source type, and tags. These are UI-level source categories. API automation should still use the backend `source_type` values documented above: `vector_db`, `mongo_db`, and `pgvector`.
+
+The current UI item form supports title/content-style text records. Multipart file upload and GridFS download remain available through the REST API even if they are not exposed in every dashboard flow.
 
 ### Context injection
 

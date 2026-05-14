@@ -10,6 +10,9 @@
 | `PUT` | `/api/knowledge-sources/{id}` | Update source |
 | `DELETE` | `/api/knowledge-sources/{id}` | Delete source (cascade-deletes items) |
 | `POST` | `/api/knowledge-sources/{id}/test` | Test connection |
+| `GET` | `/api/knowledge-sources/export` | Export all knowledge sources |
+| `GET` | `/api/knowledge-sources/{id}/export` | Export one knowledge source |
+| `POST` | `/api/knowledge-sources/import` | Import knowledge sources |
 
 ### Register Source
 
@@ -20,13 +23,28 @@ POST /api/knowledge-sources
 ```json
 {
   "name": "product-docs",
-  "type": "vector_db",
+  "source_type": "vector_db",
   "connection_config": {"url": "http://qdrant:6333", "collection": "docs"},
   "tags": ["documentation"]
 }
 ```
 
-Source types: `vector_db`, `mongo_db`.
+Source types: `vector_db`, `mongo_db`, `pgvector`.
+
+For per-source pgvector retrieval use:
+
+```json
+{
+  "name": "postgres-docs",
+  "description": "Documentation embeddings in PostgreSQL",
+  "source_type": "pgvector",
+  "connection_config": {
+    "dsn": "postgresql+asyncpg://user:pass@host:5432/dbname",
+    "collection": "docs"
+  },
+  "tags": ["documentation"]
+}
+```
 
 ---
 
@@ -52,10 +70,13 @@ POST /api/knowledge-items
 ```json
 {
   "source_id": "<SOURCE_ID>",
-  "content": "Our SLA guarantees 99.9% uptime.",
+  "name": "SLA summary",
+  "text_content": "Our SLA guarantees 99.9% uptime.",
   "tags": ["sla", "production"]
 }
 ```
+
+`content_type` defaults to `text`; file and image content should use the upload endpoint.
 
 ### Upload File
 

@@ -7,6 +7,9 @@
 | `GET` | `/api/agents/{id}` | Get agent |
 | `PUT` | `/api/agents/{id}` | Update agent |
 | `DELETE` | `/api/agents/{id}` | Delete agent |
+| `GET` | `/api/agents/export` | Export all agents |
+| `GET` | `/api/agents/{id}/export` | Export one agent |
+| `POST` | `/api/agents/import` | Import agents |
 
 ---
 
@@ -25,6 +28,9 @@ POST /api/agents
   "mcp_server_ids": ["<MCP_ID>"],
   "mcp_server_tags": ["observability", "ticketing"],
   "custom_tool_ids": ["<TOOL_ID>"],
+  "builtin_tools": ["bash", "read", "grep", "web_fetch"],
+  "knowledge_source_ids": ["<SOURCE_ID>"],
+  "knowledge_tags": ["runbook"],
   "provider_id": null
 }
 ```
@@ -45,7 +51,12 @@ POST /api/agents
 | `mcp_server_tags` | string[] | Tag-based MCP server resolution |
 | `custom_tool_ids` | string[] | IDs of Custom Python Tools mounted on this agent |
 | `builtin_tools` | string[] | Platform built-in tool names |
+| `tool_definitions` | object[] | Additional provider-compatible tool definitions |
+| `knowledge_source_ids` | string[] | Explicit knowledge source IDs |
+| `knowledge_tags` | string[] | Tag-based knowledge matching |
 | `provider_id` | string \| null | BYOK provider ID; `null` for GitHub Copilot SDK |
+
+Resource-specific import/export endpoints mirror the system import/export API. See [Import & Export](import-export.md).
 
 ---
 

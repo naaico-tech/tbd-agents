@@ -26,6 +26,7 @@ All endpoints (except `/health`) require an `Authorization: Bearer <GITHUB_TOKEN
 -   **[Tokens](tokens.md)** — Encrypted token storage
 -   **[Guardrails](guardrails.md)** — Safety policy enforcement
 -   **[Tasks](tasks.md)** — Task execution history
+-   **[Scheduled Agents](scheduled-agents.md)** — Recurring workflow prompts
 -   **[Models](models.md)** — Available model listing
 -   **[Import & Export](import-export.md)** — JSON bundle backup and restore
 

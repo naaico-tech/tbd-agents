@@ -57,7 +57,7 @@ graph LR
 
 ## Dashboard Integration Boundary
 
-The new Flutter dashboard is served from `/dashboard-new-ui`, while the legacy static dashboard remains available at `/dashboard` (and `/dashboard-legacy` as an alias). Its backend contract is already cleanly separated behind REST + streaming endpoints under `/api`.
+The Flutter dashboard is served from `/dashboard`, while the legacy static dashboard remains available at `/dashboard-legacy`. Its backend contract is already cleanly separated behind REST + streaming endpoints under `/api`.
 
 - CRUD resources: agents, MCP servers, custom tools, skills, knowledge sources/items, guardrails, tokens, providers, workflows, memories, and scheduled agents
 - Execution surfaces: `POST /api/workflows/{id}/prompt`, `POST /api/workflows/{id}/halt`, `GET /api/workflows/{id}/stream`, task history under `/api/tasks`

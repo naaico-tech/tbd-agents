@@ -19,6 +19,14 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: Agents](agents.md)
 
+-   :material-view-dashboard:{ .lg .middle } **Dashboard**
+
+    ---
+
+    Operate agents, workflows, credentials, guardrails, tasks, schedules, and chat from the Flutter UI.
+
+    [:octicons-arrow-right-24: Dashboard](dashboard.md)
+
 -   :wrench:{ .lg .middle } **MCP Tools**
 
     ---
@@ -59,6 +67,14 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: Knowledge Bases](knowledge.md)
 
+-   :material-brain:{ .lg .middle } **Agent Memory**
+
+    ---
+
+    Use STM, LTM, and semantic memory for persistent agent context.
+
+    [:octicons-arrow-right-24: Agent Memory](memory.md)
+
 -   :material-shield-check:{ .lg .middle } **Guardrails**
 
     ---
@@ -82,6 +98,30 @@ A deep dive into what TBD Agents offers and how each capability works.
     Write Python tool functions and lock them to specific agents.
 
     [:octicons-arrow-right-24: Custom Tools](custom-tools.md)
+
+-   :material-chat:{ .lg .middle } **Agent Chat**
+
+    ---
+
+    Chat with an agent over SSE without starting a workflow task.
+
+    [:octicons-arrow-right-24: Agent Chat](agent-chat.md)
+
+-   :material-format-list-checks:{ .lg .middle } **Tasks**
+
+    ---
+
+    Run workflows, inspect task executions, and stop active runs.
+
+    [:octicons-arrow-right-24: Tasks](tasks.md)
+
+-   :material-chart-line:{ .lg .middle } **Observability**
+
+    ---
+
+    Trace agent runs and monitor the application with OpenTelemetry.
+
+    [:octicons-arrow-right-24: Observability](observability.md)
 
 -   :material-database-export:{ .lg .middle } **Import & Export**
 

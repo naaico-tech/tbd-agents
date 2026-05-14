@@ -27,9 +27,13 @@ curl -X POST http://localhost:8000/api/guardrails \
   -d '{
     "name": "no-pii",
     "description": "Blocks prompts containing personally identifiable information",
-    "type": "prompt",
-    "config": {
-      "patterns": ["\\b\\d{3}-\\d{2}-\\d{4}\\b", "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"]
+    "guardrail_type": "prompt",
+    "tags": ["safety"],
+    "enabled": true,
+    "prompt_config": {
+      "forbidden_patterns": ["\\b\\d{3}-\\d{2}-\\d{4}\\b", "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"],
+      "required_patterns": [],
+      "max_length": 4000
     }
   }'
 ```
@@ -42,8 +46,14 @@ curl -X POST http://localhost:8000/api/guardrails \
 |---|---|---|
 | `name` | string | Unique name for the guardrail |
 | `description` | string | Human-readable description |
-| `type` | string | Guardrail type (e.g. `prompt`, `request`) |
-| `config` | object | Type-specific configuration |
+| `guardrail_type` | string | `prompt`, `request`, or `output` |
+| `tags` | string[] | Optional tags for workflow selection |
+| `enabled` | boolean | Enable/disable policy evaluation |
+| `prompt_config` | object | Prompt policy: `forbidden_patterns`, `required_patterns`, `max_length`, `min_length` |
+| `request_config` | object | Request policy with `json_schema` |
+| `output_config` | object | Output policy: patterns, `max_length`, `pii_detection`, `must_be_valid_json` |
+
+The Flutter Guardrails page exposes the same three guardrail types. Prompt and output guardrails support forbidden/required patterns and max length; output guardrails also support PII detection and valid JSON enforcement. Request guardrails validate against a JSON Schema.
 
 ---
 

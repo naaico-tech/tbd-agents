@@ -55,7 +55,7 @@ GITHUB_TOKEN=ghp_your_token_here
     | `qdrant` | 6333 | Vector store |
 
     !!! tip "Choose your vector store"
-        Qdrant starts by default. To start without any vector store (no semantic memory), simply omit `COMPOSE_PROFILES` from `.env`.
+        `.env.example` sets `COMPOSE_PROFILES=qdrant`, so Qdrant starts after copying it. To start without a vector store, remove or empty `COMPOSE_PROFILES` in your `.env`.
 
 === "PostgreSQL"
 
@@ -93,8 +93,8 @@ GITHUB_TOKEN=ghp_your_token_here
     ```
 
 !!! tip "Access points"
-    - **Flutter UI** — [http://localhost:8000/dashboard-new-ui](http://localhost:8000/dashboard-new-ui)
-    - **Legacy UI** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+    - **Flutter UI** — [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+    - **Legacy UI** — [http://localhost:8000/dashboard-legacy](http://localhost:8000/dashboard-legacy)
     - **Swagger UI** — [http://localhost:8000/docs](http://localhost:8000/docs)
     - **API base** — [http://localhost:8000/api](http://localhost:8000/api)
 

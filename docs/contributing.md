@@ -25,7 +25,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
 
 ### Submitting Pull Requests
 
-1. **Fork** the repository and create a branch from `main`:
+1. **Fork** the repository and create a branch from `master`:
     ```bash
     git checkout -b feature/your-feature-name
     ```
@@ -51,7 +51,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
     flutter pub get
     flutter analyze
     flutter test
-    flutter build web --release --base-href /dashboard-new-ui/
+    flutter build web --release --base-href /dashboard/
     ```
 
 5. **Run the linter:**
@@ -73,7 +73,7 @@ Be respectful and constructive. Harassment or abusive behavior will not be toler
     | `refactor:` | Code change (no fix, no feature) |
     | `chore:` | Maintenance tasks |
 
-7. **Push** and open a Pull Request against `main`.
+7. **Push** and open a Pull Request against `master`.
 
 ---
 
@@ -122,7 +122,7 @@ observability/      ← Grafana dashboards, Prometheus, Loki, Tempo
     docker-compose up --build
     ```
 - **MongoDB, Redis, and observability** services are included in the compose file.
-- **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard-new-ui`; use `/dashboard` for the legacy UI (`/dashboard-legacy` remains as a compatibility alias).
+- **Flutter dashboard** — the Docker image builds the web bundle and FastAPI serves it at `/dashboard`; use `/dashboard-legacy` for the legacy UI.
 - See [Local Setup](getting-started/local-setup.md) for bare-metal setup.
 
 ---

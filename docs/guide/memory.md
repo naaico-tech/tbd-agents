@@ -11,14 +11,16 @@ Memory uses a two-tier architecture for optimal performance:
 | Tier | Store | Purpose | Access speed |
 |---|---|---|---|
 | **STM** (Short-Term Memory) | Redis | Last N memories per agent, used for system prompt injection | Sub-millisecond |
-| **LTM** (Long-Term Memory) | MongoDB | Up to M memories per agent, queryable via API | Standard DB |
+| **LTM** (Long-Term Memory) | MongoDB or PostgreSQL document store | Up to M memories per agent, queryable via API | Standard DB |
+| **Semantic memory** | Qdrant or pgvector | Optional vector recall when embeddings are enabled | Similarity search |
 
 ### How the tiers interact
 
 1. **Writes** go to both MongoDB (LTM) and Redis (STM) simultaneously
-2. **Reads for context injection** hit Redis STM first; fall back to MongoDB if STM is empty or unavailable
-3. **Search/query operations** always hit MongoDB LTM (full-text search)
-4. **On startup**, a warmup process loads recent memories for all agents from MongoDB into Redis
+2. **Reads for context injection** use semantic vector recall first when a query is available and `EMBEDDINGS_ENABLED=true`
+3. The engine then reads Redis STM and falls back to LTM if STM is empty or unavailable
+4. **Search/query operations** use the document store fields for keyword-style API search
+5. **On startup**, a warmup process loads recent memories for all agents from LTM into Redis
 
 ### Configuration
 
@@ -26,6 +28,8 @@ Memory uses a two-tier architecture for optimal performance:
 |---|---|---|
 | `STM_MAX_ENTRIES` | `20` | Max recent memories per agent cached in Redis |
 | `LTM_MAX_ENTRIES` | `200` | Max memories per agent in MongoDB (0 = unlimited) |
+| `EMBEDDINGS_ENABLED` | `true` | Enable semantic memory and knowledge retrieval |
+| `MEMORY_RETRIEVAL_TOP_K` | `8` | Max semantic memory matches for prompt context |
 
 Set via environment variables or `.env` file.
 
@@ -49,10 +53,11 @@ Memories are organized into three scopes:
 
 Before each agent execution, the engine automatically:
 
-1. Checks **Redis STM** for cached recent memories (fast path)
-2. Falls back to **MongoDB LTM** if STM is empty or unavailable
-3. Prunes any expired memories (TTL-based)
-4. Injects all memories as a `<memories>` XML block in the system prompt
+1. Uses semantic vector retrieval when a query is available and embeddings are enabled
+2. Checks **Redis STM** for cached recent memories (fast path)
+3. Falls back to **LTM** in the selected document store if STM is empty or unavailable
+4. Prunes any expired memories (TTL-based)
+5. Injects all memories as a `<memories>` XML block in the system prompt
 
 ```xml
 <memories>

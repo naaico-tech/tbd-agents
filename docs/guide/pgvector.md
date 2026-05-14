@@ -30,14 +30,24 @@ variable in your `.env` file:
 
 ```env
 # .env — choose one
-COMPOSE_PROFILES=pgvector    # start pgvector
-# COMPOSE_PROFILES=qdrant   # (default) start Qdrant instead
+COMPOSE_PROFILES=pgvector   # start pgvector
+# COMPOSE_PROFILES=qdrant   # .env.example default; start Qdrant instead
+```
+
+For the all-PostgreSQL stack, also select PostgreSQL for documents and pgvector for vectors:
+
+```env
+DB_BACKEND=postgres
+VECTOR_STORE_BACKEND=pgvector
+POSTGRES_URI=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
+PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
 ```
 
 Then start the stack normally:
 
 ```bash
 docker compose up
+docker compose exec app alembic upgrade head
 ```
 
 Or, to start only the pgvector container without the full stack:
@@ -82,9 +92,11 @@ Expected output:
 
 ```bash
 VECTOR_STORE_BACKEND=pgvector
-PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents
+PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
 PGVECTOR_TABLE_PREFIX=vs
 ```
+
+Use `localhost` instead of `pgvector` only when the app process runs directly on the host and connects through the Docker-published port.
 
 ### Connecting to an existing PostgreSQL instance
 

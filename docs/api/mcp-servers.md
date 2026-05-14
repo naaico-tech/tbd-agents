@@ -5,8 +5,10 @@
 | `POST` | `/api/mcps` | Register MCP server |
 | `GET` | `/api/mcps` | List MCP servers |
 | `GET` | `/api/mcps/{id}` | Get MCP server |
+| `PUT` | `/api/mcps/{id}` | Update MCP server config |
 | `POST` | `/api/mcps/{id}/test` | Test MCP connection |
 | `GET` | `/api/mcps/{id}/tools` | List tools from MCP server |
+| `PUT` | `/api/mcps/{id}/tools` | Update allowed tool names |
 | `DELETE` | `/api/mcps/{id}` | Remove MCP server |
 
 ---
@@ -74,6 +76,16 @@ GET /api/mcps/{id}
 
 ---
 
+## Update MCP Server
+
+```
+PUT /api/mcps/{id}
+```
+
+Updates server metadata, transport settings, connection config, tags, or enabled state.
+
+---
+
 ## Test Connection
 
 ```
@@ -95,6 +107,16 @@ GET /api/mcps/{id}/tools
 Returns the list of tools exposed by the MCP server.
 
 **Response:** `200 OK` — Array of tool definitions.
+
+---
+
+## Update Allowed Tools
+
+```
+PUT /api/mcps/{id}/tools
+```
+
+Use this endpoint to restrict the MCP tools exposed to agents by setting the server's allowed tool names.
 
 ---
 

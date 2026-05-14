@@ -1,6 +1,6 @@
 # System Overview
 
-TBD Agents separates concerns across four main components connected by Redis and MongoDB.
+TBD Agents separates concerns across API, workers, model/tool integrations, Redis, and pluggable storage.
 
 ---
 
@@ -37,18 +37,20 @@ graph TB
     end
 
     subgraph Storage
-        Mongo[(MongoDB)]
+        Docs[(MongoDB or PostgreSQL)]
+        Vectors[(Qdrant or pgvector)]
     end
 
     Dashboard & CLI & Apps -->|HTTP + Auth| FastAPI
     FastAPI -->|Enqueue Tasks| Redis
     FastAPI -->|Subscribe Events| Redis
     FastAPI -->|SSE Stream| Dashboard & CLI & Apps
-    FastAPI -->|Read/Write| Mongo
+    FastAPI -->|Read/Write| Docs
 
     Redis -->|Deliver Tasks| W1 & W2 & W3
     W1 & W2 & W3 -->|Publish Events| Redis
-    W1 & W2 & W3 -->|Persist State| Mongo
+    W1 & W2 & W3 -->|Persist State| Docs
+    W1 & W2 & W3 -->|Semantic retrieval| Vectors
     W1 & W2 & W3 -->|SDK Session| SDK
 
     SDK --> Models
@@ -72,12 +74,12 @@ The API layer handles authentication, CRUD for agents/skills/MCP servers/workflo
 Workers execute the actual agent loop. Each worker:
 
 1. Receives a task from the Redis queue containing `(workflow_id, prompt, github_token)`
-2. Initialises its own MongoDB connection via Beanie/Motor
-3. Loads the Workflow, Agent, MCP servers, and Skills from the database
+2. Initialises the configured document-store connection (`DB_BACKEND=mongo` or `postgres`)
+3. Loads the Workflow, Agent, MCP servers, Skills, knowledge, and memory from the database
 4. Creates a Copilot SDK session with the agent's configuration
 5. Runs the SDK agentic loop — the SDK handles planning, tool calls, and response generation
 6. Publishes real-time events (logs, message deltas, usage stats, status changes) to Redis pub/sub
-7. Persists final state (messages, logs, usage, status) to MongoDB
+7. Persists final state (messages, logs, usage, status) to the configured document store
 
 **Key Celery settings:**
 
@@ -96,9 +98,11 @@ Redis serves two roles:
 
 This decoupling enables multi-process and multi-node scaling — any worker can publish events that any API instance can stream.
 
-### MongoDB
+### Document and Vector Storage
 
-Stores all persistent state: agents, MCP servers, skills, workflows (including messages, logs, and usage stats). Each worker initialises its own Motor/Beanie connection on startup.
+The document store is MongoDB by default and PostgreSQL when `DB_BACKEND=postgres`. It stores agents, MCP servers, skills, workflows, schedules, task executions, tokens, providers, guardrails, knowledge metadata, and memories.
+
+Semantic memory and knowledge retrieval use Qdrant by default or pgvector when `VECTOR_STORE_BACKEND=pgvector`.
 
 ---
 
@@ -112,7 +116,7 @@ sequenceDiagram
     participant Worker as Celery Worker
     participant SDK as Copilot SDK
     participant MCP as MCP Servers
-    participant Mongo as MongoDB
+    participant Store as Document Store
 
     Client->>API: POST /prompt (auth + payload)
     API->>API: Validate auth + workflow state
@@ -122,7 +126,7 @@ sequenceDiagram
     Client->>API: GET /stream (SSE)
 
     Redis->>Worker: Deliver task
-    Worker->>Mongo: Load Workflow + Agent + MCPs + Skills
+    Worker->>Store: Load Workflow + Agent + MCPs + Skills
     Worker->>SDK: build_client(token) → session
     Worker->>SDK: session.send(prompt)
 
@@ -135,7 +139,7 @@ sequenceDiagram
         API-->>Client: SSE event
     end
 
-    Worker->>Mongo: Persist final state
+    Worker->>Store: Persist final state
     Worker->>Redis: Publish status: completed
     Redis->>API: Final event
     API-->>Client: SSE: status completed

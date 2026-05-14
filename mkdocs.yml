@@ -71,14 +71,17 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Features: features.md
   - Getting Started:
       - getting-started/index.md
       - Quick Start: getting-started/quickstart.md
       - Local Setup: getting-started/local-setup.md
+      - Local Setup Notes: local-setup.md
       - Configuration: getting-started/configuration.md
       - Migration & Upgrade: getting-started/migration.md
   - Guide:
       - guide/index.md
+      - Dashboard: guide/dashboard.md
       - Agents: guide/agents.md
       - MCP Tools: guide/mcp-tools.md
       - Skills: guide/skills.md
@@ -90,12 +93,15 @@ nav:
       - BYOK Providers: guide/byok-providers.md
       - Custom Tools: guide/custom-tools.md
       - Agent Chat: guide/agent-chat.md
+      - Agent Chat Implementation Notes: agent-chat-plan.md
+      - Tasks: guide/tasks.md
       - Observability: guide/observability.md
       - Import & Export: guide/import-export.md
       - pgvector Setup: guide/pgvector.md
       - PostgreSQL Backend: guide/postgres-backend.md
   - Architecture:
       - architecture/index.md
+      - Architecture Reference: architecture.md
       - System Overview: architecture/system-overview.md
       - Data Model: architecture/data-model.md
       - Scaling: architecture/scaling.md
@@ -113,6 +119,9 @@ nav:
       - Tokens: api/tokens.md
       - Guardrails: api/guardrails.md
       - Tasks: api/tasks.md
+      - Scheduled Agents: api/scheduled-agents.md
       - Models: api/models.md
       - Import & Export: api/import-export.md
-  - Contributing: contributing.md
+  - Contributing:
+      - contributing.md
+      - GitHub Settings: github-settings-guide.md

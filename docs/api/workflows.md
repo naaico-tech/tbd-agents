@@ -12,6 +12,9 @@
 | `GET` | `/api/workflows/{id}/stream` | SSE stream of real-time events |
 | `POST` | `/api/workflows/{id}/skills/{skill_id}` | Install skill |
 | `DELETE` | `/api/workflows/{id}/skills/{skill_id}` | Remove skill |
+| `GET` | `/api/workflows/export` | Export all workflows |
+| `GET` | `/api/workflows/{id}/export` | Export one workflow |
+| `POST` | `/api/workflows/import` | Import workflows |
 
 ---
 
@@ -27,10 +30,18 @@ POST /api/workflows
   "model": "gpt-4.1",
   "max_turns": 10,
   "output_format": "markdown",
+  "reasoning_effort": "medium",
+  "skill_tags": ["incident"],
+  "guardrail_tags": ["safe-output"],
   "infinite_session": true,
+  "bypass_memory": false,
+  "auto_memory": true,
+  "tsv_tool_results": false,
   "caveman": true
 }
 ```
+
+Current workflow schemas also support `title`, `skill_ids`, `guardrail_ids`, credential overrides, repository fields (`repo_url`, `repo_branch`, `repo_token_name`), `webhook_url`, and `error_webhook_url`.
 
 **Response:** `201 Created`
 

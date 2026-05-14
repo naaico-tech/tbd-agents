@@ -1,6 +1,6 @@
 # Data Model
 
-All persistent state is stored in MongoDB using Beanie ODM (async MongoDB object-document mapper built on Motor).
+Persistent state is stored in the configured document backend: MongoDB/Beanie by default (`DB_BACKEND=mongo`) or PostgreSQL JSONB tables when `DB_BACKEND=postgres`. The logical entities are the same across both backends.
 
 ---
 
@@ -16,6 +16,11 @@ erDiagram
         string model
         list mcp_server_ids
         list mcp_server_tags
+        list custom_tool_ids
+        list builtin_tools
+        list knowledge_source_ids
+        list knowledge_tags
+        string provider_id
     }
 
     McpServer {
@@ -44,6 +49,9 @@ erDiagram
         string status
         string output_format
         bool infinite_session
+        bool bypass_memory
+        bool auto_memory
+        string reasoning_effort
         bool caveman
         dict usage
         list skill_ids
@@ -54,7 +62,7 @@ erDiagram
     KnowledgeSource {
         string id PK
         string name
-        string type
+        string source_type
         dict connection_config
         list tags
     }
@@ -62,7 +70,7 @@ erDiagram
     KnowledgeItem {
         string id PK
         string source_id FK
-        string content
+        string text_content
         string content_type
         list tags
     }
@@ -71,8 +79,19 @@ erDiagram
         string id PK
         string name
         string description
-        string type
-        dict config
+        string guardrail_type
+        dict prompt_config
+        dict request_config
+        dict output_config
+    }
+
+    ScheduledAgent {
+        string id PK
+        string workflow_id FK
+        string prompt
+        int interval_value
+        string interval_unit
+        bool enabled
     }
 
     Provider {
@@ -100,6 +119,7 @@ erDiagram
     Agent }o--o{ McpServer : "mcp_server_ids"
     Workflow }o--o{ Skill : "skill_ids"
     Workflow ||--o{ TaskExecution : "executions"
+    Workflow ||--o{ ScheduledAgent : "scheduled by"
     KnowledgeSource ||--o{ KnowledgeItem : "contains"
 ```
 
@@ -119,6 +139,11 @@ The reusable definition of an AI agent — personality, model, and tool access.
 | `model` | string | Copilot model (e.g. `gpt-4.1`) |
 | `mcp_server_ids` | string[] | Explicit MCP server references |
 | `mcp_server_tags` | string[] | Tag-based MCP resolution |
+| `custom_tool_ids` | string[] | Custom Python tools mounted on the agent |
+| `builtin_tools` | string[] | Built-in tools such as `bash`, `read`, `grep`, `web_fetch` |
+| `provider_id` | string | Optional BYOK provider |
+| `knowledge_source_ids` | string[] | Explicit knowledge sources |
+| `knowledge_tags` | string[] | Tag-based knowledge matching |
 
 ### Workflow
 
@@ -133,11 +158,16 @@ An execution context that ties an agent to a conversation session.
 | `status` | enum | `active` / `running` / `completed` / `failed` / `max_turns` |
 | `output_format` | string | `json` or `markdown` |
 | `infinite_session` | bool | Enable context compaction |
+| `bypass_memory` | bool | Skip memory context injection |
+| `auto_memory` | bool | Enable automatic memory extraction |
+| `reasoning_effort` | string | Optional `low` / `medium` / `high` effort hint |
 | `caveman` | bool | Enable terse output + compressed injected context |
 | `usage` | object | `{premium_req, in_tok, out_tok, cache_read, cache_write, cost}` |
 | `skill_ids` | string[] | Installed skills |
 | `messages` | array | `{role, content, tool_calls}` |
 | `logs` | array | `{timestamp, event, detail}` |
+
+Workflows can also reference `guardrail_ids`, `guardrail_tags`, `skill_tags`, repository checkout fields, credential overrides, and webhook/error webhook URLs.
 
 ### McpServer
 

@@ -7,7 +7,7 @@ This guide covers how to upgrade TBD Agents between versions, handle database mi
 ## General Upgrade Steps
 
 1. **Read the changelog** — check the [GitHub releases](https://github.com/naaico-tech/tbd-agents/releases) for breaking changes.
-2. **Back up your database** — always snapshot MongoDB before upgrading.
+2. **Back up your database** — snapshot MongoDB or PostgreSQL, depending on `DB_BACKEND`.
 3. **Pull the new image or code** — update your Docker image or `git pull` the latest tag.
 4. **Run database migrations** — apply any schema changes (see below).
 5. **Restart services** — restart the API server and Celery workers.
@@ -34,7 +34,12 @@ uv sync          # or: pip install -e ".[dev]"
 
 ## Database Migrations
 
-TBD Agents uses **MongoDB** with **Beanie ODM**. Beanie documents are schema-flexible — new fields with defaults are added automatically when existing documents are read. However, some changes require explicit migration.
+TBD Agents supports two document-store backends:
+
+- **MongoDB** with Beanie ODM (`DB_BACKEND=mongo`, the default)
+- **PostgreSQL** with Alembic-managed schema (`DB_BACKEND=postgres`)
+
+MongoDB documents are schema-flexible — new fields with defaults are added automatically when existing documents are read. PostgreSQL deployments must run Alembic migrations after upgrades that include schema changes.
 
 ### When migration is NOT needed
 
@@ -72,6 +77,22 @@ async def migrate():
 
 asyncio.run(migrate())
 ```
+
+### PostgreSQL / Alembic migrations
+
+For PostgreSQL deployments, run:
+
+```bash
+docker compose exec app alembic upgrade head
+docker compose exec app alembic current
+```
+
+See the [PostgreSQL Backend guide](../guide/postgres-backend.md) for first-run setup, migration from MongoDB, and verification scripts.
+
+!!! warning "MongoDB database name during backend migration"
+    The app default MongoDB database is `copilot_agent_hub`. Some migration script
+    examples historically used `tbd_agents`; set `MONGO_DB_NAME=copilot_agent_hub`
+    explicitly when migrating from the default app deployment.
 
 ### MongoDB backup / restore
 

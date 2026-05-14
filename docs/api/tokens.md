@@ -4,6 +4,8 @@
 |---|---|---|
 | `POST` | `/api/tokens` | Store encrypted token |
 | `GET` | `/api/tokens` | List tokens (values hidden) |
+| `GET` | `/api/tokens/{id}` | Get token metadata |
+| `PUT` | `/api/tokens/{id}` | Update token value or description |
 | `DELETE` | `/api/tokens/{id}` | Delete token |
 
 ---
@@ -17,7 +19,8 @@ POST /api/tokens
 ```json
 {
   "name": "datadog-api-key",
-  "value": "your-secret-value"
+  "value": "your-secret-value",
+  "description": "Datadog API key"
 }
 ```
 
@@ -36,9 +39,36 @@ The value is encrypted at rest using the `TOKEN_ENCRYPTION_KEY`.
 GET /api/tokens
 ```
 
-Returns token metadata (name, id, created date). Values are always hidden.
+Returns token metadata (`id`, `name`, `description`, `masked_value`, `created_by`, timestamps). Values are always masked and never decrypted in API responses.
 
 **Response:** `200 OK`
+
+---
+
+## Get Token
+
+```
+GET /api/tokens/{id}
+```
+
+Returns one token metadata object with `masked_value`.
+
+---
+
+## Update Token
+
+```
+PUT /api/tokens/{id}
+```
+
+```json
+{
+  "value": "rotated-secret-value",
+  "description": "Rotated Datadog API key"
+}
+```
+
+All fields are optional. If `value` is provided, it is encrypted before storage.
 
 ---
 
