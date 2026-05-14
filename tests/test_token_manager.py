@@ -1,8 +1,9 @@
 """Tests for the token manager (encryption, decryption, config resolution)."""
 
+from unittest.mock import patch
+
 import pytest
 from cryptography.fernet import Fernet
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.token_manager import (
     _TOKEN_REF_RE,
@@ -10,9 +11,9 @@ from app.services.token_manager import (
     _substitute,
     decrypt_value,
     encrypt_value,
+    find_unresolved_tokens,
     mask_value,
 )
-
 
 # Generate a real Fernet key for testing
 _TEST_KEY = Fernet.generate_key().decode()
@@ -169,3 +170,41 @@ class TestSubstitute:
             {"user": "admin", "pass": "s3cret"},
         )
         assert result == {"combined": "admin:s3cret"}
+
+
+class TestFindUnresolvedTokens:
+    def test_empty_dict_returns_empty_set(self):
+        assert find_unresolved_tokens({}) == set()
+
+    def test_fully_resolved_returns_empty_set(self):
+        # Simulate a resolved env config where all {{token:...}} were replaced.
+        resolved = {"API_KEY": "actual-secret", "TIMEOUT": "30"}
+        assert find_unresolved_tokens(resolved) == set()
+
+    def test_single_unresolved_token(self):
+        # token was not found in the store — placeholder left in place
+        resolved = {"CREDS_JSON": "{{token:google-sheets-credentials}}"}
+        assert find_unresolved_tokens(resolved) == {"google-sheets-credentials"}
+
+    def test_multiple_unresolved_tokens(self):
+        resolved = {
+            "KEY_A": "{{token:token-a}}",
+            "KEY_B": "{{token:token-b}}",
+        }
+        assert find_unresolved_tokens(resolved) == {"token-a", "token-b"}
+
+    def test_mixed_resolved_and_unresolved(self):
+        resolved = {
+            "RESOLVED_KEY": "real-value",
+            "MISSING_KEY": "{{token:missing-cred}}",
+        }
+        assert find_unresolved_tokens(resolved) == {"missing-cred"}
+
+    def test_partial_substitution_in_string(self):
+        # e.g. "Bearer {{token:tok}}" where the token was not found
+        resolved = {"AUTH": "Bearer {{token:my-token}}"}
+        assert find_unresolved_tokens(resolved) == {"my-token"}
+
+    def test_nested_dict_unresolved(self):
+        resolved = {"outer": {"inner": "{{token:nested-tok}}"}}
+        assert find_unresolved_tokens(resolved) == {"nested-tok"}

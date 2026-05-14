@@ -18,13 +18,13 @@ POST   /api/chat/start  — get or create a dedicated chat workflow for an agent
 import json
 import logging
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.deps import extract_optional_token, get_current_user
 from app.config import settings
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
@@ -90,7 +90,7 @@ async def chat(
     - ``done``     — stream complete, contains ``usage`` and ``message_id``
     - ``error``    — on LLM / provider failure, contains ``message``
     """
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -100,7 +100,7 @@ async def chat(
     # ── Resolve or create chat session ────────────────────────────────────
     if body.session_id:
         try:
-            session = await ChatSession.get(PydanticObjectId(body.session_id))
+            session = await ChatSession.get(parse_doc_id(body.session_id))
         except Exception:
             session = None
         if not session:
@@ -113,7 +113,7 @@ async def chat(
             )
     else:
         session = ChatSession(
-            agent_id=PydanticObjectId(agent_id),
+            agent_id=parse_doc_id(agent_id),
             github_user=github_user,
         )
         await session.insert()
@@ -169,7 +169,7 @@ async def list_chat_sessions(
     user=Depends(get_current_user),
 ):
     """List chat sessions for an agent, newest first (paginated)."""
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -177,7 +177,7 @@ async def list_chat_sessions(
     sessions = (
         await ChatSession.find(
             {
-                "agent_id": PydanticObjectId(agent_id),
+                "agent_id": parse_doc_id(agent_id),
                 "github_user": github_user,
             }
         )
@@ -202,12 +202,12 @@ async def get_chat_session(
     user=Depends(get_current_user),
 ):
     """Get a chat session including full message history (chronological)."""
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     try:
-        session = await ChatSession.get(PydanticObjectId(session_id))
+        session = await ChatSession.get(parse_doc_id(session_id))
     except Exception:
         session = None
     if not session:
@@ -247,12 +247,12 @@ async def delete_chat_session(
     user=Depends(get_current_user),
 ):
     """Delete a chat session and cascade-delete all its messages."""
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     try:
-        session = await ChatSession.get(PydanticObjectId(session_id))
+        session = await ChatSession.get(parse_doc_id(session_id))
     except Exception:
         session = None
     if not session:
@@ -297,7 +297,7 @@ async def start_chat_session(
     github_user = current_user.get("login") or "local"
 
     try:
-        agent = await Agent.get(PydanticObjectId(body.agent_id))
+        agent = await Agent.get(parse_doc_id(body.agent_id))
     except Exception:
         agent = None
     if not agent:
@@ -306,12 +306,12 @@ async def start_chat_session(
     chat_title = f"Chat: {agent.name}"
 
     # Look for existing active chat workflow for this user + agent
-    existing = await Workflow.find_one(
-        Workflow.github_user == github_user,
-        Workflow.agent_id == str(agent.id),
-        Workflow.status == WorkflowStatus.ACTIVE,
-        Workflow.infinite_session == True,  # noqa: E712 – beanie query, not Python bool
-    )
+    existing = await Workflow.find_one({
+        "github_user": github_user,
+        "agent_id": str(agent.id),
+        "status": WorkflowStatus.ACTIVE,
+        "infinite_session": True,
+    })
 
     if existing:
         return ChatStartResponse(

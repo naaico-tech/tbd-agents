@@ -48,6 +48,7 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
   // ── task state ────────────────────────────────────────────────────────
   bool _isRunning = false;
   String? _taskId;
+  String? _workflowId;
   String? _output;
   String? _outputStatus;
   int? _currentTurn;
@@ -119,6 +120,7 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
       _output = null;
       _outputStatus = null;
       _taskId = null;
+      _workflowId = null;
       _currentTurn = null;
       _maxTurns = null;
       _liveLogs.clear();
@@ -150,6 +152,7 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
         _maxTurns = (decoded['max_turns'] as num?)?.toInt();
         _output = decoded['response']?.toString();
         _taskId = decoded['task_id']?.toString();
+        _workflowId = decoded['workflow_id']?.toString() ?? _selectedWorkflow!.id;
       });
 
       // Fall back to discovery only when the prompt response omitted task_id
@@ -243,6 +246,27 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
         if (mounted) setState(() => _isRunning = false);
       }
     } catch (_) {}
+  }
+
+  Future<void> _stopTask() async {
+    if (_workflowId == null) return;
+    try {
+      final resp = await _client.post(
+        AppLinks.apiUri('/workflows/$_workflowId/halt'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        String detail = 'Stop failed (${resp.statusCode})';
+        try {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>?;
+          detail = body?['detail'] as String? ?? detail;
+        } catch (_) {}
+        throw Exception(detail);
+      }
+      if (mounted) setState(() => _outputStatus = 'halted');
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Stop failed: $e');
+    }
   }
 
   // ── helpers ────────────────────────────────────────────────────────────
@@ -556,6 +580,10 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
                               color: accentTeal,
                             ),
                           ),
+                          if (_workflowId != null) ...[
+                            const SizedBox(width: sp8),
+                            _StopButton(onStop: _stopTask),
+                          ],
                         ],
                         if (_taskId != null && !_isRunning) ...[
                           const Spacer(),
@@ -731,6 +759,60 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
           .toList(),
       onChanged:
           _isRunning ? null : (v) => setState(() => _selectedWorkflow = v),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _StopButton — compact stop control for an in-progress task
+// ---------------------------------------------------------------------------
+class _StopButton extends StatefulWidget {
+  const _StopButton({required this.onStop});
+  final Future<void> Function() onStop;
+
+  @override
+  State<_StopButton> createState() => _StopButtonState();
+}
+
+class _StopButtonState extends State<_StopButton> {
+  bool _stopping = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: _stopping
+          ? null
+          : () async {
+              setState(() => _stopping = true);
+              try {
+                await widget.onStop();
+              } finally {
+                if (mounted) setState(() => _stopping = false);
+              }
+            },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: sp8, vertical: 4),
+        decoration: BoxDecoration(
+          border: Border.all(color: accentPrimary, width: 1),
+          color: accentPrimary.withValues(alpha: 0.1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.stop_circle_outlined, color: accentPrimary, size: 12),
+            const SizedBox(width: 4),
+            Text(
+              _stopping ? 'STOPPING…' : 'STOP',
+              style: const TextStyle(
+                fontFamily: fontBody,
+                fontSize: 10,
+                color: accentPrimary,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from app.core.plugin_loader import _name_to_class
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -18,6 +15,7 @@ def _make_plugin_cls(name: str = "test_plugin", is_enabled: bool = True):
     """Return a minimal concrete PluginBase subclass for use in loader tests."""
     import sys
     import types
+
     from app.core.plugin_base import PluginBase
 
     _enabled = is_enabled  # close over the value

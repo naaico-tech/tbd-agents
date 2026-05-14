@@ -91,4 +91,12 @@ A deep dive into what TBD Agents offers and how each capability works.
 
     [:octicons-arrow-right-24: Import & Export](import-export.md)
 
+-   :material-database-cog:{ .lg .middle } **PostgreSQL Backend**
+
+    ---
+
+    Run a fully-PostgreSQL stack (JSONB + pgvector) with no MongoDB dependency.
+
+    [:octicons-arrow-right-24: PostgreSQL Backend](postgres-backend.md)
+
 </div>

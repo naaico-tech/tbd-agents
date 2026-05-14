@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from app.core.guardrails import enforce_guardrails
-from app.models.guardrail import Guardrail, GuardrailType
+from app.models.guardrail import GuardrailType
 
 from .conftest import create_agent, create_guardrail, create_workflow
 

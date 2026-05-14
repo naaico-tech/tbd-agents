@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.guardrail import (
     Guardrail,
     OutputGuardrailConfig,
@@ -63,7 +63,7 @@ async def list_guardrails(
 ):
     """List all guardrails, optionally filtered by a single tag."""
     if tag:
-        guardrails = await Guardrail.find(Guardrail.tags == tag).to_list()
+        guardrails = await Guardrail.find({"tags": tag}).to_list()
     else:
         guardrails = await Guardrail.find_all().to_list()
     return [_to_response(g) for g in guardrails]
@@ -71,7 +71,7 @@ async def list_guardrails(
 
 @router.get("/{guardrail_id}", response_model=GuardrailResponse)
 async def get_guardrail(guardrail_id: str, _user=Depends(get_current_user)):
-    g = await Guardrail.get(PydanticObjectId(guardrail_id))
+    g = await Guardrail.get(parse_doc_id(guardrail_id))
     if not g:
         raise HTTPException(status_code=404, detail="Guardrail not found")
     return _to_response(g)
@@ -81,7 +81,7 @@ async def get_guardrail(guardrail_id: str, _user=Depends(get_current_user)):
 async def update_guardrail(
     guardrail_id: str, body: GuardrailUpdate, _user=Depends(get_current_user)
 ):
-    g = await Guardrail.get(PydanticObjectId(guardrail_id))
+    g = await Guardrail.get(parse_doc_id(guardrail_id))
     if not g:
         raise HTTPException(status_code=404, detail="Guardrail not found")
 
@@ -109,7 +109,7 @@ async def update_guardrail(
 
 @router.delete("/{guardrail_id}", status_code=204)
 async def delete_guardrail(guardrail_id: str, _user=Depends(get_current_user)):
-    g = await Guardrail.get(PydanticObjectId(guardrail_id))
+    g = await Guardrail.get(parse_doc_id(guardrail_id))
     if not g:
         raise HTTPException(status_code=404, detail="Guardrail not found")
     await g.delete()

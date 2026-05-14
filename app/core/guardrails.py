@@ -31,17 +31,16 @@ async def _load_guardrails(workflow: Workflow) -> list[Guardrail]:
     found: dict[str, Guardrail] = {}
 
     if workflow.guardrail_ids:
-        from beanie import PydanticObjectId
+        from app.db import parse_doc_id  # noqa: PLC0415
 
         for gid in workflow.guardrail_ids:
-            g = await Guardrail.get(PydanticObjectId(gid))
+            g = await Guardrail.get(parse_doc_id(gid))
             if g and g.enabled:
                 found[str(g.id)] = g
 
     if workflow.guardrail_tags:
         tag_matches = await Guardrail.find(
-            {"tags": {"$in": workflow.guardrail_tags}},
-            Guardrail.enabled == True,  # noqa: E712
+            {"tags": {"$in": workflow.guardrail_tags}, "enabled": True},
         ).to_list()
         for g in tag_matches:
             found[str(g.id)] = g

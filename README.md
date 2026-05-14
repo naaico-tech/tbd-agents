@@ -142,6 +142,29 @@ VECTOR_STORE_BACKEND=qdrant  # must match the profile above
 
 See the [pgvector guide](docs/guide/pgvector.md) for full setup instructions.
 
+### Choosing a Database Backend
+
+The deployment profile controls both the vector store **and** the document/data store:
+
+| Profile | Document Store | Vector Store | Services |
+|---|---|---|---|
+| `qdrant` | MongoDB 7 | Qdrant | 2 services (`mongodb` + `qdrant`) |
+| `pgvector` | PostgreSQL 16 (JSONB) | pgvector extension | 1 service (`pgvector`) |
+
+Use the `pgvector` profile to run a fully-PostgreSQL stack — one database for everything,
+backed up with a single `pg_dump`.
+
+```env
+# .env — all-PostgreSQL stack
+COMPOSE_PROFILES=pgvector
+VECTOR_STORE_BACKEND=pgvector
+DB_BACKEND=postgres
+```
+
+See the [PostgreSQL Backend Guide](docs/guide/postgres-backend.md) for full details,
+including schema design, Alembic migrations, MongoDB→PostgreSQL data migration, and
+observability queries.
+
 ---
 
 ## 📖 Documentation

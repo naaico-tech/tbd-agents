@@ -22,7 +22,6 @@ from app.schemas.knowledge import (
 )
 from app.services.knowledge_manager import KnowledgeManager
 
-
 # ── KnowledgeSource Model ───────────────────────────────────────────────────
 
 

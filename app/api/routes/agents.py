@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 from app.schemas.export_import import (
@@ -74,7 +74,7 @@ async def export_agents(_user=Depends(get_current_user)):
 
 @router.get("/{agent_id}/export", response_model=AgentExportBundle)
 async def export_agent(agent_id: str, _user=Depends(get_current_user)):
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return AgentExportBundle(items=[_to_exported(agent)])
@@ -96,7 +96,7 @@ async def import_agents(body: AgentImportBundle, _user=Depends(get_current_user)
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str, _user=Depends(get_current_user)):
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return _to_response(agent)
@@ -104,7 +104,7 @@ async def get_agent(agent_id: str, _user=Depends(get_current_user)):
 
 @router.put("/{agent_id}", response_model=AgentResponse)
 async def update_agent(agent_id: str, body: AgentUpdate, _user=Depends(get_current_user)):
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     update_data = body.model_dump(exclude_none=True)
@@ -116,7 +116,7 @@ async def update_agent(agent_id: str, body: AgentUpdate, _user=Depends(get_curre
 
 @router.delete("/{agent_id}", status_code=204)
 async def delete_agent(agent_id: str, _user=Depends(get_current_user)):
-    agent = await Agent.get(PydanticObjectId(agent_id))
+    agent = await Agent.get(parse_doc_id(agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     await agent.delete()

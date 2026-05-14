@@ -1,9 +1,22 @@
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from beanie import Document
 from pydantic import BaseModel, Field
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, BaseModel):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
 
 
 class WorkflowStatus(StrEnum):
@@ -52,7 +65,7 @@ class OutputDestination(BaseModel):
     slack_user_id: str | None = None
 
 
-class Workflow(Document):
+class Workflow(_DocumentBase):  # type: ignore[valid-type]
     title: str | None = None
     agent_id: str
     github_user: str

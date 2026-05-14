@@ -3,8 +3,6 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from app.config import settings
-
 
 async def validate_github_token(token: str, *, skip_remote: bool = False) -> dict[str, Any]:
     """Validate a GitHub PAT by calling the GitHub Users API. Returns user info.

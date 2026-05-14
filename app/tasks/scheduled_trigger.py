@@ -14,11 +14,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from app.celery_app import celery
-from app.db import init_db
+from app.db import init_db, parse_doc_id
 from app.models.scheduled_agent import ScheduledAgent
 from app.models.task_execution import TaskExecution, TaskStatus
 from app.models.workflow import Workflow
-from beanie.operators import In
 from app.services import scheduler
 from app.tasks.agent_task import run_agent_task
 
@@ -37,11 +36,9 @@ def run_scheduled_agent(self, scheduled_agent_id: str):
 
 async def _execute(scheduled_agent_id: str) -> None:
     """Async execution body — loads DB, validates schedule, dispatches agent."""
-    from beanie import PydanticObjectId
-
     await init_db()
 
-    sa = await ScheduledAgent.get(PydanticObjectId(scheduled_agent_id))
+    sa = await ScheduledAgent.get(parse_doc_id(scheduled_agent_id))
     if not sa:
         logger.error("ScheduledAgent %s not found — skipping", scheduled_agent_id)
         return
@@ -67,10 +64,10 @@ async def _execute(scheduled_agent_id: str) -> None:
         return
 
     # -- Check for overlapping runs --
-    active_te = await TaskExecution.find_one(
-        TaskExecution.scheduled_agent_id == str(sa.id),
-        In(TaskExecution.status, [TaskStatus.PENDING, TaskStatus.RUNNING])
-    )
+    active_te = await TaskExecution.find_one({
+        "scheduled_agent_id": str(sa.id),
+        "status": {"$in": [TaskStatus.PENDING, TaskStatus.RUNNING]},
+    })
     if active_te:
         logger.warning(
             "ScheduledAgent %s: previous run %s is still active (%s) — skipping this tick to avoid overlap",
@@ -80,7 +77,7 @@ async def _execute(scheduled_agent_id: str) -> None:
 
 
     # ── Validate the target workflow still exists ────────────────────────────
-    wf = await Workflow.get(PydanticObjectId(sa.workflow_id))
+    wf = await Workflow.get(parse_doc_id(sa.workflow_id))
     if not wf:
         logger.error(
             "ScheduledAgent %s references missing Workflow %s — skipping",

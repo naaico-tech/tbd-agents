@@ -1,7 +1,7 @@
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.mcp_server import McpServer, McpServerStatus, TransportType
 from app.schemas.mcp import McpServerCreate, McpServerResponse, McpServerUpdate, McpTestResponse
 from app.services.mcp_manager import mcp_manager
@@ -47,7 +47,7 @@ async def list_mcp_servers(_user=Depends(get_current_user)):
 
 @router.get("/{server_id}", response_model=McpServerResponse)
 async def get_mcp_server(server_id: str, _user=Depends(get_current_user)):
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     return _to_response(server)
@@ -55,7 +55,7 @@ async def get_mcp_server(server_id: str, _user=Depends(get_current_user)):
 
 @router.post("/{server_id}/test", response_model=McpTestResponse)
 async def test_mcp_server(server_id: str, _user=Depends(get_current_user)):
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     result = await mcp_manager.test_connection(server)
@@ -64,7 +64,7 @@ async def test_mcp_server(server_id: str, _user=Depends(get_current_user)):
 
 @router.get("/{server_id}/tools")
 async def list_mcp_tools(server_id: str, _user=Depends(get_current_user)):
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     try:
@@ -76,7 +76,7 @@ async def list_mcp_tools(server_id: str, _user=Depends(get_current_user)):
 
 @router.delete("/{server_id}", status_code=204)
 async def delete_mcp_server(server_id: str, _user=Depends(get_current_user)):
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     await server.delete()
@@ -86,7 +86,7 @@ async def delete_mcp_server(server_id: str, _user=Depends(get_current_user)):
 async def update_mcp_server(
     server_id: str, body: McpServerUpdate, _user=Depends(get_current_user)
 ):
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     if body.name is not None:
@@ -113,7 +113,7 @@ async def update_mcp_tools(
     server_id: str, body: dict, _user=Depends(get_current_user)
 ):
     """Save the list of allowed tool names for an MCP server."""
-    server = await McpServer.get(PydanticObjectId(server_id))
+    server = await McpServer.get(parse_doc_id(server_id))
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
     tools = body.get("allowed_tools", [])

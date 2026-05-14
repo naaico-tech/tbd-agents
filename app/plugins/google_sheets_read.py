@@ -85,7 +85,6 @@ class GoogleSheetsReadPlugin(PluginBase):
             ValueError: If the env var is missing or contains invalid JSON.
             Exception: Propagated from credential construction or API build.
         """
-        import json  # noqa: PLC0415
 
         from google.oauth2.service_account import Credentials  # noqa: PLC0415
         from googleapiclient.discovery import build  # noqa: PLC0415

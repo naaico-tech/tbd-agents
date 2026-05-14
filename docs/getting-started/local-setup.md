@@ -21,31 +21,60 @@ Run TBD Agents on your development machine — Docker or bare metal.
 
 ## Option 1 — Docker Compose (recommended)
 
-```bash
-git clone https://github.com/naaico-tech/tbd-agents.git && cd tbd-agents
-cp .env.example .env
-# Edit .env and fill in at least GITHUB_TOKEN
+=== "MongoDB (default)"
 
-docker-compose up --build
-```
+    ```bash
+    git clone https://github.com/naaico-tech/tbd-agents.git && cd tbd-agents
+    cp .env.example .env
+    # Edit .env and fill in at least GITHUB_TOKEN
+    docker compose up --build
+    ```
 
-| Service | Port | Description |
-|---|---|---|
-| `app` | 8000 | FastAPI API + Flutter dashboard |
-| `worker` | — | Celery worker (4 concurrent slots) |
-| `redis` | 6379 | Task broker + event bus |
-| `mongodb` | 27017 | Persistent storage |
+    | Service | Port | Description |
+    |---|---|---|
+    | `app` | 8000 | FastAPI API + Flutter dashboard |
+    | `worker` | — | Celery worker (4 concurrent slots) |
+    | `redis` | 6379 | Task broker + event bus |
+    | `mongodb` | 27017 | Document store |
+    | `qdrant` | 6333 | Vector store |
+
+=== "PostgreSQL"
+
+    Add the following to your `.env`, then start:
+
+    ```env
+    COMPOSE_PROFILES=pgvector
+    DB_BACKEND=postgres
+    VECTOR_STORE_BACKEND=pgvector
+    POSTGRES_URI=postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents
+    ```
+
+    ```bash
+    docker compose up --build
+    # Apply schema on first run
+    docker compose exec app alembic upgrade head
+    ```
+
+    | Service | Port | Description |
+    |---|---|---|
+    | `app` | 8000 | FastAPI API + Flutter dashboard |
+    | `worker` | — | Celery worker (4 concurrent slots) |
+    | `redis` | 6379 | Task broker + event bus |
+    | `pgvector` | 5432 | PostgreSQL 16 with pgvector (replaces MongoDB + Qdrant) |
+
+    !!! note
+        The `pgvector` profile starts a single PostgreSQL container that handles both document storage and vector search. MongoDB and Qdrant are not started.
 
 ### Scaling workers
 
 ```bash
 # Run 3 worker containers instead of 1
-docker-compose up --build --scale worker=3
+docker compose up --build --scale worker=3
 ```
 
 Each worker defaults to `--concurrency=4`, so 3 containers = 12 concurrent agent executions.
 
-The application image builds the Flutter web bundle during `docker-compose up --build`, serves it from FastAPI at `/dashboard-new-ui`, and keeps the legacy dashboard available at `/dashboard` (with `/dashboard-legacy` as a compatibility alias).
+The application image builds the Flutter web bundle during `docker compose up --build`, serves it from FastAPI at `/dashboard-new-ui`, and keeps the legacy dashboard available at `/dashboard` (with `/dashboard-legacy` as a compatibility alias).
 
 ---
 
@@ -60,25 +89,61 @@ pip install -e ".[dev]"
 
 ### Step 2 — Start infrastructure
 
-You need MongoDB and Redis running locally:
+=== "MongoDB"
 
-```bash
-# MongoDB
-docker run -d --name mongo -p 27017:27017 mongo:7
+    ```bash
+    # MongoDB
+    docker run -d --name mongo -p 27017:27017 mongo:7
 
-# Redis
-docker run -d --name redis -p 6379:6379 redis:7-alpine
-```
+    # Qdrant
+    docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
 
-Or install natively via `brew install mongodb-community redis` (macOS).
+    # Redis
+    docker run -d --name redis -p 6379:6379 redis:7-alpine
+    ```
+
+    Or install natively via `brew install mongodb-community redis` (macOS).
+
+=== "PostgreSQL"
+
+    ```bash
+    # PostgreSQL with pgvector
+    docker run -d --name pgvector \
+      -p 5432:5432 \
+      -e POSTGRES_PASSWORD=postgres \
+      -e POSTGRES_DB=tbd_agents \
+      pgvector/pgvector:pg16
+
+    # Redis
+    docker run -d --name redis -p 6379:6379 redis:7-alpine
+    ```
+
+    Or install natively: `brew install postgresql` and enable the pgvector extension:
+
+    ```bash
+    psql -U postgres -d tbd_agents -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
 
 ### Step 3 — Set environment variables
 
-```bash
-export MONGO_URI=mongodb://localhost:27017
-export REDIS_URL=redis://localhost:6379/0
-export GITHUB_TOKEN="ghp_your_token_here"
-```
+=== "MongoDB"
+
+    ```bash
+    export MONGO_URI=mongodb://localhost:27017
+    export REDIS_URL=redis://localhost:6379/0
+    export GITHUB_TOKEN="ghp_your_token_here"
+    ```
+
+=== "PostgreSQL"
+
+    ```bash
+    export DB_BACKEND=postgres
+    export POSTGRES_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents
+    export VECTOR_STORE_BACKEND=pgvector
+    export PGVECTOR_DSN=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents
+    export REDIS_URL=redis://localhost:6379/0
+    export GITHUB_TOKEN="ghp_your_token_here"
+    ```
 
 Or create a `.env` file from the template — Pydantic Settings loads it automatically:
 
@@ -86,7 +151,15 @@ Or create a `.env` file from the template — Pydantic Settings loads it automat
 cp .env.example .env
 ```
 
-### Step 4 — Start the API server
+### Step 4 — Apply schema migrations (PostgreSQL only)
+
+```bash
+DB_BACKEND=postgres alembic upgrade head
+```
+
+This is a no-op when `DB_BACKEND=mongo`.
+
+### Step 5 — Start the API server
 
 ```bash
 uvicorn app.main:app --reload --port 8000
@@ -106,7 +179,7 @@ flutter build web --release --base-href /dashboard-new-ui/
 cd ..
 ```
 
-### Step 5 — Start a Celery worker
+### Step 6 — Start a Celery worker
 
 In a separate terminal (same virtualenv):
 
@@ -128,11 +201,11 @@ curl -X POST http://localhost:8000/api/agents \
   -H "Content-Type: application/json" \
   -d '{"name": "test", "system_prompt": "You are a helpful assistant."}'
 
-# Check the legacy dashboard
-open http://localhost:8000/dashboard
-
 # Check the Flutter dashboard
 open http://localhost:8000/dashboard-new-ui
+
+# Check the legacy dashboard
+open http://localhost:8000/dashboard
 ```
 
 ---
@@ -140,11 +213,16 @@ open http://localhost:8000/dashboard-new-ui
 ## Running Tests
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
+# Unit tests (MongoDB-agnostic, no external services needed)
+python -m pytest tests/ --ignore=tests/integration --ignore=tests/integration_postgres -v
 
-# Run a specific test file
-python -m pytest tests/test_agent_engine.py -v
+# MongoDB integration tests (requires running MongoDB + Redis)
+python -m pytest tests/integration/ -v
+
+# PostgreSQL integration tests (requires running PostgreSQL)
+DB_BACKEND=postgres \
+  POSTGRES_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents_integration_test \
+  python -m pytest tests/integration_postgres/ -v
 
 # Lint check
 ruff check app/ tests/
@@ -174,3 +252,5 @@ flutter build web --release --base-href /dashboard-new-ui/
 | MCP server fails to start | Ensure Node.js 22+ is installed (npx needs it) |
 | `copilot` scope errors | Regenerate your GitHub PAT with copilot scope enabled |
 | Token encryption errors | Set `TOKEN_ENCRYPTION_KEY` in .env (see .env.example) |
+| `relation "agents" does not exist` | Run `alembic upgrade head` after setting `DB_BACKEND=postgres` |
+| App still reads MongoDB when using `DB_BACKEND=postgres` | Restart the app and worker after changing `.env` |

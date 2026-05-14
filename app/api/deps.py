@@ -5,7 +5,6 @@ from fastapi import Header, HTTPException
 from app.config import settings
 from app.services.auth import validate_github_token
 
-
 LOCAL_USER = {"login": "local", "id": 0, "name": "Local User"}
 
 

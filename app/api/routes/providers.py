@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.provider import Provider
 from app.schemas.provider import ProviderCreate, ProviderResponse, ProviderUpdate
 
@@ -29,7 +29,7 @@ def _to_response(provider: Provider) -> ProviderResponse:
 @router.post("", response_model=ProviderResponse, status_code=201)
 async def create_provider(body: ProviderCreate, _user=Depends(get_current_user)):
     """Create a new provider configuration."""
-    existing = await Provider.find_one(Provider.name == body.name)
+    existing = await Provider.find_one({"name": body.name})
     if existing:
         raise HTTPException(status_code=409, detail=f"Provider '{body.name}' already exists")
     provider = Provider(**body.model_dump())
@@ -47,7 +47,7 @@ async def list_providers(_user=Depends(get_current_user)):
 @router.get("/{provider_id}", response_model=ProviderResponse)
 async def get_provider(provider_id: str, _user=Depends(get_current_user)):
     """Get a single provider by ID."""
-    provider = await Provider.get(PydanticObjectId(provider_id))
+    provider = await Provider.get(parse_doc_id(provider_id))
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     return _to_response(provider)
@@ -58,7 +58,7 @@ async def update_provider(
     provider_id: str, body: ProviderUpdate, _user=Depends(get_current_user)
 ):
     """Update a provider's configuration."""
-    provider = await Provider.get(PydanticObjectId(provider_id))
+    provider = await Provider.get(parse_doc_id(provider_id))
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     update_data = body.model_dump(exclude_none=True)
@@ -71,7 +71,7 @@ async def update_provider(
 @router.delete("/{provider_id}", status_code=204)
 async def delete_provider(provider_id: str, _user=Depends(get_current_user)):
     """Delete a provider configuration."""
-    provider = await Provider.get(PydanticObjectId(provider_id))
+    provider = await Provider.get(parse_doc_id(provider_id))
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     await provider.delete()

@@ -22,12 +22,9 @@ import logging
 import os
 import re
 import sys
+from datetime import UTC, datetime
 from io import StringIO
-from datetime import datetime, timezone
 from urllib.parse import urlparse
-
-# Compatibility: UTC alias for Python 3.9-3.10 support
-UTC = timezone.utc
 
 import httpx
 
@@ -212,12 +209,23 @@ async def _log(
     )
 
 
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "halted", "max_turns_reached"})
+
+
 async def _publish_status(workflow: Workflow, status: str | None = None) -> None:
-    """Publish a status change to SSE subscribers."""
+    """Publish a status change to SSE subscribers.
+
+    For terminal statuses (completed/failed/halted/max_turns_reached) the
+    workflow.status is reset to ACTIVE so the workflow is immediately reusable.
+    Individual task outcomes are tracked in TaskExecution records.
+    """
+    effective = status or "running"
+    if effective in _TERMINAL_STATUSES:
+        workflow.status = WorkflowStatus.ACTIVE
     await event_bus.publish(
         str(workflow.id),
         "status",
-        {"status": status or "running", "current_turn": workflow.current_turn},
+        {"status": effective, "current_turn": workflow.current_turn},
     )
 
 
@@ -1214,7 +1222,7 @@ async def _build_custom_tools_config(
         claude_tool_defs  — Claude Agent SDK custom format (for Claude path)
         tool_fn_map       — tool name → CustomTool (for execution routing)
     """
-    from beanie import PydanticObjectId as _CtObjId
+    from app.db import parse_doc_id as _CtObjId  # noqa: PLC0415
 
     openai_defs: list[dict] = []
     claude_defs: list[dict] = []
@@ -1315,6 +1323,32 @@ async def _execute_custom_tool(
     if effective_env_config:
         from app.services import token_manager
         resolved_env = await token_manager.resolve_config(effective_env_config)
+
+        # Fail fast: if any {{token:NAME}} placeholder is still present after
+        # resolution, the named token is missing from the store.  Return a
+        # clear, actionable error rather than letting the tool execute with an
+        # empty / literal placeholder value and produce a cryptic failure.
+        unresolved = token_manager.find_unresolved_tokens(resolved_env)
+        if unresolved:
+            missing_names = sorted(unresolved)
+            if len(missing_names) == 1:
+                (name,) = missing_names
+                msg = (
+                    f"Error: Required credential '{name}' is not configured. "
+                    f"Please add a token named '{name}' to the token store."
+                )
+            else:
+                names_str = ", ".join(f"'{n}'" for n in missing_names)
+                msg = (
+                    f"Error: Required credentials {names_str} are not configured. "
+                    f"Please add tokens named {names_str} to the token store."
+                )
+            logger.warning(
+                "Custom tool '%s': aborting execution — unresolved token(s): %s",
+                tool_name,
+                missing_names,
+            )
+            return json.dumps({"error": msg})
 
     merged_env = dict(resolved_env or {})
     if runtime_env:
@@ -3126,8 +3160,8 @@ async def run_agent(
     # Load task execution if provided
     task_exec: TaskExecution | None = None
     if task_execution_id:
-        from beanie import PydanticObjectId
-        task_exec = await TaskExecution.get(PydanticObjectId(task_execution_id))
+        from app.db import parse_doc_id  # noqa: PLC0415
+        task_exec = await TaskExecution.get(parse_doc_id(task_execution_id))
         if task_exec:
             task_exec.status = TaskStatus.RUNNING
             task_exec.started_at = datetime.now(UTC)
@@ -3159,7 +3193,7 @@ async def run_agent(
 
     if agent.provider_id:
         try:
-            from beanie import PydanticObjectId as _ObjId
+            from app.db import parse_doc_id as _ObjId  # noqa: PLC0415
             provider = await Provider.get(_ObjId(agent.provider_id))
         except Exception as _exc:
             logger.warning(
@@ -3205,6 +3239,7 @@ async def run_agent(
 
     # Log prompt and publish running status for SSE
     await _log(workflow, "prompt_received", user_prompt[:200], task_exec)
+    workflow.status = WorkflowStatus.RUNNING
     await _publish_status(workflow, "running")
 
     # Append user message
@@ -3258,7 +3293,7 @@ async def run_agent(
 
     # Build system prompt with skills + output destination hints
     # Resolve knowledge sources — by explicit IDs and by tags (union, deduplicated)
-    from beanie import PydanticObjectId as _KsObjId
+    from app.db import parse_doc_id as _KsObjId  # noqa: PLC0415
 
     knowledge_sources_map: dict[str, KnowledgeSource] = {}
     for ks_id in agent.knowledge_source_ids:

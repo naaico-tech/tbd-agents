@@ -1,11 +1,17 @@
 """Tests for API dependency functions."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import HTTPException
 
-from app.api.deps import _resolve_optional_token, _resolve_token, extract_optional_token, extract_token, get_current_user
+from app.api.deps import (
+    _resolve_optional_token,
+    _resolve_token,
+    extract_optional_token,
+    extract_token,
+    get_current_user,
+)
 
 
 class TestResolveToken:

@@ -1,8 +1,26 @@
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from beanie import Document, Indexed
 from pydantic import Field
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import BaseModel as _PyBase
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, _PyBase):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+    def _Indexed(t: type, **_kw: object) -> type:  # noqa: N802
+        return t
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
+    from beanie import Indexed as _Indexed  # type: ignore[assignment]
 
 
 class ProviderType(StrEnum):
@@ -20,7 +38,7 @@ PROVIDER_DEFAULT_BASE_URLS: dict[str, str] = {
 }
 
 
-class Provider(Document):
+class Provider(_DocumentBase):  # type: ignore[valid-type]
     """A named AI provider configuration that can be attached to an agent.
 
     Stores provider type, a reference to an API key in the token store,
@@ -60,7 +78,7 @@ class Provider(Document):
       API key. ``base_url`` overrides the default endpoint.
     """
 
-    name: Indexed(str, unique=True)
+    name: _Indexed(str, unique=True)  # type: ignore[valid-type]
     provider_type: ProviderType
     api_key_token_name: str  # name of a Token document in the token store
     base_url: str | None = None  # required for azure_openai and custom types

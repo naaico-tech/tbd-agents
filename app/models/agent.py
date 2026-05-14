@@ -1,10 +1,24 @@
+import os as _os
 from datetime import UTC, datetime
 
-from beanie import Document
 from pydantic import Field
 
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
 
-class Agent(Document):
+if _POSTGRES:
+    from pydantic import BaseModel as _PyBase
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, _PyBase):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
+
+
+class Agent(_DocumentBase):  # type: ignore[valid-type]
     name: str
     description: str = ""
     system_prompt: str = "You are a helpful assistant."

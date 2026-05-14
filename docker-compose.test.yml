@@ -1,7 +1,20 @@
-# Docker Compose profile for integration tests.
-# Usage: docker compose -f docker-compose.test.yml up -d
-#        pytest tests/integration/ -v
-#        docker compose -f docker-compose.test.yml down -v
+# Docker Compose for integration tests.
+#
+# MongoDB + Redis (for MongoDB integration tests):
+#   docker compose -f docker-compose.test.yml up -d mongodb redis
+#   TOKEN_ENCRYPTION_KEY=<key> TEST_MONGO_URI=mongodb://localhost:27018 \
+#     REDIS_URL=redis://localhost:6380 pytest tests/integration/ -v
+#
+# PostgreSQL / pgvector (for PostgreSQL integration tests):
+#   docker compose -f docker-compose.test.yml up -d pgvector-test redis
+#   DB_BACKEND=postgres \
+#     TEST_POSTGRES_URI=postgresql+asyncpg://postgres:postgres@localhost:5433/tbd_agents_integration_test \
+#     TOKEN_ENCRYPTION_KEY=<key> REDIS_URL=redis://localhost:6380 \
+#     pytest tests/integration/postgres/ -v
+#
+# All services:
+#   docker compose -f docker-compose.test.yml up -d
+#   docker compose -f docker-compose.test.yml down -v
 
 services:
   mongodb:
@@ -10,6 +23,22 @@ services:
       - "27018:27017"
     tmpfs:
       - /data/db
+
+  pgvector-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tbd_agents_integration_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tbd_agents_integration_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine

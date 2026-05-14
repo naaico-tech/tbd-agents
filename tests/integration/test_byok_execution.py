@@ -10,7 +10,6 @@ Closes #36
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from app.core.agent_engine import run_agent
@@ -18,7 +17,6 @@ from app.models.provider import ProviderType
 from app.models.task_execution import TaskExecution, TaskStatus
 
 from .conftest import create_agent, create_provider, create_token, create_workflow
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +27,7 @@ def _make_sse_lines(content: str = "Hello BYOK!", usage: dict | None = None):
     """Build SSE line sequence for a simple text response."""
     usage = usage or {"prompt_tokens": 50, "completion_tokens": 10}
     return [
-        f'data: {{"choices":[{{"delta":{{"role":"assistant"}},"finish_reason":null}}]}}',
+        'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}',
         f'data: {{"choices":[{{"delta":{{"content":"{content}"}},"finish_reason":null}}]}}',
         f'data: {{"choices":[{{"delta":{{}},"finish_reason":"stop"}}],"usage":{json.dumps(usage)}}}',
         "data: [DONE]",
@@ -41,7 +39,7 @@ def _make_tool_call_sse(tool_name: str, arguments: str):
     return [
         f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"index":0,"id":"call_1","type":"function","function":{{"name":"{tool_name}","arguments":""}}}}]}},"finish_reason":null}}]}}',
         f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"index":0,"function":{{"arguments":"{arguments}"}}}}]}},"finish_reason":null}}]}}',
-        f'data: {{"choices":[{{"delta":{{}},"finish_reason":"tool_calls"}}],"usage":{{"prompt_tokens":20,"completion_tokens":10}}}}',
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":10}}',
         "data: [DONE]",
     ]
 

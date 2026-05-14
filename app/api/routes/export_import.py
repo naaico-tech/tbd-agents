@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.agent import Agent
 from app.models.knowledge_source import KnowledgeSource, KnowledgeSourceType
 from app.models.skill import Skill
@@ -26,7 +26,7 @@ async def export_all(user=Depends(get_current_user)):
     """Export all skills, agents, user-owned workflows, and knowledge sources."""
     skills = await Skill.find_all().to_list()
     agents = await Agent.find_all().to_list()
-    workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     knowledge_sources = await KnowledgeSource.find_all().to_list()
 
     return FullExportBundle(
@@ -123,7 +123,7 @@ async def _import_workflows(items: list[ExportedWorkflow], github_user: str) -> 
     result = ImportResult()
     for item in items:
         try:
-            agent = await Agent.get(PydanticObjectId(item.agent_id))
+            agent = await Agent.get(parse_doc_id(item.agent_id))
             if not agent:
                 result.errors.append(
                     f"{item.title or 'untitled'}: agent_id {item.agent_id!r} not found"

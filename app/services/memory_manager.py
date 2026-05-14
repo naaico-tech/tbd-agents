@@ -298,12 +298,17 @@ class MemoryManager:
         memories_dicts: list[dict] = []
 
         # ── Semantic retrieval (if query provided) ───────────────────────
+        # Guard: skip embedding entirely when the agent has no stored memories
+        # to avoid loading the fastembed model (and its HuggingFace cache-
+        # validation HTTP requests) on every task for agents with empty memory.
         if query and settings.embeddings_enabled:
-            semantic_hits = await self.search_semantic(
-                agent_id, query, top_k=settings.memory_retrieval_top_k
-            )
-            if semantic_hits:
-                memories_dicts = semantic_hits
+            has_memories = await Memory.find({"agent_id": agent_id}).count() > 0
+            if has_memories:
+                semantic_hits = await self.search_semantic(
+                    agent_id, query, top_k=settings.memory_retrieval_top_k
+                )
+                if semantic_hits:
+                    memories_dicts = semantic_hits
 
         # ── Try Redis STM next ───────────────────────────────────────────
         if not memories_dicts:

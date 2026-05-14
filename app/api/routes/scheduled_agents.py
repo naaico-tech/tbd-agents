@@ -3,10 +3,10 @@
 import logging
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.scheduled_agent import ScheduledAgent
 from app.models.workflow import Workflow
 from app.schemas.scheduled_agent import (
@@ -44,10 +44,10 @@ def _to_response(sa: ScheduledAgent) -> ScheduledAgentResponse:
 
 async def _get_owned(sa_id: str, user: dict) -> ScheduledAgent:
     """Load a ScheduledAgent and verify it belongs to the authenticated user."""
-    sa = await ScheduledAgent.get(PydanticObjectId(sa_id))
+    sa = await ScheduledAgent.get(parse_doc_id(sa_id))
     if not sa:
         raise HTTPException(status_code=404, detail="Scheduled agent not found")
-    wf = await Workflow.get(PydanticObjectId(sa.workflow_id))
+    wf = await Workflow.get(parse_doc_id(sa.workflow_id))
     if not wf or wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your scheduled agent")
     return sa
@@ -63,7 +63,7 @@ async def create_scheduled_agent(
 ):
     """Create and immediately register a new scheduled agent."""
     # Verify ownership of the referenced workflow
-    wf = await Workflow.get(PydanticObjectId(body.workflow_id))
+    wf = await Workflow.get(parse_doc_id(body.workflow_id))
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
@@ -89,7 +89,7 @@ async def create_scheduled_agent(
 @router.get("", response_model=list[ScheduledAgentResponse])
 async def list_scheduled_agents(user=Depends(get_current_user)):
     """List all scheduled agents that belong to the authenticated user."""
-    user_workflows = await Workflow.find(Workflow.github_user == user["login"]).to_list()
+    user_workflows = await Workflow.find({"github_user": user["login"]}).to_list()
     wf_ids = {str(wf.id) for wf in user_workflows}
     all_sas = await ScheduledAgent.find_all().sort("-created_at").to_list()
     return [_to_response(sa) for sa in all_sas if sa.workflow_id in wf_ids]

@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.skill import Skill
 from app.schemas.export_import import (
     ExportedSkill,
@@ -58,7 +58,7 @@ async def export_skills(_user=Depends(get_current_user)):
 
 @router.get("/{skill_id}/export", response_model=SkillExportBundle)
 async def export_skill(skill_id: str, _user=Depends(get_current_user)):
-    skill = await Skill.get(PydanticObjectId(skill_id))
+    skill = await Skill.get(parse_doc_id(skill_id))
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return SkillExportBundle(items=[_to_exported(skill)])
@@ -80,7 +80,7 @@ async def import_skills(body: SkillImportBundle, _user=Depends(get_current_user)
 
 @router.get("/{skill_id}", response_model=SkillResponse)
 async def get_skill(skill_id: str, _user=Depends(get_current_user)):
-    skill = await Skill.get(PydanticObjectId(skill_id))
+    skill = await Skill.get(parse_doc_id(skill_id))
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return _to_response(skill)
@@ -90,7 +90,7 @@ async def get_skill(skill_id: str, _user=Depends(get_current_user)):
 async def update_skill(
     skill_id: str, body: SkillUpdate, _user=Depends(get_current_user)
 ):
-    skill = await Skill.get(PydanticObjectId(skill_id))
+    skill = await Skill.get(parse_doc_id(skill_id))
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     update_data = body.model_dump(exclude_none=True)
@@ -102,7 +102,7 @@ async def update_skill(
 
 @router.delete("/{skill_id}", status_code=204)
 async def delete_skill(skill_id: str, _user=Depends(get_current_user)):
-    skill = await Skill.get(PydanticObjectId(skill_id))
+    skill = await Skill.get(parse_doc_id(skill_id))
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     await skill.delete()

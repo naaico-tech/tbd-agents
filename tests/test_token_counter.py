@@ -1,6 +1,5 @@
 """Tests for app.services.token_counter."""
 
-import pytest
 
 from app.services.token_counter import count_tokens, estimate_messages_tokens
 

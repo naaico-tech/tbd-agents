@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.agent_engine import run_agent
-from app.models.mcp_server import McpServer, TransportType
+from app.models.mcp_server import TransportType
 from app.models.task_execution import TaskExecution, TaskStatus
 
 from .conftest import (
@@ -23,7 +23,6 @@ from .conftest import (
     create_token,
     create_workflow,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,7 +89,7 @@ def _sse_text_response(text: str = "Tool result used"):
     """SSE lines for simple text response (no tool calls)."""
     return [
         f'data: {{"choices":[{{"delta":{{"role":"assistant","content":"{text}"}},"finish_reason":null}}]}}',
-        f'data: {{"choices":[{{"delta":{{}},"finish_reason":"stop"}}],"usage":{{"prompt_tokens":30,"completion_tokens":10}}}}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":30,"completion_tokens":10}}',
         "data: [DONE]",
     ]
 

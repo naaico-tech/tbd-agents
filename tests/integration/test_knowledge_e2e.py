@@ -23,7 +23,6 @@ from app.models.task_execution import TaskExecution, TaskStatus
 
 from .conftest import create_agent, create_workflow
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

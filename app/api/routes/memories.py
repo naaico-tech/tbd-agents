@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
-from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.db import parse_doc_id
 from app.models.memory import Memory, MemoryScope
 from app.schemas.memory import (
     MemoryCreate,
@@ -11,8 +11,8 @@ from app.schemas.memory import (
     MemorySearchRequest,
     MemoryUpdate,
 )
-from app.services.memory_manager import memory_manager
 from app.services import memory_stm
+from app.services.memory_manager import memory_manager
 
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
@@ -71,7 +71,7 @@ async def list_memories(
 
 @router.get("/{memory_id}", response_model=MemoryResponse)
 async def get_memory(memory_id: str, _user=Depends(get_current_user)):
-    mem = await Memory.get(PydanticObjectId(memory_id))
+    mem = await Memory.get(parse_doc_id(memory_id))
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
     return _to_response(mem)
@@ -81,7 +81,7 @@ async def get_memory(memory_id: str, _user=Depends(get_current_user)):
 async def update_memory(
     memory_id: str, body: MemoryUpdate, _user=Depends(get_current_user)
 ):
-    mem = await Memory.get(PydanticObjectId(memory_id))
+    mem = await Memory.get(parse_doc_id(memory_id))
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
     update_data = body.model_dump(exclude_none=True)
@@ -93,7 +93,7 @@ async def update_memory(
 
 @router.delete("/{memory_id}", status_code=204)
 async def delete_memory(memory_id: str, _user=Depends(get_current_user)):
-    mem = await Memory.get(PydanticObjectId(memory_id))
+    mem = await Memory.get(parse_doc_id(memory_id))
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
     # Remove from Redis STM as well

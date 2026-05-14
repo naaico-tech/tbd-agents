@@ -7,8 +7,8 @@ import pytest
 
 from app.core.agent_engine import (
     _build_system_prompt,
-    _copilot_tool_uses_mcp_allowlist,
     _compress_caveman_context,
+    _copilot_tool_uses_mcp_allowlist,
     _parse_todo_list,
 )
 from app.models.agent import Agent

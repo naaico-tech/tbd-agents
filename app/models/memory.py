@@ -1,8 +1,22 @@
+import os as _os
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from beanie import Document
 from pydantic import Field
+
+_POSTGRES = _os.environ.get("DB_BACKEND", "mongo").lower() == "postgres"
+
+if _POSTGRES:
+    from pydantic import BaseModel as _PyBase
+    from pydantic import Field as _PgField
+
+    from app.db_postgres import PostgresDocument as _PgBase
+
+    class _DocumentBase(_PgBase, _PyBase):  # type: ignore[misc]
+        id: str | None = _PgField(default=None)
+
+else:
+    from beanie import Document as _DocumentBase  # type: ignore[assignment]
 
 
 class MemoryScope(StrEnum):
@@ -11,7 +25,7 @@ class MemoryScope(StrEnum):
     GLOBAL = "global"
 
 
-class Memory(Document):
+class Memory(_DocumentBase):  # type: ignore[valid-type]
     agent_id: str
     scope: MemoryScope
     key: str
