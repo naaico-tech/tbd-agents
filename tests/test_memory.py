@@ -427,11 +427,16 @@ class TestMemoryManager:
             {"key": "semantic_fact", "scope": "agent", "value": "semantic match"},
         ]
 
+        mock_qs = MagicMock()
+        mock_qs.count = AsyncMock(return_value=1)
+
         with (
             patch.object(manager, "prune", new_callable=AsyncMock),
             patch.object(manager, "search_semantic", new_callable=AsyncMock, return_value=semantic_hits) as mock_sem,
             patch("app.services.memory_manager.settings") as mock_settings,
+            patch("app.services.memory_manager.Memory") as MockMemory,
         ):
+            MockMemory.find.return_value = mock_qs
             mock_settings.embeddings_enabled = True
             mock_settings.memory_retrieval_top_k = 8
             mock_settings.prompt_context_max_items = 12
@@ -446,6 +451,9 @@ class TestMemoryManager:
         """When semantic search returns nothing, STM is used as fallback."""
         stm_entries = [{"key": "stm_key", "scope": "agent", "value": "stm_value"}]
 
+        mock_qs = MagicMock()
+        mock_qs.count = AsyncMock(return_value=1)
+
         with (
             patch.object(manager, "prune", new_callable=AsyncMock),
             patch.object(manager, "search_semantic", new_callable=AsyncMock, return_value=[]),
@@ -455,7 +463,9 @@ class TestMemoryManager:
                 return_value=stm_entries,
             ),
             patch("app.services.memory_manager.settings") as mock_settings,
+            patch("app.services.memory_manager.Memory") as MockMemory,
         ):
+            MockMemory.find.return_value = mock_qs
             mock_settings.embeddings_enabled = True
             mock_settings.memory_retrieval_top_k = 8
             mock_settings.prompt_context_max_items = 12
