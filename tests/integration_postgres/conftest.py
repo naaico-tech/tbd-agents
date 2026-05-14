@@ -28,10 +28,26 @@ from __future__ import annotations
 
 import os
 
-# IMPORTANT: set DB_BACKEND BEFORE any app model imports so the conditional
-# ``_POSTGRES = os.environ.get("DB_BACKEND", "mongo") == "postgres"`` at the
-# top of each model module evaluates to True.
+# ---------------------------------------------------------------------------
+# IMPORTANT: set ALL env vars BEFORE any app imports so that:
+#   1. ``_POSTGRES = os.environ.get("DB_BACKEND", "mongo") == "postgres"``
+#      evaluates to True in every model module.
+#   2. Pydantic Settings singleton picks up POSTGRES_URI when it is first
+#      instantiated inside app.config (which happens at import time of any
+#      app module).  Setting os.environ AFTER the first app import is too
+#      late because Settings reads env vars only at instantiation.
+# ---------------------------------------------------------------------------
+
 os.environ["DB_BACKEND"] = "postgres"
+
+TEST_POSTGRES_URI = os.getenv(
+    "TEST_POSTGRES_URI",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents_integration_test",
+)
+TEST_DB_NAME = TEST_POSTGRES_URI.rsplit("/", 1)[-1]
+
+# Must be set BEFORE the app.db_postgres import below.
+os.environ["POSTGRES_URI"] = TEST_POSTGRES_URI
 
 from datetime import UTC, datetime  # noqa: E402 (after env-var set)
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
@@ -40,7 +56,7 @@ import pytest  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# DB helpers — imported AFTER DB_BACKEND is set
+# DB helpers — imported AFTER all env vars are set
 # ---------------------------------------------------------------------------
 
 from app.db_postgres import (  # noqa: E402
@@ -49,19 +65,6 @@ from app.db_postgres import (  # noqa: E402
     get_engine,
     init_postgres,
 )
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-TEST_POSTGRES_URI = os.getenv(
-    "TEST_POSTGRES_URI",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/tbd_agents_integration_test",
-)
-TEST_DB_NAME = TEST_POSTGRES_URI.rsplit("/", 1)[-1]
-
-# Override the settings URI so PostgresDocument uses the test database.
-os.environ["POSTGRES_URI"] = TEST_POSTGRES_URI
 
 
 def _create_test_db_if_missing() -> None:
