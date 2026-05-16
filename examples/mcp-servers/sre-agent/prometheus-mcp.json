@@ -1,0 +1,11 @@
+{
+  "name": "prometheus",
+  "transport_type": "sse",
+  "connection_config": {
+    "url": "http://prometheus-mcp:3000/sse",
+    "headers": {
+      "Authorization": "Bearer {{token:prometheus-mcp-token}}"
+    }
+  },
+  "tags": ["prometheus", "observability", "metrics", "sre"]
+}

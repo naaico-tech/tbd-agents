@@ -1,0 +1,14 @@
+{
+  "name": "tiktok-ads",
+  "transport_type": "stdio",
+  "connection_config": {
+    "command": "npx",
+    "args": ["-y", "@tiktok/mcp-server-ads"],
+    "env": {
+      "TIKTOK_ACCESS_TOKEN": "{{token:tiktok-ads-access-token}}",
+      "TIKTOK_APP_ID": "{{token:tiktok-ads-app-id}}",
+      "TIKTOK_APP_SECRET": "{{token:tiktok-ads-app-secret}}"
+    }
+  },
+  "tags": ["tiktok_ads", "ads", "social-ads", "marketing"]
+}

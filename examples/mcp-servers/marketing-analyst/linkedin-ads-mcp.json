@@ -1,0 +1,11 @@
+{
+  "name": "linkedin-ads",
+  "transport_type": "sse",
+  "connection_config": {
+    "url": "http://linkedin-ads-mcp:3000/sse",
+    "headers": {
+      "Authorization": "Bearer {{token:linkedin-ads-access-token}}"
+    }
+  },
+  "tags": ["linkedin_ads", "ads", "b2b-ads", "marketing"]
+}

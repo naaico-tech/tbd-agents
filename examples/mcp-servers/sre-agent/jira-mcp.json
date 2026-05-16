@@ -1,0 +1,14 @@
+{
+  "name": "jira",
+  "transport_type": "stdio",
+  "connection_config": {
+    "command": "npx",
+    "args": ["-y", "@anthropic/mcp-server-atlassian"],
+    "env": {
+      "ATLASSIAN_API_TOKEN": "{{token:atlassian-api-token}}",
+      "ATLASSIAN_EMAIL": "{{token:atlassian-email}}",
+      "ATLASSIAN_URL": "{{token:atlassian-url}}"
+    }
+  },
+  "tags": ["jira", "ticketing", "incident", "sre"]
+}

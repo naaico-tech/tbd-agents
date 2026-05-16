@@ -1,0 +1,13 @@
+{
+  "name": "gcp",
+  "transport_type": "stdio",
+  "connection_config": {
+    "command": "npx",
+    "args": ["-y", "@google/mcp-server-gcp"],
+    "env": {
+      "GOOGLE_APPLICATION_CREDENTIALS_JSON": "{{token:gcp-service-account-key}}",
+      "GCP_PROJECT_ID": "{{token:gcp-project-id}}"
+    }
+  },
+  "tags": ["gcp", "cloud", "infrastructure", "sre"]
+}
