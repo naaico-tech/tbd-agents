@@ -13,8 +13,6 @@
 plugins:
   - name: mysql_read
     enabled: true
-  - name: repo_inspector
-    enabled: true
   - name: bigquery_read
     enabled: true
   - name: slack

@@ -177,18 +177,6 @@ def test_mysql_read_plugin_schema():
     assert "max_rows" not in schema.get("required", [])
 
 
-def test_repo_inspector_plugin_schema():
-    """RepoInspectorPlugin has correct name and 'operation' as required string."""
-    from app.plugins.repo_inspector import RepoInspectorPlugin
-
-    plugin = RepoInspectorPlugin()
-    assert plugin.name == "repo_inspector"
-
-    schema = plugin.get_parameters_schema()
-    assert "operation" in schema["required"]
-    assert schema["properties"]["operation"]["type"] == "string"
-
-
 def test_get_source_code_raises_for_non_plugin_module():
     """get_source_code() raises ValueError when class is not in app.plugins.*."""
     from app.core.plugin_base import PluginBase

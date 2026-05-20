@@ -443,6 +443,31 @@ async def close_postgres() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _jsonb_path(col: str, parts: list[str]) -> str:
+    """Build a JSONB navigation path returning a jsonb value.
+
+    e.g. _jsonb_path('metadata', ['workflow_id']) → "metadata->'workflow_id'"
+    """
+    expr = col
+    for part in parts:
+        expr += f"->'{part}'"
+    return expr
+
+
+def _jsonb_text_path(col: str, parts: list[str]) -> str:
+    """Build a JSONB navigation path returning a text value (uses ->> for last hop).
+
+    e.g. _jsonb_text_path('metadata', ['workflow_id']) → "metadata->>'workflow_id'"
+    """
+    if not parts:
+        return col
+    expr = col
+    for part in parts[:-1]:
+        expr += f"->'{part}'"
+    expr += f"->>'{parts[-1]}'"
+    return expr
+
+
 def _translate_filters(
     model_cls: type,
     filters: dict[str, Any],
@@ -451,6 +476,8 @@ def _translate_filters(
     """Translate a MongoDB-style filter dict to a structured-column WHERE clause.
 
     Supported operators: $in, $ne, $lt, $gt, $lte, $gte, $exists.
+    Supports MongoDB dot-notation for JSONB fields (e.g. ``metadata.workflow_id``
+    translates to ``metadata->>'workflow_id'``).
     Returns a SQL string with named bind parameters written into *params*.
 
     Args:
@@ -467,9 +494,85 @@ def _translate_filters(
     )
 
     for key, value in filters.items():
-        col_key = "id" if key in ("_id", "id") else key
-        sa_type = col_map.get(col_key, TEXT())
+        # ── Detect MongoDB dot-notation for JSONB sub-fields ──────────────
+        # e.g. "metadata.workflow_id" → col="metadata", json_parts=["workflow_id"]
+        if "." in key and not key.startswith("$"):
+            col_name, *json_parts = key.split(".")
+            is_jsonb_path = True
+            sa_type = JSONB()  # the top-level column is always JSONB
+        else:
+            col_name = "id" if key in ("_id", "id") else key
+            json_parts = []
+            is_jsonb_path = False
+            sa_type = col_map.get(col_name, TEXT())
 
+        col_key = col_name  # alias used in the rest of the loop
+
+        if is_jsonb_path:
+            # ── JSONB dot-notation branch ─────────────────────────────────
+            text_expr = _jsonb_text_path(col_name, json_parts)   # col->>'key'
+            jsonb_expr = _jsonb_path(col_name, json_parts)        # col->'key'
+
+            if isinstance(value, dict):
+                for op, op_val in value.items():
+                    param_name = f"p{param_idx}"
+                    param_idx += 1
+
+                    if op == "$in":
+                        if not op_val:
+                            conditions.append("FALSE")
+                        else:
+                            # Use jsonb ? operator: col->'key' ? :p0
+                            # Works for both JSON arrays and JSON objects (key lookup).
+                            any_clauses: list[str] = []
+                            for v in op_val:
+                                pn = f"p{param_idx}"
+                                param_idx += 1
+                                params[pn] = str(v.value if isinstance(v, Enum) else v)
+                                any_clauses.append(f"{jsonb_expr} ? :{pn}")
+                            conditions.append(f"({' OR '.join(any_clauses)})")
+
+                    elif op == "$ne":
+                        params[param_name] = str(op_val.value if isinstance(op_val, Enum) else op_val)
+                        conditions.append(f"{text_expr} != :{param_name}")
+
+                    elif op == "$lt":
+                        params[param_name] = op_val
+                        conditions.append(f"({text_expr})::numeric < :{param_name}")
+
+                    elif op == "$gt":
+                        params[param_name] = op_val
+                        conditions.append(f"({text_expr})::numeric > :{param_name}")
+
+                    elif op == "$lte":
+                        params[param_name] = op_val
+                        conditions.append(f"({text_expr})::numeric <= :{param_name}")
+
+                    elif op == "$gte":
+                        params[param_name] = op_val
+                        conditions.append(f"({text_expr})::numeric >= :{param_name}")
+
+                    elif op == "$exists":
+                        if op_val:
+                            conditions.append(f"{jsonb_expr} IS NOT NULL")
+                        else:
+                            conditions.append(f"{jsonb_expr} IS NULL")
+
+                    else:
+                        param_idx -= 1  # revert unused slot
+
+            elif value is None:
+                conditions.append(f"{jsonb_expr} IS NULL")
+
+            else:
+                param_name = f"p{param_idx}"
+                param_idx += 1
+                params[param_name] = str(value.value if isinstance(value, Enum) else value)
+                conditions.append(f"{text_expr} = :{param_name}")
+
+            continue  # skip the non-JSONB branch below
+
+        # ── Regular column branch ─────────────────────────────────────────
         if isinstance(value, dict):
             for op, op_val in value.items():
                 param_name = f"p{param_idx}"
@@ -478,6 +581,16 @@ def _translate_filters(
                 if op == "$in":
                     if not op_val:
                         conditions.append("FALSE")
+                    elif isinstance(sa_type, ARRAY):
+                        # ARRAY column: "any of op_val is in the array column"
+                        # SQL: (:p0 = ANY(col) OR :p1 = ANY(col) OR ...)
+                        any_clauses_r: list[str] = []
+                        for v in op_val:
+                            pn = f"p{param_idx}"
+                            param_idx += 1
+                            params[pn] = v.value if isinstance(v, Enum) else v
+                            any_clauses_r.append(f":{pn} = ANY({col_key})")
+                        conditions.append(f"({' OR '.join(any_clauses_r)})")
                     else:
                         phs: list[str] = []
                         for v in op_val:

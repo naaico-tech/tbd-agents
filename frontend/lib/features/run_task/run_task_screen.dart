@@ -269,6 +269,36 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
     }
   }
 
+  Future<void> _resetWorkflow() async {
+    final wfId = _selectedWorkflow?.id;
+    if (wfId == null) return;
+    final resp = await _client.post(
+      AppLinks.apiUri('/workflows/$wfId/reset'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      String detail = 'Reset failed (${resp.statusCode})';
+      try {
+        final body = jsonDecode(resp.body) as Map<String, dynamic>?;
+        detail = body?['detail'] as String? ?? detail;
+      } catch (_) {}
+      throw Exception(detail);
+    }
+  }
+
+  Future<void> _resetAndRetry() async {
+    setState(() => _error = null);
+    try {
+      await _resetWorkflow();
+      await _submitTask();
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Reset failed: $e');
+    }
+  }
+
+  bool get _isTaskAlreadyRunning =>
+      _error != null && _error!.toLowerCase().contains('already running');
+
   // ── helpers ────────────────────────────────────────────────────────────
 
   Color get _outputAccentColor {
@@ -331,32 +361,63 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
               child: RetroCard(
                 child: Padding(
                   padding: const EdgeInsets.all(sp12),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.error_outline,
-                        color: accentPrimary,
-                        size: 16,
-                      ),
-                      const SizedBox(width: sp8),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: const TextStyle(
-                            fontFamily: fontBody,
-                            fontSize: fontSizeSmall,
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
                             color: accentPrimary,
+                            size: 16,
                           ),
-                        ),
+                          const SizedBox(width: sp8),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: const TextStyle(
+                                fontFamily: fontBody,
+                                fontSize: fontSizeSmall,
+                                color: accentPrimary,
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() => _error = null),
+                            child: const Icon(
+                              Icons.close,
+                              size: 14,
+                              color: textMuted,
+                            ),
+                          ),
+                        ],
                       ),
-                      GestureDetector(
-                        onTap: () => setState(() => _error = null),
-                        child: const Icon(
-                          Icons.close,
-                          size: 14,
-                          color: textMuted,
-                        ),
-                      ),
+                      if (_isTaskAlreadyRunning && _selectedWorkflow != null) ...
+                        [
+                          const SizedBox(height: sp8),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.info_outline,
+                                size: 13,
+                                color: textMuted,
+                              ),
+                              const SizedBox(width: sp4),
+                              const Expanded(
+                                child: Text(
+                                  'A previous run may be stuck. Reset the workflow to clear the lock, then retry.',
+                                  style: TextStyle(
+                                    fontFamily: fontBody,
+                                    fontSize: 11,
+                                    color: textMuted,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: sp8),
+                          _ResetAndRetryButton(onPressed: _resetAndRetry),
+                        ],
                     ],
                   ),
                 ),
@@ -759,6 +820,64 @@ class _RunTaskScreenState extends State<RunTaskScreen> {
           .toList(),
       onChanged:
           _isRunning ? null : (v) => setState(() => _selectedWorkflow = v),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _ResetAndRetryButton — shown in the error banner when task is already running
+// ---------------------------------------------------------------------------
+class _ResetAndRetryButton extends StatefulWidget {
+  const _ResetAndRetryButton({required this.onPressed});
+  final Future<void> Function() onPressed;
+
+  @override
+  State<_ResetAndRetryButton> createState() => _ResetAndRetryButtonState();
+}
+
+class _ResetAndRetryButtonState extends State<_ResetAndRetryButton> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: _busy
+          ? null
+          : () async {
+              setState(() => _busy = true);
+              try {
+                await widget.onPressed();
+              } finally {
+                if (mounted) setState(() => _busy = false);
+              }
+            },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: sp8, vertical: 4),
+        decoration: BoxDecoration(
+          border: Border.all(color: accentAmber, width: 1),
+          color: accentAmber.withValues(alpha: 0.1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _busy ? Icons.hourglass_empty : Icons.restart_alt,
+              color: accentAmber,
+              size: 12,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              _busy ? 'RESETTING…' : 'RESET & RETRY',
+              style: const TextStyle(
+                fontFamily: fontBody,
+                fontSize: 10,
+                color: accentAmber,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

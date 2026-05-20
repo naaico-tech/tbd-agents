@@ -385,6 +385,24 @@ def _sanitize_json_schema(obj):
     return obj
 
 
+def _strip_additional_properties(obj):
+    """Recursively remove ``additionalProperties`` from a JSON Schema dict.
+
+    The Claude Agent SDK beta (``beta.agents.create``) rejects
+    ``additionalProperties`` anywhere in ``input_schema`` with a 400 error.
+    This is a no-op for other schema consumers (OpenAI, Anthropic Messages API).
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _strip_additional_properties(v)
+            for k, v in obj.items()
+            if k != "additionalProperties"
+        }
+    if isinstance(obj, list):
+        return [_strip_additional_properties(item) for item in obj]
+    return obj
+
+
 def _estimate_tools_tokens(tools: list[dict]) -> int:
     """Estimate token count for serialized tool definitions."""
     if not tools:
@@ -763,6 +781,14 @@ async def _sync_repo(workflow: Workflow) -> str | None:
             clone_url = clone_url.replace("https://", f"https://{token_value}@")
 
     if os.path.isdir(os.path.join(repo_dir, ".git")):
+        # Remove stale lock file left by a killed/crashed git process
+        lock_file = os.path.join(repo_dir, ".git", "index.lock")
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+                logger.info("Removed stale git lock file: %s", lock_file)
+            except OSError as exc:
+                logger.warning("Could not remove git lock file %s: %s", lock_file, exc)
         # Pull latest
         cmd = f"git -C {shlex.quote(repo_dir)} fetch --depth 1 origin {shlex.quote(branch)} && git -C {shlex.quote(repo_dir)} checkout FETCH_HEAD"
     else:
@@ -1259,8 +1285,9 @@ def _append_custom_tool_definition(
             "parameters": _sanitize_json_schema(schema),
         },
     })
-    allowed_keys = {"type", "properties", "required", "description", "additionalProperties"}
-    claude_schema = {k: v for k, v in schema.items() if k in allowed_keys}
+    allowed_keys = {"type", "properties", "required", "description"}
+    claude_schema = _strip_additional_properties(_sanitize_json_schema(schema))
+    claude_schema = {k: v for k, v in claude_schema.items() if k in allowed_keys}
     claude_schema.setdefault("type", "object")
     claude_schema.setdefault("properties", {})
     claude_defs.append({
@@ -1271,18 +1298,6 @@ def _append_custom_tool_definition(
     })
     fn_map[tool.name] = tool
     return True
-
-
-async def _load_builtin_repo_inspector_tool() -> CustomTool | None:
-    """Load the repo inspection tool that is auto-loaded from disk, if present."""
-    try:
-        tool = await CustomTool.find_one({"name": "repo_inspector"})
-    except Exception as exc:
-        logger.debug("Repo inspector lookup skipped: %s", exc)
-        return None
-    if not tool or not tool.is_enabled:
-        return None
-    return tool
 
 
 def _build_custom_tool_runtime_env(repo_path: str | None = None) -> dict[str, str]:
@@ -1576,9 +1591,10 @@ def _mcp_tool_to_claude_custom(tool) -> dict:
     defs = schema.get("$defs", {})
     if defs:
         schema = _resolve_refs(schema, defs)
-    schema = _sanitize_json_schema(schema)
-    # Keep only the keys the API accepts.
-    schema = {k: v for k, v in schema.items() if k in _ALLOWED_SCHEMA_KEYS}
+    schema = _strip_additional_properties(_sanitize_json_schema(schema))
+    # Keep only the keys the Agent SDK accepts (additionalProperties excluded).
+    _CLAUDE_SDK_SCHEMA_KEYS = _ALLOWED_SCHEMA_KEYS - {"additionalProperties"}
+    schema = {k: v for k, v in schema.items() if k in _CLAUDE_SDK_SCHEMA_KEYS}
     return {
         "type": "custom",
         "name": tool.name,
@@ -1868,22 +1884,6 @@ async def _run_with_claude_sdk(
                     )
         except Exception as _ct_exc:
             logger.debug("Custom tool lookup skipped: %s", _ct_exc)
-
-        if repo_path:
-            repo_tool = await _load_builtin_repo_inspector_tool()
-            repo_tool_added = _append_custom_tool_definition(
-                repo_tool,
-                [],
-                custom_tools,
-                custom_python_tool_map_claude,
-            )
-            if repo_tool_added:
-                await _log(
-                    workflow,
-                    "repo_tool_loaded",
-                    "repo_inspector exposed for repository-aware file inspection",
-                    task_exec,
-                )
 
         # ── Build native MCP servers for URL-based transports ────────────────
         native_mcp_servers = _build_claude_agent_mcp_servers(mcp_config or {})
@@ -2361,19 +2361,6 @@ async def _run_with_anthropic_messages(
         except Exception as _ct_exc:
             logger.debug("Custom tool lookup skipped: %s", _ct_exc)
 
-        if repo_path:
-            repo_tool = await _load_builtin_repo_inspector_tool()
-            _repo_openai_defs: list[dict] = []
-            _repo_claude_defs: list[dict] = []
-            repo_tool_added = _append_custom_tool_definition(
-                repo_tool, _repo_openai_defs, _repo_claude_defs, custom_python_tool_map,
-            )
-            if repo_tool_added:
-                _repo_anthropic_defs = [{k: v for k, v in t.items() if k != "type"} for t in _repo_claude_defs]
-                anthropic_tools.extend(_repo_anthropic_defs)
-                await _log(workflow, "repo_tool_loaded",
-                           "repo_inspector exposed for repository-aware file inspection", task_exec)
-
         anthropic_tools.append(STORE_MEMORY_TOOL_ANTHROPIC)
 
         await _log(
@@ -2758,24 +2745,6 @@ async def _run_with_custom_provider(
                     )
         except Exception as _ct_exc:
             logger.debug("Custom tool lookup skipped: %s", _ct_exc)
-
-        if repo_path:
-            repo_tool = await _load_builtin_repo_inspector_tool()
-            repo_tool_openai_defs: list[dict] = []
-            repo_tool_added = _append_custom_tool_definition(
-                repo_tool,
-                repo_tool_openai_defs,
-                [],
-                custom_python_tool_map,
-            )
-            if repo_tool_added:
-                openai_tools.extend(repo_tool_openai_defs)
-                await _log(
-                    workflow,
-                    "repo_tool_loaded",
-                    "repo_inspector exposed for repository-aware file inspection",
-                    task_exec,
-                )
 
         # Always add the store_memory built-in tool
         openai_tools.append(STORE_MEMORY_TOOL_OPENAI)
@@ -3209,7 +3178,7 @@ async def run_agent(
                     await _log(
                         workflow,
                         "provider_resolved",
-                        f"Using BYOK github_copilot provider '{provider.name}'",
+                        f"Using GitHub Copilot provider '{provider.name}' (token override)",
                         task_exec,
                     )
                 else:
@@ -3395,8 +3364,7 @@ async def run_agent(
             f"A git repository has been cloned and is available at: {repo_path}\n"
             f"URL: {workflow.repo_url}\n"
             f"Branch: {workflow.repo_branch or 'main'}\n"
-            f"Use repository-aware tools to inspect this path when available. "
-            f"If the repo_inspector tool is exposed, prefer it for listing, searching, and reading files instead of attempting shell access.\n"
+            f"Use repository-aware tools to inspect this path when available.\n"
             f"</repository>"
         )
         system_prompt += repo_context

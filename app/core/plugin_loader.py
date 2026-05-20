@@ -37,8 +37,6 @@ def _name_to_class(name: str) -> str:
         'MysqlReadPlugin'
         >>> _name_to_class("web_search")
         'WebSearchPlugin'
-        >>> _name_to_class("repo_inspector")
-        'RepoInspectorPlugin'
 
     Args:
         name: Snake-case plugin identifier, e.g. ``"mysql_read"``.

@@ -55,7 +55,6 @@ def _make_plugin_cls(name: str = "test_plugin", is_enabled: bool = True):
 def test_name_to_class_conversion():
     """_name_to_class converts snake_case plugin names to PascalCase class names."""
     assert _name_to_class("mysql_read") == "MysqlReadPlugin"
-    assert _name_to_class("repo_inspector") == "RepoInspectorPlugin"
     assert _name_to_class("web_search") == "WebSearchPlugin"
     assert _name_to_class("simple") == "SimplePlugin"
 

@@ -95,6 +95,22 @@ class TestTranslateFilters:
         sql, params = _tf({"status": {"$in": []}})
         assert sql == "FALSE"
 
+    def test_operator_in_array_column_uses_any(self):
+        """$in on a TEXT[] column should produce ANY(col) clauses, not IN (...)."""
+        from app.db_postgres import ARRAY
+        from sqlalchemy import TEXT
+
+        class _FakeModel:
+            @classmethod
+            def _get_column_map(cls):
+                return {"tags": ARRAY(TEXT())}
+
+        sql, params = _tf({"tags": {"$in": ["sre", "jira"]}}, model_cls=_FakeModel)
+        assert "IN (" not in sql
+        assert "ANY(tags)" in sql
+        assert "sre" in params.values()
+        assert "jira" in params.values()
+
     def test_operator_ne(self):
         """$ne should produce a != clause."""
         sql, params = _tf({"status": {"$ne": "deleted"}})
@@ -175,6 +191,64 @@ class TestTranslateFilters:
         assert " AND " in sql
         assert "name" in sql
         assert "active" in sql
+
+    # ── dot-notation / JSONB sub-field tests ──────────────────────────────
+
+    def test_dot_notation_scalar_equality(self):
+        """metadata.workflow_id = 'abc' → metadata->>'workflow_id' = :p0."""
+        sql, params = _tf({"metadata.workflow_id": "abc"})
+        assert "metadata->>'workflow_id'" in sql
+        assert "=" in sql
+        assert "abc" in params.values()
+        assert "metadata.workflow_id" not in sql  # must not appear verbatim
+
+    def test_dot_notation_scalar_none(self):
+        """metadata.workflow_id = None → metadata->'workflow_id' IS NULL."""
+        sql, params = _tf({"metadata.workflow_id": None})
+        assert "metadata->'workflow_id' IS NULL" in sql
+        assert params == {}
+
+    def test_dot_notation_in_uses_jsonb_contains(self):
+        """metadata.tags $in ['sre', 'jira'] → uses JSONB ? operator per value."""
+        sql, params = _tf({"metadata.tags": {"$in": ["sre", "jira"]}})
+        # Must use jsonb ? operator, not IN (...)
+        assert "IN (" not in sql
+        assert "metadata->'tags' ?" in sql
+        assert "sre" in params.values()
+        assert "jira" in params.values()
+
+    def test_dot_notation_in_empty_is_false(self):
+        """metadata.tags $in [] → FALSE."""
+        sql, params = _tf({"metadata.tags": {"$in": []}})
+        assert sql == "FALSE"
+
+    def test_dot_notation_ne(self):
+        """metadata.status $ne 'deleted' → metadata->>'status' != :p0."""
+        sql, params = _tf({"metadata.status": {"$ne": "deleted"}})
+        assert "metadata->>'status'" in sql
+        assert "!=" in sql
+        assert "deleted" in params.values()
+
+    def test_dot_notation_exists_true(self):
+        """metadata.workflow_id $exists True → metadata->'workflow_id' IS NOT NULL."""
+        sql, params = _tf({"metadata.workflow_id": {"$exists": True}})
+        assert "metadata->'workflow_id' IS NOT NULL" in sql
+        assert params == {}
+
+    def test_dot_notation_exists_false(self):
+        """metadata.workflow_id $exists False → metadata->'workflow_id' IS NULL."""
+        sql, params = _tf({"metadata.workflow_id": {"$exists": False}})
+        assert "metadata->'workflow_id' IS NULL" in sql
+        assert params == {}
+
+    def test_dot_notation_combined_with_top_level(self):
+        """Dot-notation and regular keys can appear in the same filter."""
+        sql, params = _tf({"agent_id": "a1", "metadata.workflow_id": "wf1"})
+        assert "AND" in sql
+        assert "agent_id" in sql
+        assert "metadata->>'workflow_id'" in sql
+        assert "a1" in params.values()
+        assert "wf1" in params.values()
 
     def test_lt_gt_combined(self):
         """$lt and $gt on the same key should produce two separate conditions."""

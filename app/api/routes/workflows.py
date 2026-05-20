@@ -145,7 +145,22 @@ async def send_prompt(
     if wf.status == WorkflowStatus.INACTIVE:
         raise HTTPException(status_code=400, detail="Workflow is inactive")
     if wf.status == WorkflowStatus.RUNNING:
-        raise HTTPException(status_code=400, detail="A task is already running for this workflow")
+        # Auto-recover if the Celery task is no longer alive (e.g. worker was restarted)
+        running_task = await TaskExecution.find_one(
+            {"workflow_id": str(wf.id), "status": "running"}
+        )
+        task_alive = False
+        if running_task and running_task.celery_task_id:
+            from celery.result import AsyncResult
+            from app.celery_app import celery as celery_app
+            ar = AsyncResult(running_task.celery_task_id, app=celery_app)
+            task_alive = ar.state in ("PENDING", "STARTED", "RETRY")
+        if task_alive:
+            raise HTTPException(status_code=400, detail="A task is already running for this workflow")
+        # Dead task — mark it failed and let the new prompt proceed
+        if running_task:
+            running_task.status = "failed"
+            await running_task.save()
 
     # Reset for a new run — also auto-recovers from terminal states
     # (completed / failed / halted / max_turns_reached) so workflows are reusable
@@ -206,8 +221,8 @@ async def halt_workflow(workflow_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Workflow not found")
     if wf.github_user != user["login"]:
         raise HTTPException(status_code=403, detail="Not your workflow")
-    if wf.status != WorkflowStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, not active")
+    if wf.status not in (WorkflowStatus.ACTIVE, WorkflowStatus.RUNNING):
+        raise HTTPException(status_code=400, detail=f"Workflow is {wf.status}, cannot halt")
     # Check if there is actually a running task for this workflow
     running_task = await TaskExecution.find_one(
         {"workflow_id": str(wf.id), "status": "running"},
@@ -354,6 +369,41 @@ async def import_workflows(body: WorkflowImportBundle, user=Depends(get_current_
         except Exception as exc:
             result.errors.append(f"{item.title or 'untitled'}: {exc}")
     return result
+
+
+@router.post("/{workflow_id}/reset", status_code=200)
+async def reset_workflow(
+    workflow_id: str,
+    user=Depends(get_current_user),
+):
+    """Force-reset a stuck workflow back to ACTIVE. Revokes any live Celery task and
+    marks running TaskExecution records as failed. Safe to call after a worker crash."""
+    wf = await Workflow.get(parse_doc_id(workflow_id))
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf.github_user != user["login"]:
+        raise HTTPException(status_code=403, detail="Not your workflow")
+    if wf.status == WorkflowStatus.INACTIVE:
+        raise HTTPException(status_code=400, detail="Workflow is inactive — activate it first")
+
+    # Revoke the live Celery task and mark any running TaskExecution as failed
+    running_tasks = await TaskExecution.find(
+        {"workflow_id": str(wf.id), "status": "running"}
+    ).to_list()
+    from celery.result import AsyncResult
+    from app.celery_app import celery as celery_app
+    for t in running_tasks:
+        if t.celery_task_id:
+            AsyncResult(t.celery_task_id, app=celery_app).revoke(terminate=True)
+        t.status = "failed"
+        await t.save()
+
+    wf.status = WorkflowStatus.ACTIVE
+    from datetime import UTC, datetime
+    wf.updated_at = datetime.now(UTC)
+    await wf.save()
+    await event_bus.clear_halt(str(wf.id))
+    return {"detail": "Workflow reset to active", "tasks_aborted": len(running_tasks)}
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)

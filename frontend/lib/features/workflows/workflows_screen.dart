@@ -567,6 +567,52 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
     });
   }
 
+  Future<void> _resetWorkflow(BuildContext ctx, _Workflow workflow) async {
+    final name = workflow.title.isNotEmpty ? workflow.title : workflow.id;
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (_) => _ConfirmDeleteDialog(
+        message: "Reset workflow '$name'?\n\nThis will abort any stuck task and unlock the workflow.",
+        accentColor: accentAmber,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final response = await _client.post(
+        AppLinks.apiUri('/workflows/${workflow.id}/reset'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        String detail;
+        try {
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Reset failed (${response.statusCode})';
+        } catch (_) {
+          detail = response.body.isNotEmpty
+              ? response.body
+              : 'Reset failed (${response.statusCode})';
+        }
+        throw Exception(detail);
+      }
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Workflow '$name' reset to active."),
+          backgroundColor: accentTeal,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _confirmDelete(
     BuildContext ctx,
     _Workflow workflow,
@@ -703,6 +749,7 @@ class _WorkflowsScreenState extends State<WorkflowsScreen> {
                                 client: _client,
                                 onSaved: _reload,
                                 onDelete: () => _confirmDelete(context, wf),
+                                onReset: () => _resetWorkflow(context, wf),
                               ),
                           ],
                         ),
@@ -726,12 +773,14 @@ class _WorkflowCard extends StatelessWidget {
     required this.client,
     required this.onSaved,
     this.onDelete,
+    this.onReset,
   });
 
   final _Workflow workflow;
   final http.Client client;
   final VoidCallback onSaved;
   final VoidCallback? onDelete;
+  final VoidCallback? onReset;
 
   String get _displayTitle =>
       workflow.title.isNotEmpty ? workflow.title : workflow.agentId;
@@ -739,8 +788,9 @@ class _WorkflowCard extends StatelessWidget {
   Color get _statusColor {
     switch (workflow.status.toLowerCase()) {
       case 'active':
-      case 'running':
         return accentTeal;
+      case 'running':
+        return accentAmber;
       case 'error':
       case 'failed':
         return accentPrimary;
@@ -847,6 +897,17 @@ class _WorkflowCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (workflow.status.toLowerCase() == 'running' && onReset != null) ...
+                    [
+                      const SizedBox(width: sp8),
+                      RetroButton(
+                        label: 'RESET',
+                        icon: Icons.restart_alt,
+                        color: accentAmber,
+                        textColor: textPrimary,
+                        onPressed: onReset,
+                      ),
+                    ],
                   if (onDelete != null) ...[
                     const SizedBox(width: sp8),
                     IconButton(

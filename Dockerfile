@@ -45,6 +45,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_SYSTEM_PYTHON=1 \
     PATH="/opt/node/bin:${PATH}"
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -52,6 +53,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-compile uv
 
 COPY --from=python-builder /install /usr/local
 COPY --from=node-runtime /usr/local/ /opt/node/
