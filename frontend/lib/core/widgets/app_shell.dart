@@ -116,6 +116,12 @@ class AppShell extends StatelessWidget {
       icon: Icons.chat_bubble_outline,
       accentColor: accentLavender,
     ),
+    NavDestination(
+      route: AppLinks.codegraph,
+      label: 'Code Graph',
+      icon: Icons.account_tree_outlined,
+      accentColor: accentTeal,
+    ),
   ];
 
   @override

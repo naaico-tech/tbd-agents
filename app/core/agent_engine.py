@@ -3231,6 +3231,24 @@ async def run_agent(
 
     mcp_servers_db: list[McpServer] = list(mcp_servers_map.values())
 
+    # Auto-inject codegraph MCP if the workflow has a linked repo
+    if workflow.codegraph_repo_id and settings.codegraph_enabled:
+        try:
+            from app.models.codegraph_repo import CodeGraphRepo, CodeGraphRepoStatus
+            cg_repo = await CodeGraphRepo.get(parse_doc_id(workflow.codegraph_repo_id))
+            if (
+                cg_repo
+                and cg_repo.status == CodeGraphRepoStatus.READY
+                and cg_repo.mcp_server_id
+                and cg_repo.mcp_server_id not in mcp_servers_map
+            ):
+                cg_mcp = await McpServer.get(parse_doc_id(cg_repo.mcp_server_id))
+                if cg_mcp:
+                    mcp_servers_map[str(cg_mcp.id)] = cg_mcp
+                    mcp_servers_db = list(mcp_servers_map.values())
+        except Exception:
+            pass  # Non-fatal — agent still runs without codegraph
+
     mcp_config = await build_mcp_servers_config(mcp_servers_db)
 
     # Record MCP connection metrics

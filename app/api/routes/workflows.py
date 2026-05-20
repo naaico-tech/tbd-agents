@@ -77,6 +77,7 @@ async def _to_response(wf: Workflow) -> WorkflowResponse:
         repo_url=wf.repo_url,
         repo_branch=wf.repo_branch,
         repo_token_name=wf.repo_token_name,
+        codegraph_repo_id=wf.codegraph_repo_id,
         credential_overrides=wf.credential_overrides,
         webhook_url=wf.webhook_url,
         usage=_usage_response(wf),
@@ -122,6 +123,7 @@ async def create_workflow(body: WorkflowCreate, user=Depends(get_current_user)):
         repo_url=body.repo_url,
         repo_branch=body.repo_branch,
         repo_token_name=body.repo_token_name,
+        codegraph_repo_id=body.codegraph_repo_id,
         credential_overrides=body.credential_overrides,
         webhook_url=body.webhook_url,
     )

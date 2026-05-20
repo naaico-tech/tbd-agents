@@ -352,6 +352,7 @@ class _Workflow {
     this.repoUrl,
     this.repoBranch,
     this.repoTokenName,
+    this.codegraphRepoId,
     this.webhookUrl,
     this.errorWebhookUrl,
   });
@@ -377,6 +378,7 @@ class _Workflow {
   final String? repoUrl;
   final String? repoBranch;
   final String? repoTokenName;
+  final String? codegraphRepoId;
   final String? webhookUrl;
   final String? errorWebhookUrl;
 
@@ -404,6 +406,7 @@ class _Workflow {
     repoUrl: json['repo_url']?.toString(),
     repoBranch: json['repo_branch']?.toString(),
     repoTokenName: json['repo_token_name']?.toString(),
+    codegraphRepoId: json['codegraph_repo_id']?.toString(),
     webhookUrl: json['webhook_url']?.toString(),
     errorWebhookUrl: json['error_webhook_url']?.toString(),
   );
@@ -1488,6 +1491,25 @@ class _AgentOption {
   );
 }
 
+class _CodeGraphRepoRef {
+  const _CodeGraphRepoRef({
+    required this.id,
+    required this.name,
+    required this.status,
+  });
+
+  final String id;
+  final String name;
+  final String status;
+
+  factory _CodeGraphRepoRef.fromJson(Map<String, dynamic> j) =>
+      _CodeGraphRepoRef(
+        id: j['id']?.toString() ?? '',
+        name: j['name']?.toString() ?? '',
+        status: j['status']?.toString() ?? 'unknown',
+      );
+}
+
 // ---------------------------------------------------------------------------
 // _WorkflowDialog — create a new workflow
 // ---------------------------------------------------------------------------
@@ -1540,6 +1562,10 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
   late Future<List<_Skill>> _skillsFuture;
   late Future<List<_Guardrail>> _wfGuardrailsFuture;
 
+  // CodeGraph repo dropdown
+  String? _selectedCodeGraphRepoId;
+  late Future<List<_CodeGraphRepoRef>> _cgReposFuture;
+
   // Credential overrides
   final List<_CredOverride> _credOverrides = [];
   List<_TokenRef> _credTokens = [];
@@ -1568,6 +1594,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _repoUrlCtrl.text = w?.repoUrl ?? '';
     _repoBranchCtrl.text = w?.repoBranch ?? '';
     _repoTokenCtrl.text = w?.repoTokenName ?? '';
+    _selectedCodeGraphRepoId = w?.codegraphRepoId;
     _webhookUrlCtrl.text = w?.webhookUrl ?? '';
     _errorWebhookUrlCtrl.text = w?.errorWebhookUrl ?? '';
     // Pre-populate credential overrides from existing workflow
@@ -1581,6 +1608,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     _agentsFuture = _fetchAgentOptions(widget.client);
     _skillsFuture = _fetchSkills(widget.client);
     _wfGuardrailsFuture = _fetchGuardrails(widget.client);
+    _cgReposFuture = _fetchCodeGraphRepos(widget.client);
     _loadCredentialData();
   }
 
@@ -1619,6 +1647,21 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
     final decoded = jsonDecode(response.body);
     if (decoded is! List) return [];
     return decoded.whereType<Map<String, dynamic>>().map(_AgentOption.fromJson).toList();
+  }
+
+  Future<List<_CodeGraphRepoRef>> _fetchCodeGraphRepos(http.Client client) async {
+    try {
+      final response = await client.get(AppLinks.apiUri('/codegraph/repos'));
+      if (response.statusCode < 200 || response.statusCode >= 300) return [];
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(_CodeGraphRepoRef.fromJson)
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   @override
@@ -1684,6 +1727,7 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         body['repo_token_name'] = _repoTokenCtrl.text.trim().isEmpty
             ? null
             : _repoTokenCtrl.text.trim();
+        body['codegraph_repo_id'] = _selectedCodeGraphRepoId; // null clears it
         body['reasoning_effort'] = _reasoningEffort; // null is valid (clears it)
         body['skill_tags'] = _skillTagsCtrl.text.trim().isEmpty
             ? <String>[]
@@ -1727,6 +1771,9 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
         }
         if (_repoTokenCtrl.text.trim().isNotEmpty) {
           body['repo_token_name'] = _repoTokenCtrl.text.trim();
+        }
+        if (_selectedCodeGraphRepoId != null) {
+          body['codegraph_repo_id'] = _selectedCodeGraphRepoId;
         }
         if (_webhookUrlCtrl.text.trim().isNotEmpty) {
           body['webhook_url'] = _webhookUrlCtrl.text.trim();
@@ -2173,6 +2220,64 @@ class _WorkflowDialogState extends State<_WorkflowDialog> {
                   label: 'REPO TOKEN NAME (optional)',
                   controller: _repoTokenCtrl,
                   hint: 'GITHUB_TOKEN',
+                ),
+                const SizedBox(height: sp12),
+                // CODEGRAPH ─────────────────────────────────────────────
+                const Padding(
+                  padding: EdgeInsets.only(bottom: sp4),
+                  child: Text(
+                    'CODE GRAPH (optional)',
+                    style: TextStyle(
+                      fontFamily: fontBody,
+                      fontSize: 11,
+                      color: textMuted,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: sp4),
+                FutureBuilder<List<_CodeGraphRepoRef>>(
+                  future: _cgReposFuture,
+                  builder: (context, snap) {
+                    final repos = snap.data ?? [];
+                    final loading = snap.connectionState == ConnectionState.waiting;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: sp12, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: pageBg,
+                            border: Border.all(color: accentTeal.withAlpha(80)),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: DropdownButton<String?>(
+                            value: _selectedCodeGraphRepoId,
+                            isExpanded: true,
+                            underline: const SizedBox(),
+                            dropdownColor: cardBg,
+                            style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary),
+                            hint: Text(
+                              loading ? 'Loading…' : '— None —',
+                              style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textMuted),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('— None —', style: TextStyle(fontFamily: fontBody, fontSize: 12, color: textMuted)),
+                              ),
+                              for (final r in repos)
+                                DropdownMenuItem<String?>(
+                                  value: r.id,
+                                  child: Text('${r.name} (${r.status})', style: const TextStyle(fontFamily: fontBody, fontSize: 12, color: textPrimary)),
+                                ),
+                            ],
+                            onChanged: (val) => setState(() => _selectedCodeGraphRepoId = val),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: sp12),
                 _WfDialogField(
@@ -5824,6 +5929,469 @@ class _EmptyState extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CodeGraphScreen — manage codegraph-indexed repos for semantic code search
+// ---------------------------------------------------------------------------
+
+class CodeGraphScreen extends StatefulWidget {
+  const CodeGraphScreen({super.key});
+
+  @override
+  State<CodeGraphScreen> createState() => _CodeGraphScreenState();
+}
+
+class _CodeGraphScreenState extends State<CodeGraphScreen> {
+  http.Client? _ownedClient;
+  late Future<List<_CgRepo>> _reposFuture;
+
+  http.Client get _client => _ownedClient ??= http.Client();
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    _ownedClient?.close();
+    super.dispose();
+  }
+
+  void _reload() {
+    setState(() {
+      _reposFuture = _fetchCgRepos(_client);
+    });
+  }
+
+  Future<void> _confirmDelete(String id, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ConfirmDeleteDialog(
+        message: "Remove '$name' from CodeGraph index?",
+        accentColor: accentTeal,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final res = await _client.delete(AppLinks.apiUri('/codegraph/repos/$id'));
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        String detail;
+        try {
+          final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Delete failed (${res.statusCode})';
+        } catch (_) {
+          detail = res.body.isNotEmpty ? res.body : 'Delete failed (${res.statusCode})';
+        }
+        throw Exception(detail);
+      }
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("'$name' removed from index."),
+          backgroundColor: accentTeal,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _reindex(String id, String name) async {
+    try {
+      final res = await _client.post(AppLinks.apiUri('/codegraph/repos/$id/reindex'));
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        throw Exception(decoded['detail']?.toString() ?? 'Reindex failed');
+      }
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Re-indexing '$name'…"),
+          backgroundColor: accentTeal,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Re-index failed: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<_CgRepo>>(
+      future: _reposFuture,
+      builder: (context, snapshot) {
+        final loading = snapshot.connectionState == ConnectionState.waiting;
+        final repos = snapshot.data ?? [];
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(sp24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ScreenHeader(
+                title: 'CODE GRAPH',
+                subtitle: 'Semantic code search via indexed repos',
+                actions: [
+                  RetroButton(
+                    label: loading ? 'LOADING…' : 'REFRESH',
+                    onPressed: loading ? null : _reload,
+                    icon: Icons.refresh,
+                    color: accentSlate,
+                  ),
+                  RetroButton(
+                    label: 'REGISTER REPO',
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => _CodeGraphRegisterDialog(
+                        client: _client,
+                        onSaved: _reload,
+                      ),
+                    ),
+                    icon: Icons.add,
+                    color: accentTeal,
+                    textColor: textPrimary,
+                  ),
+                ],
+              ),
+              const SizedBox(height: sp24),
+              if (snapshot.hasError)
+                _WfErrorBanner(
+                  message: 'Failed to load repos: ${snapshot.error}',
+                  onRetry: _reload,
+                ),
+              SectionFrame(
+                title: 'Indexed Repositories',
+                accentColor: accentTeal,
+                minHeight: repos.isEmpty ? 300 : 0,
+                child: repos.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(sp16),
+                        child: _EmptyState(
+                          icon: Icons.account_tree_outlined,
+                          message: loading ? 'Loading…' : 'No repos indexed yet.',
+                          hint: 'Register a GitHub repo to enable semantic code search.',
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(sp16),
+                        child: Column(
+                          children: [
+                            for (final r in repos)
+                              _CgRepoCard(
+                                repo: r,
+                                onDelete: () => _confirmDelete(r.id, r.name),
+                                onReindex: () => _reindex(r.id, r.name),
+                              ),
+                          ],
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+class _CgRepo {
+  _CgRepo({
+    required this.id,
+    required this.name,
+    required this.repoUrl,
+    required this.status,
+    this.errorMessage,
+    this.indexedAt,
+  });
+
+  final String id;
+  final String name;
+  final String repoUrl;
+  final String status;
+  final String? errorMessage;
+  final String? indexedAt;
+
+  factory _CgRepo.fromJson(Map<String, dynamic> j) => _CgRepo(
+    id: j['id']?.toString() ?? '',
+    name: j['name']?.toString() ?? '',
+    repoUrl: j['repo_url']?.toString() ?? '',
+    status: j['status']?.toString() ?? 'unknown',
+    errorMessage: j['error_message']?.toString(),
+    indexedAt: j['indexed_at']?.toString(),
+  );
+}
+
+Future<List<_CgRepo>> _fetchCgRepos(http.Client client) async {
+  final res = await client.get(AppLinks.apiUri('/codegraph/repos'));
+  if (res.statusCode < 200 || res.statusCode >= 300) return [];
+  final decoded = jsonDecode(res.body);
+  if (decoded is! List) return [];
+  return decoded.whereType<Map<String, dynamic>>().map(_CgRepo.fromJson).toList();
+}
+
+// ---------------------------------------------------------------------------
+
+class _CgRepoCard extends StatelessWidget {
+  const _CgRepoCard({
+    required this.repo,
+    required this.onDelete,
+    required this.onReindex,
+  });
+
+  final _CgRepo repo;
+  final VoidCallback onDelete;
+  final VoidCallback onReindex;
+
+  Color _statusColor() => switch (repo.status.toLowerCase()) {
+    'ready' => accentTeal,
+    'error' => Colors.red,
+    'indexing' || 'cloning' => accentAmber,
+    _ => textMuted,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: sp12),
+      child: RetroCard(
+        child: Padding(
+          padding: const EdgeInsets.all(sp16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.account_tree_outlined, color: _statusColor(), size: 18),
+                  const SizedBox(width: sp8),
+                  Expanded(
+                    child: Text(
+                      repo.name,
+                      style: const TextStyle(
+                        fontFamily: fontBody,
+                        fontSize: 14,
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: sp8, vertical: sp4),
+                    decoration: BoxDecoration(
+                      color: _statusColor().withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: _statusColor(), width: 1),
+                    ),
+                    child: Text(
+                      repo.status.toUpperCase(),
+                      style: TextStyle(
+                        fontFamily: fontBody,
+                        fontSize: 10,
+                        color: _statusColor(),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: sp8),
+              Text(
+                repo.repoUrl,
+                style: const TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: 12,
+                  color: textMuted,
+                ),
+              ),
+              if (repo.errorMessage != null) ...[
+                const SizedBox(height: sp4),
+                Text(
+                  'Error: ${repo.errorMessage}',
+                  style: const TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: 12,
+                    color: Colors.red,
+                  ),
+                ),
+              ],
+              if (repo.indexedAt != null) ...[
+                const SizedBox(height: sp4),
+                Text(
+                  'Last indexed: ${repo.indexedAt}',
+                  style: const TextStyle(
+                    fontFamily: fontBody,
+                    fontSize: 11,
+                    color: textMuted,
+                  ),
+                ),
+              ],
+              const SizedBox(height: sp12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  RetroButton(
+                    label: 'REINDEX',
+                    onPressed: onReindex,
+                    icon: Icons.refresh,
+                    color: accentSlate,
+                  ),
+                  const SizedBox(width: sp8),
+                  RetroButton(
+                    label: 'REMOVE',
+                    onPressed: onDelete,
+                    icon: Icons.delete_outline,
+                    color: Colors.red,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+class _CodeGraphRegisterDialog extends StatefulWidget {
+  const _CodeGraphRegisterDialog({
+    required this.client,
+    required this.onSaved,
+  });
+
+  final http.Client client;
+  final VoidCallback onSaved;
+
+  @override
+  State<_CodeGraphRegisterDialog> createState() =>
+      _CodeGraphRegisterDialogState();
+}
+
+class _CodeGraphRegisterDialogState
+    extends State<_CodeGraphRegisterDialog> {
+  final _nameCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtrl.text.trim();
+    final url = _urlCtrl.text.trim();
+    if (name.isEmpty || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Name and repo URL are required.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final res = await widget.client.post(
+        AppLinks.apiUri('/codegraph/repos'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name, 'repo_url': url}),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        String detail;
+        try {
+          final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+          detail = decoded['detail']?.toString() ?? 'Failed (${res.statusCode})';
+        } catch (_) {
+          detail = res.body.isNotEmpty ? res.body : 'Failed (${res.statusCode})';
+        }
+        throw Exception(detail);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onSaved();
+    } catch (e) {
+      setState(() => _saving = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: cardBg,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Padding(
+          padding: const EdgeInsets.all(sp24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'REGISTER REPO',
+                style: TextStyle(
+                  fontFamily: fontBody,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: accentTeal,
+                ),
+              ),
+              const SizedBox(height: sp16),
+              _WfDialogField(
+                label: 'NAME',
+                controller: _nameCtrl,
+                hint: 'my-backend',
+              ),
+              const SizedBox(height: sp12),
+              _WfDialogField(
+                label: 'REPO URL',
+                controller: _urlCtrl,
+                hint: 'https://github.com/org/repo',
+              ),
+              const SizedBox(height: sp24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  RetroButton(
+                    label: 'CANCEL',
+                    onPressed: () => Navigator.of(context).pop(),
+                    color: accentSlate,
+                  ),
+                  const SizedBox(width: sp8),
+                  RetroButton(
+                    label: _saving ? 'REGISTERING…' : 'REGISTER',
+                    onPressed: _saving ? null : _save,
+                    icon: _saving ? null : Icons.add,
+                    color: accentTeal,
+                    textColor: textPrimary,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

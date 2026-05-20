@@ -91,6 +91,7 @@ class Workflow(_DocumentBase):  # type: ignore[valid-type]
     repo_url: str | None = None  # GitHub repo URL to clone for agent access
     repo_branch: str | None = None  # Branch to checkout (default: main)
     repo_token_name: str | None = None  # Token Store key for private repo auth
+    codegraph_repo_id: str | None = None  # Linked CodeGraphRepo ID — MCP auto-injected at runtime
     credential_overrides: dict[str, str] = Field(default_factory=dict)  # env_var → token_name overrides for custom tools
     webhook_url: str | None = None  # URL to POST to after task completion
     error_webhook_url: str | None = None  # URL to POST to on task failure

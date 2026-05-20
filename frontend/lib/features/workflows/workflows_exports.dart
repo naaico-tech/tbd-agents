@@ -5,4 +5,5 @@ export 'workflows_screen.dart'
         ProvidersScreen,
         WorkflowsScreen,
         TasksScreen,
-        ScheduledAgentsScreen;
+        ScheduledAgentsScreen,
+        CodeGraphScreen;

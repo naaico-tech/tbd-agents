@@ -95,6 +95,10 @@ GoRouter createAppRouter({WidgetBuilder? dashboardBuilder}) {
             path: AppLinks.chat,
             builder: (_) => const ChatScreen(),
           ),
+          _buildShellChildRoute(
+            path: AppLinks.codegraph,
+            builder: (_) => const CodeGraphScreen(),
+          ),
         ],
       ),
     ],

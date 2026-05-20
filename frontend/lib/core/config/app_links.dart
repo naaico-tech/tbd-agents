@@ -16,6 +16,7 @@ class AppLinks {
   static const String taskLogsPattern = '$tasks/:taskId/logs';
   static const String runTask = '$dashboardRoot/run-task';
   static const String chat = '$dashboardRoot/chat';
+  static const String codegraph = '$dashboardRoot/codegraph';
 
   static const String apiBasePath = '/api';
   static const String legacyDashboardBasePath = '/dashboard-legacy';
@@ -36,6 +37,7 @@ class AppLinks {
     tasks,
     runTask,
     chat,
+    codegraph,
   };
 
   static const Map<String, String> _legacyPagesByRoute = {
@@ -53,6 +55,7 @@ class AppLinks {
     tasks: 'tasks',
     runTask: 'task',
     chat: 'chat',
+    codegraph: 'codegraph',
   };
 
   static Uri apiUri(String path, {Map<String, String>? queryParameters}) {
