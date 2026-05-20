@@ -1,0 +1,17 @@
+{
+  "name": "codegraph-sidecar",
+  "version": "1.0.0",
+  "description": "HTTP sidecar that manages codegraph repo indexing and bridges the MCP stdio server over SSE",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "license": "MIT"
+}

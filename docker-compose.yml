@@ -39,6 +39,9 @@ services:
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - PGVECTOR_DSN=${PGVECTOR_DSN:-postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents}
       - VECTOR_STORE_BACKEND=${VECTOR_STORE_BACKEND:-qdrant}
+      # Codegraph — sidecar URL (no workspace path needed; sidecar owns the volume)
+      - CODEGRAPH_ENABLED=${CODEGRAPH_ENABLED:-false}
+      - CODEGRAPH_SIDECAR_URL=http://codegraph-sidecar:3001
     depends_on:
       mongodb:
         condition: service_started
@@ -47,9 +50,34 @@ services:
         condition: service_started
       otel-collector:
         condition: service_started
+      codegraph-sidecar:
+        condition: service_healthy
+        required: false
     volumes:
       - repos_data:/repos
     restart: unless-stopped
+
+  # ── CodeGraph sidecar ────────────────────────────────────────────────────────
+  # Manages git cloning, codegraph indexing, and exposes an MCP-over-SSE
+  # endpoint per indexed repo.  The main app delegates all heavy work here.
+  codegraph-sidecar:
+    image: ${CODEGRAPH_SIDECAR_IMAGE:-ghcr.io/naaico-tech/codegraph-sidecar:latest}
+    environment:
+      - PORT=3001
+      - WORKSPACE=/opt/codegraph_repos
+    volumes:
+      - codegraph_repos:/opt/codegraph_repos
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+    profiles:
+      - codegraph
 
   worker:
     <<: *app-image
@@ -263,6 +291,7 @@ volumes:
   mongo_data:
   redis_data:
   repos_data:
+  codegraph_repos:
   qdrant_data:
   pgvector_data:
   prometheus_data:

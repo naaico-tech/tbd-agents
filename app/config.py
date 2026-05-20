@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     postgres_uri: str = "postgresql+asyncpg://postgres:postgres@pgvector:5432/tbd_agents"
     postgres_db_name: str = "tbd_agents"
 
+    # ── CodeGraph integration ────────────────────────────────────────────────────
+    codegraph_enabled: bool = False
+    # URL of the codegraph sidecar container (manages cloning, indexing, and MCP SSE)
+    codegraph_sidecar_url: str = "http://codegraph-sidecar:3001"
+    # Git clone depth forwarded to the sidecar (1 = shallow, 0 = full history)
+    codegraph_clone_depth: int = 1
+
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 
 

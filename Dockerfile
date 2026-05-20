@@ -13,9 +13,6 @@ RUN --mount=type=cache,target=/root/.pub-cache \
     flutter build web --release --base-href /dashboard/
 
 
-FROM node:22-bookworm-slim AS node-runtime
-
-
 FROM python:3.12-slim AS python-builder
 
 WORKDIR /build
@@ -45,8 +42,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    UV_SYSTEM_PYTHON=1 \
-    PATH="/opt/node/bin:${PATH}"
+    UV_SYSTEM_PYTHON=1
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -58,7 +54,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-compile uv
 
 COPY --from=python-builder /install /usr/local
-COPY --from=node-runtime /usr/local/ /opt/node/
+
 COPY app/ ./app/
 COPY --from=frontend-builder /frontend/build/web ./app/dashboard/
 

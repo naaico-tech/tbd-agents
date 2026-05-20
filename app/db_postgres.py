@@ -49,6 +49,7 @@ COLLECTIONS = [
     "task_executions",
     "scheduled_agents",
     "mcp_servers",
+    "codegraph_repos",
 ]
 
 # ---------------------------------------------------------------------------
@@ -283,6 +284,21 @@ _TABLE_DDL: dict[str, str] = {
             last_error TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+    "codegraph_repos": """
+        CREATE TABLE IF NOT EXISTS codegraph_repos (
+            id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+            name          TEXT NOT NULL,
+            repo_url      TEXT NOT NULL,
+            local_path    TEXT NOT NULL DEFAULT '',
+            status        TEXT NOT NULL DEFAULT 'pending',
+            indexed_at    TIMESTAMPTZ,
+            error_message TEXT,
+            agent_ids     JSONB NOT NULL DEFAULT '[]',
+            mcp_server_id TEXT,
+            celery_task_id TEXT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
         )""",
 }
 

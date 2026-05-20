@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.config import settings
 from app.models.agent import Agent
 from app.models.chat_message import ChatMessage
+from app.models.codegraph_repo import CodeGraphRepo
 from app.models.chat_session import ChatSession
 from app.models.custom_tool import CustomTool
 from app.models.guardrail import Guardrail
@@ -61,6 +62,7 @@ async def init_db() -> None:
             TaskExecution,
             Token,
             Workflow,
+            CodeGraphRepo,
         ],
     )
 

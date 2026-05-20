@@ -12,6 +12,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.api.routes import (
     agents,
     chat,
+    codegraph,
     custom_tools,
     export_import,
     guardrails,
@@ -168,6 +169,7 @@ app.include_router(health.router)
 app.include_router(agents.router)
 app.include_router(chat.router)
 app.include_router(chat.workflow_chat_router)
+app.include_router(codegraph.router)
 app.include_router(custom_tools.router)
 app.include_router(export_import.router)
 app.include_router(guardrails.router)
