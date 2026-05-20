@@ -3500,7 +3500,9 @@ async def run_agent(
         DB allowlists.
         """
         nonlocal tool_call_count
-        tool_name = input_data.get("toolName", "unknown")
+        # MCP calls supply serverName (and optionally toolName); built-in/shell
+        # calls supply toolName only.
+        tool_name = input_data.get("toolName") or input_data.get("serverName") or "unknown"
         tool_call_count += 1
         if tool_call_count > max_turns:
             asyncio.create_task(
@@ -3514,7 +3516,7 @@ async def run_agent(
 
     def on_post_tool_use(input_data, context):
         """Log tool result; inject goal reminder when deep into the run."""
-        tool_name = input_data.get("toolName", "unknown")
+        tool_name = input_data.get("toolName") or input_data.get("serverName") or "unknown"
         asyncio.create_task(
             _log(workflow, "tool_result", f"{tool_name} completed", task_exec)
         )
@@ -3576,6 +3578,8 @@ async def run_agent(
             }
             if mcp_config:
                 session_kwargs["mcp_servers"] = mcp_config
+            if agent.builtin_tools:
+                session_kwargs["available_tools"] = agent.builtin_tools
 
             # Infinite session config
             if workflow.infinite_session:

@@ -536,51 +536,55 @@ Never omit the label. Never upgrade a single-source finding to Confirmed.
     {
         "name": "sre-write-rca-report",
         "description": (
-            "Playbook for writing the final structured RCA Markdown report to disk and "
-            "publishing it to Confluence. Covers file path convention, mandatory section "
-            "order, section content rules, and the Confluence target folder. Always produces "
-            "a report even when the RCA is inconclusive."
+            "Playbook for assembling the final structured RCA Markdown report in chat and "
+            "optionally publishing it to Confluence. Covers mandatory section order, "
+            "section content rules, and the Confluence target folder. Always produces a "
+            "report even when the RCA is inconclusive."
         ),
         "tags": ["sre", "rca", "report", "confluence"],
         "instructions": """\
 # SRE Write RCA Report Skill
 
-Use this skill as the final step after RCA synthesis to materialise the report file and publish to Confluence.
+Use this skill as the **final step** after all evidence has been gathered and the RCA
+synthesis is complete.
+
+**Important**: Output the complete RCA report as your **final chat message**.
+Do NOT write to any file. Do NOT use write, edit, bash, or any file-system tools
+for this output.
 
 ---
 
-## Output File
+## Output
 
-Create the file at:
-
-```
-~/ai-docs/debugging/[ISSUE-NUMBER].md
-```
-
-Create parent directories if they do not exist. Overwrite if the file already exists.
+Emit the complete RCA report directly in your chat response using the template below.
+The report must be self-contained — readable by anyone in the chat thread without
+accessing external files or systems.
 
 ---
 
-## Mandatory Report Template
+## Report Template
+
+Assemble the output from all previous skills into this exact structure:
 
 ```markdown
-# RCA Report: [ISSUE-NUMBER]
+# INCIDENT RCA: [Context-Description]
 
 **Date**: YYYY-MM-DD
 **Jira**: [ISSUE-NUMBER](https://rewaatech.atlassian.net/browse/[ISSUE-NUMBER])
-**Affected Integration**: [Zid / Salla / Bonat / other]
+**Affected Integration**: [Zid / Salla / Bonat / Grubtech / other]
 **Affected Service/Component**: [service path]
 **Report Status**: [Confirmed RCA / Preliminary / Inconclusive]
 
 ---
 
-## 1. Issue Summary
-
-[One paragraph: problem statement, who reported it, environment, time of onset.]
+## 1. Summary
+- **1.1 Status**: [Resolved / Monitoring / Open]
+- **1.2 Incident Date**: [ISO 8601]
+- **1.3 Executive Summary**: [2-3 sentence summary of what happened and why]
 
 ---
 
-## 2. Evidence Collected
+## 2. Evidence & Investigation
 
 ### 2.1 Jira Triage
 [Output from sre-jira-triage skill]
@@ -594,25 +598,35 @@ Create parent directories if they do not exist. Overwrite if the file already ex
 ### 2.4 API Contract Check
 [Output from sre-api-contract-check skill, or "Not applicable"]
 
+### 2.5 Implementation Context
+[Output from sre-integrations-navigator skill]
+
 ---
 
 ## 3. Root Cause Analysis
 
-[Output from sre-rca-synthesis skill — Confirmed / PRELIMINARY / HYPOTHESIS findings]
+### Confirmed Findings
+[From sre-rca-synthesis — Confirmed label findings]
+
+### [PRELIMINARY] Findings
+[From sre-rca-synthesis — PRELIMINARY label findings, or "None"]
+
+### [HYPOTHESIS] Inferences
+[From sre-rca-synthesis — HYPOTHESIS label findings with Verification steps, or "None"]
 
 ---
 
-## 4. Proposed Fix
+## 4. Remediation & Action Items
 
-> ⚠️ Recommendations only. No changes have been applied by the debugger.
+> ⚠️ Recommendations only. No changes have been applied.
 
-[Output from sre-rca-synthesis skill — [Code] / [Config] / [Process] items]
+[From sre-rca-synthesis proposed fix — [Code] / [Config] / [Process] items]
 
 ---
 
 ## 5. Follow-Up Actions
 
-[Next steps for engineers]
+- [ ] [Next step for engineers]
 ```
 
 ---
@@ -629,15 +643,20 @@ Create parent directories if they do not exist. Overwrite if the file already ex
 
 ## Confluence Publishing (Optional)
 
-After writing the file, create or overwrite a Confluence page:
-
+After outputting the report in chat, you MAY optionally publish it to Confluence
+if the Confluence MCP tool is available:
 - **Space**: MIMS
-- **Parent folder**: Heroes → TSP subfolder (`https://rewaatech.atlassian.net/wiki/spaces/MIMS/folder/4112056325`)
+- **Folder**: Heroes → TSP subfolder
 - **Page title**: The Jira issue number (e.g., `MIMS-55317`)
 
-Use the Confluence MCP tool. Skip if the MCP is unavailable.
+This step is optional. Skip it if the MCP is unavailable.
 
-Confirm the report file path to the user once written.
+---
+
+## Completion
+
+Your final message should be the complete RCA report above. No file paths to
+confirm — just deliver the report in chat.
 """,
     },
 ]
@@ -664,7 +683,8 @@ Execute the following skills in order for each investigation:
 4. **sre-api-contract-check** — Verify the current third-party API contract (endpoints, schema, auth, pagination). Output → Section 2.4.
 5. **sre-integrations-navigator** — Locate the relevant handler, mapper, and error-handling logic in the integrations codebase. Output → Section 2.5.
 6. **sre-rca-synthesis** — Cross-correlate all evidence using the synthesis matrix to identify the root cause category. Output → Sections 1.3 & 3.
-7. **sre-write-rca-report** — Assemble the final Markdown RCA document and write it to `~/ai-docs/debugging/[ISSUE-NUMBER].md`.
+7. **sre-write-rca-report** — Assemble the final RCA document and
+   **output it as your final chat message**. Do NOT write to a file.
 
 ## Constraints
 
@@ -880,13 +900,14 @@ def seed_agent(client: httpx.Client, base: str, provider_id: str | None, mcp_ser
         "name": _AGENT_NAME,
         "description": (
             "Read-only SRE debugging agent. Investigates TSP/Zid/Salla/Bonat incidents "
-            "using Jira, Datadog, and API docs, then writes a structured RCA report. "
+            "using Jira, Datadog, and API docs, then outputs a structured RCA report in chat. "
             "Never modifies Jira, Datadog, or source code."
         ),
         "system_prompt": _SYSTEM_PROMPT,
         "model": _DEFAULT_MODEL,
-        "builtin_tools": [],
+        "builtin_tools": ["bash", "read", "glob", "grep", "web_fetch", "web_search"],
         "mcp_server_ids": mcp_server_ids,
+        "mcp_server_tags": ["sre"],
     }
     if provider_id:
         payload["provider_id"] = provider_id
