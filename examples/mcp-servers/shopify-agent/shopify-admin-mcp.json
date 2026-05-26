@@ -1,0 +1,14 @@
+{
+  "_comment": "Shopify Admin MCP — community @shopify/dev-mcp package (stdio). Source: https://www.npmjs.com/package/@shopify/dev-mcp. Pin a specific version by replacing 'latest' in the args array, e.g. '@shopify/dev-mcp@1.2.0'.",
+  "name": "shopify-admin-mcp",
+  "transport_type": "stdio",
+  "connection_config": {
+    "command": "npx",
+    "args": ["-y", "@shopify/dev-mcp@latest"],
+    "env": {
+      "SHOPIFY_ACCESS_TOKEN": "{{token:shopify-admin-api-token}}",
+      "SHOPIFY_STORE": "{{token:shopify-shop-domain}}"
+    }
+  },
+  "tags": ["shopify", "ecommerce", "ops"]
+}

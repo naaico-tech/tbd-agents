@@ -92,6 +92,7 @@ nav:
       - Guardrails: guide/guardrails.md
       - BYOK Providers: guide/byok-providers.md
       - Custom Tools: guide/custom-tools.md
+      - Plugin Tag Conventions: guide/plugin-tag-conventions.md
       - Agent Chat: guide/agent-chat.md
       - Agent Chat Implementation Notes: agent-chat-plan.md
       - Tasks: guide/tasks.md

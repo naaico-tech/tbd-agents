@@ -1,0 +1,13 @@
+{
+  "_comment": "Gorgias MCP — SSE (Server-Sent Events) transport connecting to a self-hosted or cloud Gorgias MCP server. Replace the url with your actual Gorgias MCP server endpoint. The Authorization header uses a Bearer token issued by your Gorgias MCP deployment.",
+  "name": "gorgias-mcp",
+  "transport_type": "sse",
+  "connection_config": {
+    "url": "https://mcp.gorgias.example.com/sse",
+    "headers": {
+      "Authorization": "Bearer {{token:gorgias-mcp-token}}",
+      "X-Gorgias-Domain": "{{token:gorgias-account-domain}}"
+    }
+  },
+  "tags": ["gorgias", "support", "ticketing"]
+}

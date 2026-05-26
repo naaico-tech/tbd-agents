@@ -1,0 +1,12 @@
+{
+  "name": "github",
+  "transport_type": "stdio",
+  "connection_config": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": {
+      "GITHUB_PERSONAL_ACCESS_TOKEN": "{{token:github-pat}}"
+    }
+  },
+  "tags": ["github", "sre", "deploys", "sourcecontrol"]
+}

@@ -23,3 +23,21 @@ plugins:
     enabled: true
   - name: notion
     enabled: true
+  - name: shopify
+    enabled: true
+  - name: datadog
+    enabled: true
+  - name: pagerduty
+    enabled: true
+  - name: kubernetes
+    enabled: true
+  - name: google_analytics
+    enabled: true
+  - name: google_ads
+    enabled: true
+  - name: meta_ads
+    enabled: true
+  - name: google_slides
+    enabled: true
+  - name: google_search_console
+    enabled: true
